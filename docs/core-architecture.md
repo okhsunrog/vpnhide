@@ -1,6 +1,6 @@
 # Core architecture
 
-Current implementation on `main`, app/core RPC30 and journal13 (reads1–12). The backend
+Current implementation on `main`, app/core RPC31 and journal14 (reads1–13). The backend
 control-v2 / telemetry-v1 wire is a separate boundary. This document describes
 the implemented ownership and execution contract.
 
@@ -311,7 +311,14 @@ A failed acquire leaves a bounded pending reservation, never an active-success
 claim: renewal must ensure logging and a confirmed activation receipt before
 returning success. Known failures may be retried; held Persist/Native/Secret
 resources needed for logging refuse acquire rather than replay uncertain effects.
-Live deadlines use `Instant`; the journal wall-clock expiry is display metadata.
+Forensic and logcat lease authority now uses the shared checked CLOCK_BOOTTIME
+clock, including suspend. Unknown or regressed clock observations retire authority
+and preserve the normal durable restoration path; the journal wall-clock expiry
+remains display metadata. Logcat's recording cap uses the same clock and short
+active wait slices. A clock failure stops the child as `ClockUnavailable`, keeping
+the last observed duration as a possible lower bound, rather than inventing a
+normal cap, restart or successful completion. Journal14 fences older writers from
+this new persisted logcat reason; schemas1–13 retain holds, budgets and receipts.
 Restart discards both forensic and logcat leases from the old daemon instance,
 while retaining the original baseline/restoration receipt for safe maintenance.
 
@@ -407,7 +414,7 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-The current paired APK/Core contract is RPC30; journal13 reads schemas1–12. These
+The current paired APK/Core contract is RPC31; journal14 reads schemas1–13. These
 versions are independent of kernel control2/telemetry1 and do not require a
 compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
 publication and sampled current/stale/unattributed process consumption are separate
@@ -509,7 +516,7 @@ Zygisk authorization cannot claim global process coverage.
 The foreign-VPN observer, UID-in-tunnel probe and routing RPC/FFI field are removed.
 Dashboard/diagnostics consume Core evidence independently of external VPN presence
 and split-tunnel membership. Real fixture/hook API observations and manual network
-forensics remain. Current RPC30 requires a paired new APK/Core; journal13 and the frozen
+forensics remain. Current RPC31 requires a paired new APK/Core; journal14 and the frozen
 kernel control2/telemetry1 are independent, so a compatible builtin kernel does not
 need rebuilding merely because the app protocol changed.
 
@@ -551,8 +558,9 @@ refuse the newer schema without removing it. Kernel control2/telemetry1 is uncha
 <a id="explicit-existing-core-replacement-rpc27--journal13"></a>
 <a id="explicit-existing-core-replacement-rpc28--journal13"></a>
 <a id="explicit-existing-core-replacement-rpc29--journal13"></a>
+<a id="explicit-existing-core-replacement-rpc30--journal13"></a>
 
-## Explicit existing-Core replacement (RPC30 / journal13)
+## Explicit existing-Core replacement (RPC31 / journal14)
 
 The existing command writer now admits `StageCoreReplacement`. Authenticated
 preparation runs outside that writer; accepted work and dispatch intent are

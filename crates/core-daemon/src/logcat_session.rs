@@ -41,7 +41,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use vpnhide_core_rpc::{
@@ -49,6 +49,7 @@ use vpnhide_core_rpc::{
     LogcatSessionId, LogcatSessionState, LogcatSessionStatus,
 };
 
+use crate::boot_time::{BootDeadline, BootInstant};
 use crate::diagnostics::ProbeEnv;
 
 /// Byte cap per session. A busy device writes roughly 1–3 MiB/min across all buffers,
@@ -151,6 +152,8 @@ struct SessionRecord {
 
 struct Shared {
     bytes: AtomicU64,
+    /// Last observed BOOTTIME elapsed value; retained if a later clock read fails.
+    duration_ms: AtomicU64,
     truncated: AtomicBool,
     record: Mutex<SessionRecord>,
     record_path: PathBuf,
@@ -165,8 +168,10 @@ impl Shared {
     fn new(record: SessionRecord, record_path: PathBuf, settled: bool) -> Self {
         let bytes = record.ended.as_ref().map_or(0, |e| e.bytes);
         let truncated = record.ended.as_ref().is_some_and(|e| e.truncated);
+        let duration_ms = record.ended.as_ref().map_or(0, |e| e.duration_ms);
         Shared {
             bytes: AtomicU64::new(bytes),
+            duration_ms: AtomicU64::new(duration_ms),
             truncated: AtomicBool::new(truncated),
             record: Mutex::new(record),
             record_path,
@@ -182,6 +187,16 @@ impl Shared {
 
     fn running(&self) -> bool {
         self.record().ended.is_none()
+    }
+
+    fn measured_duration(&self, clock: Option<BootDeadline>) -> u64 {
+        if let Some(clock) = clock
+            && let Ok(elapsed) = BootInstant::now().and_then(|now| clock.elapsed(now))
+        {
+            self.duration_ms
+                .fetch_max(millis(elapsed), Ordering::SeqCst);
+        }
+        self.duration_ms.load(Ordering::SeqCst)
     }
 
     /// Change the record and write it through (unless discarded).
@@ -258,7 +273,7 @@ fn read_record(path: &Path) -> Option<SessionRecord> {
 struct Session {
     id: LogcatSessionId,
     /// `None` for a session recovered from disk (no child of this core run).
-    started: Option<Instant>,
+    started: Option<BootDeadline>,
     file: PathBuf,
     shared: Arc<Shared>,
     events: Option<mpsc::Sender<Event>>,
@@ -279,7 +294,7 @@ impl Session {
             ),
             None => (
                 LogcatSessionState::Recording,
-                self.started.map_or(0, |s| millis(s.elapsed())),
+                self.shared.measured_duration(self.started),
                 self.shared.bytes.load(Ordering::SeqCst),
                 self.shared.truncated.load(Ordering::SeqCst),
                 None,
@@ -629,6 +644,9 @@ fn spawn(
     id: LogcatSessionId,
     debug: Option<Arc<dyn DebugControl>>,
 ) -> Result<Session, String> {
+    // A clock failure/overflow is a known refusal before file or logging effects.
+    let started = BootDeadline::from_now(config.max_duration)
+        .map_err(|e| format!("logcat boot deadline: {e}"))?;
     fs::create_dir_all(&config.dir).map_err(|e| format!("logcat dir: {e}"))?;
     let _ = fs::set_permissions(&config.dir, fs::Permissions::from_mode(0o700));
     let path = config.dir.join(log_name(id.0));
@@ -670,7 +688,6 @@ fn spawn(
     });
     let (events, inbox) = mpsc::channel();
     let (ready_tx, ready_rx) = mpsc::channel();
-    let started = Instant::now();
     {
         let config = config.clone();
         let shared = shared.clone();
@@ -740,8 +757,12 @@ fn supervise(
     events: mpsc::Sender<Event>,
     inbox: mpsc::Receiver<Event>,
     ready: mpsc::Sender<Result<(), String>>,
-    started: Instant,
+    started: BootDeadline,
 ) {
+    if let Err(reason) = recording_wait(started, BootInstant::now()) {
+        let _ = ready.send(Err(format!("logcat deadline before spawn: {reason:?}")));
+        return;
+    }
     let mut cmd = Command::new(&config.program);
     cmd.args(&config.args);
     if config.since_start {
@@ -787,14 +808,14 @@ fn supervise(
     };
     let _ = ready.send(Ok(()));
 
-    let deadline = started + config.max_duration;
     let state = loop {
-        let left = deadline.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            break LogcatSessionState::AutoStopped {
-                reason: LogcatAutoStopReason::DurationCap,
-            };
-        }
+        let left = match recording_wait(started, BootInstant::now()) {
+            Ok((elapsed, wait)) => {
+                shared.duration_ms.fetch_max(elapsed, Ordering::SeqCst);
+                wait
+            }
+            Err(reason) => break LogcatSessionState::AutoStopped { reason },
+        };
         match inbox.recv_timeout(left) {
             Ok(Event::Stop) | Err(RecvTimeoutError::Disconnected) => {
                 break LogcatSessionState::Stopped;
@@ -824,7 +845,7 @@ fn supervise(
     let exit = child.wait().ok().and_then(|s| s.code());
     // The pipe hits EOF once the child is gone; the reader then flushes and syncs.
     let _ = reader.join();
-    let duration_ms = millis(started.elapsed());
+    let duration_ms = shared.measured_duration(Some(started));
     crate::alog::info(&format!(
         "logcat: session ended {state:?} after {duration_ms} ms, {} bytes",
         shared.bytes.load(Ordering::SeqCst)
@@ -840,6 +861,21 @@ fn supervise(
             logcat_exit: if exited_alone { exit } else { None },
         });
     });
+}
+
+/// A monotonic channel wait must not renew the entire recording cap after resume.
+fn recording_wait(
+    deadline: BootDeadline,
+    now: std::io::Result<BootInstant>,
+) -> Result<(u64, Duration), LogcatAutoStopReason> {
+    let now = now.map_err(|_| LogcatAutoStopReason::ClockUnavailable)?;
+    let elapsed = deadline
+        .elapsed(now)
+        .map_err(|_| LogcatAutoStopReason::ClockUnavailable)?;
+    let wait = deadline
+        .wait_slice(now)
+        .ok_or(LogcatAutoStopReason::DurationCap)?;
+    Ok((millis(elapsed), wait))
 }
 
 /// Pipe → file up to `max` bytes. Past the cap the rest is dropped and the supervisor told.
@@ -903,6 +939,31 @@ fn remove_stale_exports(env: &ProbeEnv) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recording_cap_counts_suspend_and_bounds_the_next_monotonic_wait() {
+        let deadline = BootInstant::at(100).after(MAX_DURATION).unwrap();
+        assert_eq!(
+            recording_wait(deadline, Ok(BootInstant::at(110))).unwrap(),
+            (10_000, Duration::from_millis(250))
+        );
+        assert_eq!(
+            recording_wait(deadline, Ok(BootInstant::at(1900))),
+            Err(LogcatAutoStopReason::DurationCap)
+        );
+        assert_eq!(
+            recording_wait(deadline, Ok(BootInstant::at(100_000))),
+            Err(LogcatAutoStopReason::DurationCap)
+        );
+        assert_eq!(
+            recording_wait(deadline, Ok(BootInstant::at(99))),
+            Err(LogcatAutoStopReason::ClockUnavailable)
+        );
+        assert_eq!(
+            recording_wait(deadline, Err(std::io::Error::other("clock denied"))),
+            Err(LogcatAutoStopReason::ClockUnavailable)
+        );
+    }
 
     #[test]
     fn since_is_one_second_before_start_in_logcats_epoch_form() {

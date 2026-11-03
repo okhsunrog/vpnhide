@@ -1,20 +1,20 @@
-//! Suspend-aware time for bounded diagnostic authority and resource ownership.
+//! Suspend-aware time for bounded authority and resource ownership.
 //! Condvar timeouts use CLOCK_MONOTONIC on Android/Linux, so active waits must
 //! recheck CLOCK_BOOTTIME in short slices after resume. This does not wake a
 //! sleeping device or claim cleanup can execute while the CPU is suspended.
 use std::{io, time::Duration};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) struct BootInstant(Duration);
+pub(crate) struct BootInstant(Duration);
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct BootDeadline {
+pub(crate) struct BootDeadline {
     start: BootInstant,
     end: BootInstant,
 }
 
 fn invalid() -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, "invalid diagnostic boot clock")
+    io::Error::new(io::ErrorKind::InvalidData, "invalid boot clock")
 }
 
 impl BootInstant {
@@ -66,6 +66,10 @@ impl BootInstant {
 }
 
 impl BootDeadline {
+    pub fn elapsed(self, now: BootInstant) -> io::Result<Duration> {
+        now.0.checked_sub(self.start.0).ok_or_else(invalid)
+    }
+
     pub fn from_now(duration: Duration) -> io::Result<Self> {
         BootInstant::now()?.after(duration)
     }

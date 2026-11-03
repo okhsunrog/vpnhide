@@ -9,6 +9,7 @@ pub mod auth;
 pub mod autonomous;
 pub mod backend;
 pub mod boot;
+mod boot_time;
 mod command_engine;
 pub mod config_edit;
 pub mod config_file;

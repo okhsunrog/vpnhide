@@ -569,6 +569,7 @@ private fun logcatEndNotice(
         LogcatAutoStop.DurationCap -> stringResource(R.string.logcat_auto_stopped_duration, maxDurationMs / 60_000)
         LogcatAutoStop.LogcatExited -> stringResource(R.string.logcat_auto_stopped_exited)
         LogcatAutoStop.CoreRestarted -> stringResource(R.string.logcat_auto_stopped_core_restarted)
+        LogcatAutoStop.ClockUnavailable -> stringResource(R.string.logcat_auto_stopped_clock_unavailable)
         null -> null
     }
 }

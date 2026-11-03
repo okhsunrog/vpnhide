@@ -30,6 +30,9 @@ pub enum LogcatAutoStopReason {
     /// Core found the session unfinished when it started (it crashed, or the device
     /// rebooted). The file ends where the old core stopped.
     CoreRestarted,
+    /// Core could not safely measure the remaining suspend-aware lifetime.
+    /// Duration retains the last known elapsed measurement, possibly a lower bound.
+    ClockUnavailable,
 }
 
 /// What the session's debug-logging lease did with the config's `debug` field.

@@ -1331,6 +1331,9 @@ mod tests {
                 LogcatSessionState::AutoStopped {
                     reason: LogcatAutoStopReason::CoreRestarted,
                 },
+                LogcatSessionState::AutoStopped {
+                    reason: LogcatAutoStopReason::ClockUnavailable,
+                },
             ];
             let restores = [
                 LogcatDebugRestore::Held,

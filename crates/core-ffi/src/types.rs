@@ -1274,6 +1274,7 @@ pub enum CoreLogcatAutoStopReason {
     DurationCap,
     LogcatExited,
     CoreRestarted,
+    ClockUnavailable,
 }
 impl From<rpc::LogcatAutoStopReason> for CoreLogcatAutoStopReason {
     fn from(value: rpc::LogcatAutoStopReason) -> Self {
@@ -1282,6 +1283,7 @@ impl From<rpc::LogcatAutoStopReason> for CoreLogcatAutoStopReason {
             rpc::LogcatAutoStopReason::DurationCap => Self::DurationCap,
             rpc::LogcatAutoStopReason::LogcatExited => Self::LogcatExited,
             rpc::LogcatAutoStopReason::CoreRestarted => Self::CoreRestarted,
+            rpc::LogcatAutoStopReason::ClockUnavailable => Self::ClockUnavailable,
         }
     }
 }
@@ -1292,6 +1294,7 @@ impl From<CoreLogcatAutoStopReason> for rpc::LogcatAutoStopReason {
             CoreLogcatAutoStopReason::DurationCap => Self::DurationCap,
             CoreLogcatAutoStopReason::LogcatExited => Self::LogcatExited,
             CoreLogcatAutoStopReason::CoreRestarted => Self::CoreRestarted,
+            CoreLogcatAutoStopReason::ClockUnavailable => Self::ClockUnavailable,
         }
     }
 }
@@ -1460,6 +1463,20 @@ impl From<CorePortPolicyMode> for String {
 mod tests {
     use super::*;
     use std::collections::{BTreeMap, BTreeSet};
+
+    #[test]
+    fn logcat_clock_failure_keeps_its_own_typed_reason_across_both_directions() {
+        for reason in [
+            rpc::LogcatAutoStopReason::SizeCap,
+            rpc::LogcatAutoStopReason::DurationCap,
+            rpc::LogcatAutoStopReason::LogcatExited,
+            rpc::LogcatAutoStopReason::CoreRestarted,
+            rpc::LogcatAutoStopReason::ClockUnavailable,
+        ] {
+            let restored: rpc::LogcatAutoStopReason = CoreLogcatAutoStopReason::from(reason).into();
+            assert_eq!(restored, reason);
+        }
+    }
 
     #[test]
     fn canonical_projection_preserves_hook_overrides_and_unknown_imported_modes() {

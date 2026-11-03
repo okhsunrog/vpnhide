@@ -345,6 +345,7 @@
     <string name="logcat_start_failed">Не удалось начать запись в VPN Hide Core (%1$s).</string>
     <string name="logcat_stop_failed">Не удалось получить запись от VPN Hide Core (%1$s).</string>
     <string name="logcat_auto_stopped_core_restarted">VPN Hide Core остановился (сбой, обновление или перезагрузка) во время записи, поэтому запись заканчивается там, где остановился core.</string>
+    <string name="logcat_auto_stopped_clock_unavailable">Запись остановлена: Core не смог проверить ограничение времени. Последняя измеренная длительность может быть неполной.</string>
     <string name="logcat_discard_failed">Не удалось удалить запись в VPN Hide Core (%1$s).</string>
     <string name="logcat_undelivered_title">Есть несохранённая запись</string>
     <string name="logcat_undelivered_body">В VPN Hide Core осталась запись от %1$s (%2$s, %3$s), которая так и не была сохранена. Сохраните её в ZIP или удалите. Новая запись тоже удалит её.</string>

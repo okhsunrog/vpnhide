@@ -54,6 +54,12 @@ class CoreLogcatRecordingTest {
         assertEquals(LogcatAutoStop.CoreRestarted, stopped.autoStop)
         assertTrue(stopped.undelivered)
         assertEquals("logcat-42.txt", stopped.file!!.name)
+        native.state = CoreLogcatSessionState.AutoStopped(CoreLogcatAutoStopReason.CLOCK_UNAVAILABLE)
+        native.durationMs = 123u
+        val clockFailure = coreLogcatSession(native)
+        assertEquals(LogcatAutoStop.ClockUnavailable, clockFailure.autoStop)
+        assertEquals("clock_unavailable", clockFailure.autoStop?.wire)
+        assertFalse(clockFailure.recording)
         native.debug!!.restore = CoreLogcatDebugRestore.USER_CHOICE
         assertEquals(LogcatDebugRestore.UserChoice, coreLogcatSession(native).debug!!.restore)
         native.delivered = true

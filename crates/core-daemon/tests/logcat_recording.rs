@@ -524,6 +524,55 @@ fn crash_copy(f: &Fixture) -> Vec<(PathBuf, Vec<u8>)> {
 }
 
 #[test]
+fn clock_failure_record_is_retained_after_restart_with_its_measured_duration() {
+    let f = idle();
+    bootstrap(&f.state, false, false);
+    let id = LogcatSessionId(142);
+    f.state.start_logcat_recording(id).unwrap();
+    f.state.stop_logcat_recording(id).unwrap();
+    f.state.shutdown();
+    // Independent persisted input: recovery must not reinterpret this as a
+    // normal duration cap or delete a useful undelivered recording.
+    let path = f.core_dir.join("session.json");
+    let mut record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    record["ended"]["state"] = serde_json::json!({
+        "kind": "auto_stopped", "reason": "clock_unavailable"
+    });
+    record["ended"]["duration_ms"] = 123.into();
+    record["ended"]["bytes"] = 6.into();
+    std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+    std::fs::write(f.core_dir.join("session-142.log"), b"saved\n").unwrap();
+    let next = core(
+        &f.core_dir,
+        &f.app_dir,
+        "sleep",
+        &["30"],
+        1 << 20,
+        Duration::from_secs(60),
+    );
+    let journal: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(f.core_dir.parent().unwrap().join("operations.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(journal["version"], vpnhide_build_contract::JOURNAL_VERSION);
+    next.logcat().recover();
+    let status = next.logcat().status().unwrap();
+    assert_eq!(status.duration_ms, 123);
+    assert_eq!(
+        status.state,
+        LogcatSessionState::AutoStopped {
+            reason: LogcatAutoStopReason::ClockUnavailable,
+        }
+    );
+    assert!(!next.debug_lease_held());
+    assert_eq!(debug_of(&next), (false, false));
+    let delivered = next.stop_logcat_recording(id).unwrap().file.unwrap();
+    assert_eq!(std::fs::read(delivered).unwrap(), b"saved\n");
+    next.ack_logcat_recording(id).unwrap();
+}
+
+#[test]
 fn a_session_unfinished_at_core_start_ends_and_restores_debug() {
     let f = idle();
     bootstrap(&f.state, false, false);

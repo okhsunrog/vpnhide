@@ -1,7 +1,7 @@
 # Reading a VPN Hide debug bundle
 
 Start with `state.json` inside the exported ZIP. This guide describes the current
-schema10, paired APK/Core RPC30 and diagnostic contract9. Historical captures use
+schema11, paired APK/Core RPC31 and diagnostic contract9. Historical captures use
 [the versioned reference](archive/2026-11-03-debug-bundle-legacy-reference.md).
 Current exports do not require a foreign VPN or split-tunnel membership, and
 collecting a file does not admit a diagnostic run.
@@ -46,6 +46,7 @@ wire versions are separate boundaries.
 
 | Schema | Shipped in | What changed |
 |---|---|---|
+| 11 | main (unreleased) | Logcat duration now includes suspend using CLOCK_BOOTTIME. `clock_unavailable` is a distinct auto-stop reason; its duration can be the last measured lower bound. Field names remain stable. |
 | 10 | main (unreleased) | `run.filesystem` preserves eighteen separate libc/direct-syscall stat/access/open-directory checks for sysfs and both proc-sys families, plus matching RAW observations. Denied/unsupported lookups remain unverified; late control failures retain qualified leaks. Directory enumeration remains separate. |
 | 9 | main (unreleased) | `run.sysInterfaces` retains separate libc/direct-getdents64 directory proof, leaks and controls for sysfs and both proc-sys families. All six require positive same-worker RAW and ordinary-object controls; this does not complete stat/access/open or promote a denied read to proof. Shared RAW receipts retain the corresponding actual observations. |
 | 8 | main (unreleased) | Native proof requires a correlated app RAW interval and confirmed revocation; privileged root controls alone remain unverified. `run.nativeRaw` preserves the full shared Rust receipt, including failed-scope observations and exact thread identity. Native evidence is retained before framework collection, so worker death cannot erase an already reported leak. |
@@ -268,3 +269,13 @@ localization and the open sheet's explicit overrides. Unjoined/stale leaks canno
 recommend attachments, and recommendations neither collect them nor authorize
 backend/boot changes. Capture/export/agent orchestration remains incomplete;
 current APK packaging is not presented as a completed Core-owned session.
+
+## Capture clock limits
+
+Paired RPC31 adds the typed logcat auto-stop reason `clock_unavailable`. Core uses
+CLOCK_BOOTTIME for temporary logging authority and the recording cap, so suspend
+does not extend either. Active waits recheck at most every250ms after resume;
+no cleanup is claimed while the CPU sleeps. With clock failure, duration is the
+last valid measured lower bound. Field names stay stable; schema11 records the
+changed elapsed-time meaning. Private journal14 fences older writers from the new
+persisted recorder reason; schemas1–13 still migrate without discarding holds.

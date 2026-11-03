@@ -978,12 +978,74 @@ fn lease_expiry_restores_baseline_without_a_recorder_session() {
                 .unwrap()
                 .get_mut(&DebugLeaseId(10))
                 .unwrap()
-                .deadline = std::time::Instant::now() - std::time::Duration::from_secs(1);
+                .deadline = crate::boot_time::BootInstant::at(0)
+                .after(std::time::Duration::ZERO)
+                .unwrap();
             state.expire_debug_leases();
         })
         .unwrap();
     assert!(!state.snapshot().config.unwrap().debug);
     assert!(!state.debug_lease_held());
+}
+
+#[test]
+fn both_logging_lease_owners_count_suspend_and_deny_unknown_or_regressed_clocks() {
+    use crate::boot_time::BootInstant;
+    for owner in [DebugLeaseOwner::Forensic, DebugLeaseOwner::Logcat] {
+        let seconds = lease_duration(owner).as_secs();
+        let lease = LiveLease {
+            deadline: BootInstant::at(100).after(lease_duration(owner)).unwrap(),
+            active: true,
+        };
+        assert!(lease.live_at(Some(BootInstant::at(100 + seconds - 1))));
+        assert!(!lease.live_at(Some(BootInstant::at(100 + seconds))));
+        // A long suspend advances BOOTTIME even without application activity.
+        assert!(!lease.live_at(Some(BootInstant::at(100 + seconds + 86_400))));
+        assert!(!lease.live_at(Some(BootInstant::at(99))));
+        assert!(!lease.live_at(None));
+    }
+}
+
+#[test]
+fn logging_authority_expiry_restores_both_owners_through_the_durable_writer() {
+    use crate::boot_time::BootInstant;
+    let _env = crate::ports::test_env_lock();
+    for now in [
+        Some(BootInstant::at(100_000)),
+        Some(BootInstant::at(99)),
+        None,
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let state = load(root.path(), 1);
+        bootstrap(&state);
+        for (id, owner) in [
+            (DebugLeaseId(10), DebugLeaseOwner::Forensic),
+            (DebugLeaseId(20), DebugLeaseOwner::Logcat),
+        ] {
+            state.acquire_debug_lease(id, owner).unwrap();
+        }
+        state
+            .call_writer(move |state| {
+                for lease in state.live_leases.lock().unwrap().values_mut() {
+                    lease.deadline = BootInstant::at(100)
+                        .after(std::time::Duration::from_secs(1))
+                        .unwrap();
+                }
+                let mut store = state.engine.store.lock().unwrap().clone();
+                for lease in &mut store.journal.debug_leases {
+                    // Wall-clock metadata cannot extend runtime authority.
+                    lease.expires_at_ms = u64::MAX;
+                }
+                state.persist_store(&store).unwrap();
+                state.expire_debug_leases_at(now);
+            })
+            .unwrap();
+        assert!(!state.debug_lease_held());
+        assert!(!state.snapshot().config.unwrap().debug);
+        let journal = journal::read(&root.path().join("operations.json")).unwrap();
+        assert!(journal.debug_leases.is_empty());
+        assert!(journal.debug_restore.is_none());
+    }
 }
 
 #[test]

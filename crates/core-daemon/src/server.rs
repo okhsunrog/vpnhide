@@ -22,6 +22,7 @@ use vpnhide_core_rpc::{
     Published, RootEffect, SubmitError, VpnhideCore,
 };
 
+use crate::boot_time::{BootDeadline, BootInstant};
 use crate::config_edit::{self, apply_canonical_edit};
 use crate::config_file;
 use crate::journal::{self, Journal, JournalEntry};
@@ -82,8 +83,13 @@ fn lease_deadline(owner: DebugLeaseOwner) -> u64 {
 
 #[derive(Clone, Copy)]
 struct LiveLease {
-    deadline: std::time::Instant,
+    deadline: BootDeadline,
     active: bool,
+}
+impl LiveLease {
+    fn live_at(self, now: Option<BootInstant>) -> bool {
+        now.is_some_and(|now| !self.deadline.expired(now))
+    }
 }
 
 struct CommandSpec {
@@ -797,6 +803,10 @@ impl CoreState {
         owner: DebugLeaseOwner,
     ) -> Result<(), SubmitError> {
         self.call_writer(move |state| {
+            // Reserve a suspend-aware bound before persistence or logging effects.
+            // An unavailable clock cannot admit or extend logging authority.
+            let deadline = BootDeadline::from_now(lease_duration(owner))
+                .map_err(|_| SubmitError::Unavailable)?;
             let mut store = state.engine.store.lock().expect("config mutex").clone();
             let existing = store
                 .journal
@@ -859,10 +869,15 @@ impl CoreState {
                     });
             }
             state.persist_store(&store)?;
+            if deadline.expired(BootInstant::now().map_err(|_| SubmitError::Unavailable)?) {
+                // Keep the restoration reservation, but never enable logging
+                // under a bound consumed while persistence was blocked.
+                return Err(SubmitError::Unavailable);
+            }
             state.live_leases.lock().expect("live leases").insert(
                 id,
                 LiveLease {
-                    deadline: std::time::Instant::now() + lease_duration(owner),
+                    deadline,
                     active: already_active,
                 },
             );
@@ -897,6 +912,10 @@ impl CoreState {
     }
 
     pub(crate) fn expire_debug_leases(&self) {
+        self.expire_debug_leases_at(BootInstant::now().ok());
+    }
+
+    fn expire_debug_leases_at(&self, now: Option<BootInstant>) {
         if self.shutting_down.load(Ordering::SeqCst) || self.snapshot().storage_fault.is_some() {
             return;
         }
@@ -905,12 +924,11 @@ impl CoreState {
         }
         let mut store = self.engine.store.lock().expect("config mutex").clone();
         let before = store.journal.debug_leases.len();
-        let now = std::time::Instant::now();
         let live = self.live_leases.lock().expect("live leases").clone();
-        store.journal.debug_leases.retain(|lease| {
-            live.get(&lease.id)
-                .is_some_and(|lease| lease.deadline > now)
-        });
+        store
+            .journal
+            .debug_leases
+            .retain(|lease| live.get(&lease.id).is_some_and(|lease| lease.live_at(now)));
         if before != store.journal.debug_leases.len() && self.persist_store(&store).is_err() {
             return;
         }

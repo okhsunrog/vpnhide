@@ -250,6 +250,7 @@ internal enum class LogcatAutoStop(
 
     /** Core stopped (crash, update, reboot) while the session recorded. */
     CoreRestarted("core_restarted"),
+    ClockUnavailable("clock_unavailable"),
 }
 
 /** How core put debug logging back after a session (`core-rpc` `LogcatDebugRestore`). */
@@ -342,6 +343,7 @@ internal fun coreLogcatSession(value: CoreLogcatSessionStatus): CoreLogcatSessio
                     CoreLogcatAutoStopReason.DURATION_CAP -> LogcatAutoStop.DurationCap
                     CoreLogcatAutoStopReason.LOGCAT_EXITED -> LogcatAutoStop.LogcatExited
                     CoreLogcatAutoStopReason.CORE_RESTARTED -> LogcatAutoStop.CoreRestarted
+                    CoreLogcatAutoStopReason.CLOCK_UNAVAILABLE -> LogcatAutoStop.ClockUnavailable
                 }
             },
         startedAtMs = value.startedAtMs.toLong(),

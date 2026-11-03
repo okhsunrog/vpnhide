@@ -141,7 +141,9 @@ effective in-runtime value. On a capture path, `debug` may temporarily become
 `true` while `debugSwitch` remains `false`. Core-owned expiring leases cover both
 forensic ZIP capture and logcat. The operation journal retains the baseline and
 restoration obligation independently of recorder artifacts; the last release or
-expiry triggers restoration. If the user changed `debugSwitch` meanwhile, the
+expiry triggers restoration. Runtime lease authority uses checked CLOCK_BOOTTIME,
+including suspend; wall-clock expiry is display metadata. Unknown or regressed
+clock observations retire authority through the same restoration path. If the user changed `debugSwitch` meanwhile, the
 switch wins (see
 [debug-bundle.md](debug-bundle.md) §1).
 

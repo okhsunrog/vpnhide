@@ -116,6 +116,7 @@
     <string name="logcat_start_failed">Couldn\'t start the recording in VPN Hide Core (%1$s).</string>
     <string name="logcat_stop_failed">Couldn\'t get the recording from VPN Hide Core (%1$s).</string>
     <string name="logcat_auto_stopped_core_restarted">VPN Hide Core stopped (a crash, an update or a reboot) while this was recording, so it ends where core stopped.</string>
+    <string name="logcat_auto_stopped_clock_unavailable">Recording stopped because Core could not verify its time limit. The last measured duration may be incomplete.</string>
     <string name="logcat_discard_failed">Couldn\'t discard the recording in VPN Hide Core (%1$s).</string>
     <string name="logcat_undelivered_title">An unsaved recording is waiting</string>
     <string name="logcat_undelivered_body">VPN Hide Core still holds a recording from %1$s (%2$s, %3$s) that was never saved. Save it as a ZIP or discard it. Starting a new recording also discards it.</string>
