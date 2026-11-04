@@ -23,7 +23,12 @@ exec "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" --targe
 SH
 chmod 0700 "$linker"
 rustup target add aarch64-unknown-linux-musl
-CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER="$linker" \
+# C build scripts (ring) otherwise guess aarch64-linux-musl-gcc, absent on
+# hosts and CI. Compile with the same NDK clang target and LLVM archiver.
+llvm_bin="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+CC_aarch64_unknown_linux_musl="$llvm_bin/clang --target=aarch64-linux-musl" \
+    AR_aarch64_unknown_linux_musl="$llvm_bin/llvm-ar" \
+    CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER="$linker" \
     cargo build --target aarch64-unknown-linux-musl -p vpnhide_core_daemon --features fixture-oracle --bin vpnhide-fixture-oracle
 mkdir -p "$(dirname "$output")"
 install -m 0755 target/aarch64-unknown-linux-musl/debug/vpnhide-fixture-oracle "$output"

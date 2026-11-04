@@ -108,11 +108,18 @@ fn executable(root: &Path, relative: &str, uid: u32) -> io::Result<(String, File
         // AOSP /data is system:system 0771, not root-only. Trust exactly
         // that platform parent; /data/adb and every executable descendant
         // still require the retained root-owned, non-writable boundary.
-        let platform_uid = if uid == 0 { 1000 } else { uid };
+        // Non-root owners exist only for unprivileged tests; their files carry
+        // the process's primary group, which need not equal the uid (e.g. CI
+        // runners are uid 1001, gid 118).
+        let (platform_uid, platform_gid) = if uid == 0 {
+            (1000, 1000)
+        } else {
+            (uid, unsafe { libc::getegid() })
+        };
         let platform_data = parent == Path::new("data")
             && meta.is_dir()
             && meta.uid() == platform_uid
-            && meta.gid() == platform_uid
+            && meta.gid() == platform_gid
             && meta.mode() & 0o002 == 0;
         if !platform_data && (meta.uid() != uid || meta.mode() & 0o022 != 0) {
             return Err(invalid());
