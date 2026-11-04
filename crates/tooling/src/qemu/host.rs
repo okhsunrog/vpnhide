@@ -228,7 +228,10 @@ fn boot(plan: &Plan, image: &Path, root: &Path, work: &Path, tag: &str) -> io::R
         .arg(format!(
             "console=ttyAMA0 rodata=off panic=-1 rdinit=/init vpnhide_harness={}{}",
             plan.session,
-            if matches!(plan.mode, Mode::FixtureRaw | Mode::FixtureProtected) {
+            if matches!(
+                plan.mode,
+                Mode::FixtureRaw | Mode::FixtureProtected | Mode::CorePreflight
+            ) {
                 " vpnhide_fixture_oracle=1"
             } else {
                 ""
@@ -376,7 +379,9 @@ pub fn run(args: Args) -> io::Result<()> {
                 path: None,
             }
         };
-        let mode = if nonempty("VPNHIDE_QEMU_PREFLIGHT_ONLY") {
+        let mode = if nonempty("VPNHIDE_QEMU_CORE_PREFLIGHT") {
+            Mode::CorePreflight
+        } else if nonempty("VPNHIDE_QEMU_PREFLIGHT_ONLY") {
             Mode::Preflight
         } else {
             match env::var("VPNHIDE_QEMU_NATIVE_FIXTURE_MODE").as_deref() {
@@ -469,11 +474,42 @@ pub fn run(args: Args) -> io::Result<()> {
                 copy_file(&root, name, &p, true)?;
             }
         }
-        if matches!(mode, Mode::FixtureRaw | Mode::FixtureProtected) {
+        if matches!(
+            mode,
+            Mode::FixtureRaw | Mode::FixtureProtected | Mode::CorePreflight
+        ) {
             let oracle = env_path("VPNHIDE_NATIVE_FIXTURE_BIN", PathBuf::new());
             copy_file(&root, "native-fixture-oracle", &oracle, true)?;
         }
         let mut staged = std::collections::BTreeMap::new();
+        if mode == Mode::CorePreflight {
+            let source = env_path("VPNHIDE_QEMU_PREFLIGHT_CATALOG", PathBuf::new());
+            let bytes = read_regular(
+                &source.join("payloads/manifest.json"),
+                vpnhide_artifact_model::manifest::MAX_MANIFEST_BYTES,
+            )?;
+            let manifest = vpnhide_artifact_model::manifest::Manifest::parse(&bytes)?;
+            let manifest_path = "vpnhide-preflight-catalog/payloads/manifest.json";
+            initramfs::place(&root, manifest_path, &bytes, false)?;
+            staged.insert(manifest_path.to_owned(), FileIdentity::of(&bytes));
+            let mut total = 0u64;
+            // Host staging consumes the shared manifest grammar. The Core in
+            // the guest independently verifies actual final bytes/capabilities.
+            for payload in &manifest.payloads {
+                let relative = payload.implementation.relative_path()?;
+                let bytes = read_regular(
+                    &source.join(&relative),
+                    vpnhide_artifact_model::MAX_PAYLOAD_BYTES,
+                )?;
+                total += bytes.len() as u64;
+                if total > vpnhide_artifact_model::manifest::MAX_BUNDLE_BYTES {
+                    return Err(error("preflight catalog exceeds staging budget"));
+                }
+                let destination = format!("vpnhide-preflight-catalog/{relative}");
+                initramfs::place(&root, &destination, &bytes, false)?;
+                staged.insert(destination, FileIdentity::of(&bytes));
+            }
+        }
         for name in [
             "init",
             "vpnhide-tooling",
@@ -490,7 +526,7 @@ pub fn run(args: Args) -> io::Result<()> {
         ] {
             if root.join(name).exists() {
                 staged.insert(
-                    name,
+                    name.to_owned(),
                     FileIdentity::of(&read_regular(&root.join(name), 128 * 1024 * 1024)?),
                 );
             }

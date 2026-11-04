@@ -11,6 +11,7 @@ use std::path::Path;
 use sha2::{Digest, Sha256};
 
 pub mod device;
+pub mod frozen;
 pub use vpnhide_artifact_model::elf;
 pub mod kmi;
 pub mod projection;

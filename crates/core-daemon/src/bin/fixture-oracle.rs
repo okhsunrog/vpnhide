@@ -15,6 +15,8 @@ use vpnhide_diagnostic_model::{
     ProcInterfaceCheck, ScopedNativeResult, SysInterfaceCheck, cleanup_confirmed,
 };
 
+#[path = "fixture-oracle/preflight_control.rs"]
+mod preflight_control;
 #[path = "fixture-oracle/raw_control.rs"]
 mod raw_control;
 #[path = "fixture-oracle/route_control.rs"]
@@ -91,6 +93,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if unsafe { libc::geteuid() } != 0 {
         return Err("native oracle parent is not root".into());
+    }
+    if args.as_slice() == ["preflight-catalog"] {
+        return preflight_control::run();
     }
     if args.as_slice() == ["route-crash-owner"] {
         let fixture =

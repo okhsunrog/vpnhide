@@ -141,10 +141,14 @@ also adopts fresh durable state before choosing the user's logging intent, so a
 landed rename cannot be overwritten from an older in-memory config.
 
 Initial Native activation uses the same writer and journal. Before effects, Core
-pins payload bytes in an anonymous private file and records their SHA-256/size,
+pins payload bytes in a sealed anonymous memfd and records their SHA-256/size,
 source, boot identity, config revision, load-time feature and transition. Zygisk
 retirement pins its directory identity. Secondary `native_boot.json` is diagnostic
 output only; startup does not delete legacy settings or installed modules.
+The retained snapshot forbids writes, growth and truncation through duplicate or
+reopened descriptors. A kernel without confirmed sealing support refuses before
+load dispatch; no unsealed fallback is used. Crash recovery uses the journal and
+never treats the anonymous file as a persisted authorization to replay a load.
 
 An interrupted load or a failed load with ambiguous effects keeps Native held.
 Restart and reboot do not replay it. Existing **RepairActivation** can adopt a

@@ -22,6 +22,7 @@ pub enum Backend {
 pub enum Mode {
     Full,
     Preflight,
+    CorePreflight,
     FixtureRaw,
     FixtureProtected,
 }
@@ -142,7 +143,9 @@ impl Plan {
                 return Err(invalid("required native probe unavailable"));
             }
         }
-        if self.mode == Mode::Preflight && !self.probes.preflight.present {
+        if matches!(self.mode, Mode::Preflight | Mode::CorePreflight)
+            && !self.probes.preflight.present
+        {
             return Err(invalid("preflight mode needs its syscall oracle"));
         }
         Ok(())
@@ -152,8 +155,11 @@ impl Plan {
     pub fn expected(&self) -> io::Result<BTreeMap<String, bool>> {
         self.validate()?;
         let mut result = BTreeMap::new();
-        if self.mode == Mode::Preflight {
+        if matches!(self.mode, Mode::Preflight | Mode::CorePreflight) {
             result.insert("loader_preflight".into(), false);
+            if self.mode == Mode::CorePreflight {
+                result.insert("core_preflight_dispatch".into(), false);
+            }
             return Ok(result);
         }
         if matches!(self.mode, Mode::FixtureRaw | Mode::FixtureProtected) {
@@ -265,16 +271,18 @@ impl Report {
                 "report does not complete the declared session/plan",
             ));
         }
-        if matches!(self.mode, Mode::Preflight | Mode::FixtureRaw)
-            && (self.loaded || self.registered != 0)
+        if matches!(
+            self.mode,
+            Mode::Preflight | Mode::CorePreflight | Mode::FixtureRaw
+        ) && (self.loaded || self.registered != 0)
         {
             return Err(invalid("unexpected backend exposure in a no-load plan"));
         }
-        if !matches!(self.mode, Mode::Preflight | Mode::FixtureRaw)
-            && (!self.loaded
-                || (self.mode == Mode::Full
-                    && self.backend != Backend::Kpm
-                    && self.registered == 0))
+        if !matches!(
+            self.mode,
+            Mode::Preflight | Mode::CorePreflight | Mode::FixtureRaw
+        ) && (!self.loaded
+            || (self.mode == Mode::Full && self.backend != Backend::Kpm && self.registered == 0))
         {
             return Err(invalid("backend loading/registration was not confirmed"));
         }

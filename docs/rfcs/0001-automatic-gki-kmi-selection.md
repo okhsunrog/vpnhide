@@ -23,6 +23,13 @@
 > See [the dated qualification evidence](../archive/2026-11-03-gki-modpost-qualification.md).
 > This does not enable production preflight or prove private ABI/device acceptance.
 
+> Experiment update (4 November 2026): Core now freezes sealed final-file snapshots
+> and the isolated QEMU oracle dispatches them through the durable preflight ledger.
+> Positive sentinel and CRC-rejected cases were exercised on the reference6.1
+> Image. [Scope and evidence](../archive/2026-11-04-final-byte-preflight.md).
+> Production dispatch/selection reconciliation remains unfinished and disabled;
+> one sentinel does not authorize activation or resolve private ABI.
+
 **Идентификатор:** `RFC-AUTO-GKI-KMOD-001`  
 **Статус:** Proposed / требует реализации и проверки на устройствах  
 **Дата:** 2026-11-02  

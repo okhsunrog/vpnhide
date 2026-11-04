@@ -29,6 +29,7 @@ use vpnhide_core_rpc::{
 
 use crate::alog;
 pub mod evidence;
+pub mod preflight;
 pub mod prepared;
 pub(crate) mod transition;
 

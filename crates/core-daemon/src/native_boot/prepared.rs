@@ -2,7 +2,7 @@
 use super::*;
 use sha2::{Digest, Sha256};
 use std::fs::{File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 mod bundled;
@@ -171,18 +171,22 @@ impl Prepared {
                     .file_name()
                     .and_then(|s| s.to_str())
                     .ok_or("invalid artifact name")?;
-                let mut input =
+                let input =
                     crate::payloads::open_beneath(&directory, name).map_err(|e| e.to_string())?;
                 let staging = env
                     .state_file
                     .parent()
                     .ok_or("missing private owner directory")?;
                 fs::create_dir_all(staging).map_err(|e| e.to_string())?;
-                let mut output = tempfile::tempfile_in(staging).map_err(|e| e.to_string())?;
-                let identity = copy_payload(&mut input, &mut output, source.clone())
+                let frozen = crate::payloads::frozen::FrozenPayload::copy(&input)
                     .map_err(|e| e.to_string())?;
-                payload = Some(identity);
-                staged = Some(output);
+                payload = Some(PayloadIdentity {
+                    source,
+                    sha256: frozen.sha256.clone(),
+                    bytes: frozen.bytes,
+                    init_contract: None,
+                });
+                staged = Some(frozen.into_file());
             }
         }
         let retire_zygisk = (facts.installed.contains(&NativeBackend::Zygisk)
@@ -348,38 +352,6 @@ impl Prepared {
         let rejection = super::evidence::rejection(&self.intent, &boot, *effects.failure.borrow());
         PreparedExecution { boot, rejection }
     }
-}
-
-fn copy_payload(
-    input: &mut File,
-    output: &mut File,
-    source: PathBuf,
-) -> io::Result<PayloadIdentity> {
-    let mut hash = Sha256::new();
-    let mut bytes = 0u64;
-    let mut buffer = [0u8; 64 * 1024];
-    loop {
-        let n = input.read(&mut buffer)?;
-        if n == 0 {
-            break;
-        }
-        bytes += n as u64;
-        if bytes > crate::payloads::MAX_PAYLOAD_BYTES {
-            return Err(io::Error::other("payload exceeds preparation budget"));
-        }
-        output.write_all(&buffer[..n])?;
-        hash.update(&buffer[..n]);
-    }
-    if bytes == 0 {
-        return Err(io::Error::other("empty payload"));
-    }
-    output.sync_all()?;
-    Ok(PayloadIdentity {
-        source,
-        sha256: format!("{:x}", hash.finalize()),
-        bytes,
-        init_contract: None,
-    })
 }
 
 struct PinnedEffects<'a> {

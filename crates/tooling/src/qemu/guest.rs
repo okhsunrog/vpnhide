@@ -642,8 +642,23 @@ pub fn run() -> io::Result<()> {
     println!("##### VPNHIDE-QEMU-TEST START #####");
     let mut report = Report::new(&plan);
     let outcome = (|| -> io::Result<()> {
-        if plan.mode == Mode::Preflight {
+        if matches!(plan.mode, Mode::Preflight | Mode::CorePreflight) {
             preflight(&plan, &mut report)?;
+            if plan.mode == Mode::CorePreflight {
+                let result = execute("/native-fixture-oracle", &["preflight-catalog"], false)?;
+                io::stdout().write_all(&result.output.stdout)?;
+                io::stderr().write_all(&result.output.stderr)?;
+                if !success(&result) {
+                    return Err(io::Error::other(
+                        "Core preflight experiment did not complete cleanly",
+                    ));
+                }
+                report.rows.push(ResultRow::new(
+                    "core_preflight_dispatch",
+                    Verdict::Pass,
+                    "synced final-byte loader experiment only; no private-ABI or activation proof",
+                ));
+            }
             report.setup_ok = true;
             return Ok(());
         }
