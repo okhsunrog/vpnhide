@@ -1,5 +1,8 @@
 obj-m += vpnhide_kmod.o
 
+# Kernel code cannot call compiler-rt userspace outline-atomic helpers.
+ccflags-y += -mno-outline-atomics
+
 # Kbuild includes the external module Makefile in its modpost stage. Replace
 # only the checker executable here, preserving this kernel's own recursive
 # MODPOST flags (including $@, symbol inputs and later += additions). Passing
