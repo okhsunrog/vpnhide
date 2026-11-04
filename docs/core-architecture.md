@@ -687,9 +687,10 @@ files does not erase a qualified already-consumed generation. It still requires
 the established recipient/source identities and live process/image evidence; it
 does not prove unhooking, full coverage or successful new authorization.
 
-Production still supplies the colocated compatibility recipient until the
-journaled managed projection executor is implemented. This identity split creates
-no production discovery copy, manager operation, consent grant or Zygisk choice.
+Production initially configures the colocated compatibility recipient. Before
+loader probing or native selection, the boot thread can bind a retained, confirmed
+managed projection to its independent recipient after exact source/code readback.
+This creates no discovery copy, manager operation, consent grant or Zygisk choice.
 Both actual ABI proofs remain mandatory on mixed-ABI devices; ARMv7 compilation
 and a 64-bit worker do not replace the missing genuine secondary32 launcher.
 
@@ -733,6 +734,29 @@ journal17. Public RPC33 and backend control2 are unchanged.
 The production choice path still refuses new Zygisk publication and selected-Zygisk
 retirement. The journal callback executor is exercised by offline manager/process
 fixtures, not wired into the public chooser. Production admission, bootstrap
-publication, current recipient routing, owned withdrawal/update and existing-user
-continuity remain code work. No new module, provider refresh or device reboot is
+publication, owned withdrawal/update and existing-user continuity remain code work. No new module, provider refresh or device reboot is
 performed by ordinary startup or these journal migrations.
+
+
+## Production managed-recipient boot readback
+
+The boot thread inspects retained confirmed projection work before loader workers
+and native selection. Hashing stays outside the command writer and IPC startup.
+Same-boot staged bytes remain inert; after a different real boot, only the exact
+active image and running Core source can bind the loader recipient. Source and
+recipient directory leases span readback and binding. Callback handlers obtain
+the current binding; an in-flight callback from an older binding cannot be ACKed.
+
+An authorization file is accepted during readback only if its owned, bounded
+bytes and directory identity match the exact latest or prior retained journal
+authority. It is separate from the inert code file set and grants no new consent,
+policy delivery or behavioral proof. Missing consumption still means unavailable.
+
+Unowned, disabled, unreadable or broken-link discovery residue is not evidence of
+absence. Boot records a durable current-boot possible-exposure fence and refuses
+selection without loading or spending an attempt. Prepared KMOD/KPM loads also
+recheck residue before and after durable admission. Appearance during admission
+retains an uncertain result and budget; neither window calls the loader. An owned
+namespace alone does not authorize a new kernel load while discovery remains.
+The explicit chooser, bootstrap grant and owned withdrawal/update remain closed
+implementation gaps; this read-side connection does not complete RFC0005.

@@ -301,7 +301,7 @@ impl ImageFence {
         }
         Ok(())
     }
-    pub(super) fn inspect(
+    pub(crate) fn inspect(
         root: &Path,
         descriptor: Option<&VerifiedDescriptor>,
         abi: Abi,

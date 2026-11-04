@@ -62,6 +62,17 @@ struct LoaderContext {
     boot_id: String,
     epoch: u64,
     catalog: Arc<Mutex<Option<CatalogGeneration>>>,
+    binding: Option<BindingExpectation>,
+}
+
+#[derive(Debug, Clone)]
+struct BindingExpectation {
+    owner_uid: u32,
+    source: (u64, u64),
+    recipient: (u64, u64),
+    descriptor: vpnhide_artifact_model::zygisk_projection::Descriptor,
+    // Keep the recipient generation alive across cache/context churn.
+    _recipient: Arc<File>,
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +98,13 @@ fn pinned_generation(
     }
     let metadata = directory.metadata()?;
     let identity = (metadata.dev(), metadata.ino());
+    if context
+        .binding
+        .as_ref()
+        .is_some_and(|binding| metadata.uid() != binding.owner_uid || metadata.mode() & 0o022 != 0)
+    {
+        return Err(invalid("managed source ownership changed"));
+    }
     if !metadata.is_dir() || directory_identity(&open_directory(&context.root)?)? != identity {
         return Err(invalid(
             "catalog descriptor differs from authoritative source",
@@ -125,6 +143,16 @@ fn pinned_generation(
         return Err(io::Error::new(
             io::ErrorKind::TimedOut,
             "loader catalog deadline",
+        ));
+    }
+    if context.binding.as_ref().is_some_and(|binding| {
+        generation.directory != binding.source
+            || generation.sha256 != binding.descriptor.manifest_sha256
+            || generation.file_sha256 != binding.descriptor.manifest_file_sha256
+            || generation.manifest.bundle_commit != binding.descriptor.source_commit
+    }) {
+        return Err(invalid(
+            "managed catalog differs from its owned projection binding",
         ));
     }
     *cache = Some(generation.clone());
@@ -177,6 +205,16 @@ impl LoaderSources {
                 "callback recipient differs from expected recipient",
             ));
         }
+        if context.binding.as_ref().is_some_and(|binding| {
+            binding.recipient != recipient_identity
+                || !received
+                    .metadata()
+                    .is_ok_and(|m| m.uid() == binding.owner_uid && m.mode() & 0o022 == 0)
+        }) {
+            return Err(invalid(
+                "recipient differs from the journal-qualified projection",
+            ));
+        }
         // The companion supplies only its recipient. Open the authoritative
         // source ourselves, never a peer-selected embedded catalog.
         let catalog_directory = open_directory(&context.root)?;
@@ -204,6 +242,14 @@ impl LoaderSources {
             != self.recipient_identity
         {
             return Err(invalid("recipient changed during source inspection"));
+        }
+        if context.binding.as_ref().is_some_and(|binding| {
+            !binding
+                ._recipient
+                .metadata()
+                .is_ok_and(|m| m.uid() == binding.owner_uid && m.mode() & 0o022 == 0)
+        }) {
+            return Err(invalid("managed recipient ownership changed"));
         }
         let generation = pinned_generation(context, &self.catalog_directory, deadline)?;
         if generation.directory != self.generation.directory
@@ -393,6 +439,156 @@ fn live_identity(o: &LoaderObservation, root: &Path, child_mapping: bool) -> boo
 }
 
 impl LoaderRegistry {
+    #[cfg(test)]
+    pub(crate) fn configure_test_context(&self, root: PathBuf, boot_id: String, epoch: u64) {
+        *self.context.lock().expect("loader context") = Some(LoaderContext {
+            recipient_root: root.clone(),
+            root,
+            boot_id,
+            epoch,
+            catalog: Arc::new(Mutex::new(None)),
+            binding: None,
+        });
+    }
+    pub(crate) fn bind_projection_owned(
+        &self,
+        source: &Path,
+        recipient: &Path,
+        readback: &crate::maintenance::zygisk_projection::work::ActiveProjectionReadback,
+        uid: u32,
+        boot: &str,
+        epoch: u64,
+    ) -> io::Result<()> {
+        let previous = self
+            .context
+            .lock()
+            .expect("loader context")
+            .clone()
+            .ok_or_else(|| invalid("loader listener unavailable"))?;
+        if previous.boot_id != boot
+            || previous.epoch != epoch
+            || source != previous.root
+            || source
+                .parent()
+                .map(|p| p.join(vpnhide_protocol::zygisk_activation::MANAGED_MODULE_ID))
+                .as_deref()
+                != Some(recipient)
+        {
+            return Err(invalid(
+                "projection is outside the configured source/module namespace",
+            ));
+        }
+        let image = &readback.image;
+        if directory_identity(&readback.source_directory)? != readback.source.root
+            || directory_identity(&readback.recipient_directory)? != image.directory
+        {
+            return Err(invalid(
+                "readback directory leases differ from its evidence",
+            ));
+        }
+        image.descriptor.validate()?;
+        if !image.valid_for(&image.descriptor) {
+            return Err(invalid("projection image evidence is incomplete"));
+        }
+        let directory = open_directory(recipient)?;
+        let metadata = directory.metadata()?;
+        if metadata.uid() != uid
+            || metadata.mode() & 0o022 != 0
+            || directory_identity(&directory)? != image.directory
+        {
+            return Err(invalid("owned projection directory generation changed"));
+        }
+        let target = crate::zygisk::ZygiskTarget::open(recipient).map_err(io::Error::other)?;
+        if !target.is_managed().map_err(io::Error::other)? {
+            return Err(invalid("projection recipient contract changed"));
+        }
+        let source_directory = open_directory(source)?;
+        if directory_identity(&source_directory)? != readback.source.root {
+            return Err(invalid("source directory changed after readback"));
+        }
+        let next = LoaderContext {
+            root: previous.root.clone(),
+            recipient_root: recipient.into(),
+            boot_id: previous.boot_id.clone(),
+            epoch: previous.epoch,
+            catalog: Arc::new(Mutex::new(None)),
+            binding: Some(BindingExpectation {
+                owner_uid: uid,
+                source: readback.source.root,
+                recipient: image.directory,
+                descriptor: image.descriptor.clone(),
+                _recipient: Arc::new(directory),
+            }),
+        };
+        let deadline = Instant::now() + Duration::from_secs(30);
+        pinned_generation(&next, &source_directory, deadline)?;
+        if target.revalidate_identity().map_err(io::Error::other)? != image.directory {
+            return Err(invalid("projection changed during binding"));
+        }
+        let mut current = self.context.lock().expect("loader context");
+        if current
+            .as_ref()
+            .is_none_or(|current| !Arc::ptr_eq(&current.catalog, &previous.catalog))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "loader binding changed during qualification",
+            ));
+        }
+        *current = Some(next);
+        Ok(())
+    }
+    fn accept_current(
+        &self,
+        context: &LoaderContext,
+        observation: LoaderObservation,
+    ) -> io::Result<()> {
+        let current = self.context.lock().expect("loader context");
+        if current
+            .as_ref()
+            .is_none_or(|current| !Arc::ptr_eq(&current.catalog, &context.catalog))
+        {
+            return Err(invalid("loader binding changed during the callback"));
+        }
+        if observation.boot_id != context.boot_id
+            || observation.epoch != context.epoch
+            || context.binding.as_ref().is_some_and(|binding| {
+                observation.directory_identity != binding.recipient
+                    || observation.catalog_directory_identity != binding.source
+                    || observation.manifest_sha256 != binding.descriptor.manifest_sha256
+            })
+        {
+            return Err(invalid("callback is outside the bound generation"));
+        }
+        self.accept(observation);
+        Ok(())
+    }
+    /// Ownership of this exact readback namespace only. This is not loader,
+    /// authorization, installed-hook or behavior evidence.
+    pub(crate) fn owns_projection(&self, modules: &Path) -> bool {
+        let context = self.context.lock().expect("loader context");
+        let Some(context) = context.as_ref() else {
+            return false;
+        };
+        let Some(binding) = context.binding.as_ref() else {
+            return false;
+        };
+        if context.root != modules.join("vpnhide_core")
+            || context.recipient_root
+                != modules.join(vpnhide_protocol::zygisk_activation::MANAGED_MODULE_ID)
+        {
+            return false;
+        }
+        let matches = |path: &Path, expected| {
+            open_directory(path).is_ok_and(|file| {
+                file.metadata().is_ok_and(|metadata| {
+                    metadata.uid() == binding.owner_uid && metadata.mode() & 0o022 == 0
+                }) && directory_identity(&file).ok() == Some(expected)
+            })
+        };
+        matches(&context.root, binding.source)
+            && matches(&context.recipient_root, binding.recipient)
+    }
     pub fn enabled(&self) -> bool {
         self.context.lock().expect("loader context").is_some()
     }
@@ -896,6 +1092,7 @@ pub fn start(
         boot_id,
         epoch,
         catalog: Arc::new(Mutex::new(None)),
+        binding: None,
     };
     if context.boot_id.is_empty() || context.boot_id.len() > 128 {
         return Err(invalid("loader listener requires boot identity"));
@@ -911,13 +1108,15 @@ pub fn start(
                 return;
             };
             let registry = registry.clone();
-            let context = context.clone();
             tokio::task::spawn_blocking(move || {
                 let _permit = permit;
                 if cancel.is_cancelled() {
                     return;
                 }
                 let Ok(stream) = stream.into_std() else {
+                    return;
+                };
+                let Some(context) = registry.context.lock().expect("loader context").clone() else {
                     return;
                 };
                 let _ = receive_observation(stream, &context, &registry);
@@ -970,7 +1169,7 @@ fn receive_observation(
             "loader observation expired",
         ));
     }
-    registry.accept(observation);
+    registry.accept_current(context, observation)?;
     transport::send(
         &mut stream,
         &Acknowledgement {
@@ -1101,6 +1300,7 @@ mod tests {
             boot_id: "boot".into(),
             epoch: 7,
             catalog: Arc::new(Mutex::new(None)),
+            binding: None,
         };
         let observation = LoaderObservation {
             process: ProcessIdentity {
@@ -1635,6 +1835,216 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
+        assert!(!registry.available_at(&f.catalog, Abi::Arm64, false, &f.proc_root));
+    }
+    fn managed_image(
+        f: &Fixture,
+    ) -> (
+        PathBuf,
+        crate::maintenance::zygisk_projection::work::ActiveProjectionReadback,
+    ) {
+        use vpnhide_artifact_model::zygisk_projection::Descriptor;
+        let descriptor = Descriptor::bind(
+            &fs::read(f.context.root.join("payloads/manifest.json")).unwrap(),
+            8,
+        )
+        .unwrap();
+        let files = descriptor
+            .files(
+                &fs::read(f.context.root.join("payloads/zygisk/arm64-v8a.so")).unwrap(),
+                &fs::read(f.context.root.join("payloads/zygisk/armeabi-v7a.so")).unwrap(),
+            )
+            .unwrap();
+        let recipient = f
+            .context
+            .root
+            .parent()
+            .unwrap()
+            .join(vpnhide_protocol::zygisk_activation::MANAGED_MODULE_ID);
+        for (name, bytes) in files {
+            let path = recipient.join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
+        }
+        let image = crate::maintenance::zygisk_projection::ProjectionImage::inspect_owned(
+            &recipient,
+            &descriptor,
+            unsafe { libc::geteuid() },
+        )
+        .unwrap();
+        let source_core = f.context.root.join("vpnhide-core");
+        fs::copy(f.context.root.join("bin/arm64/vpnhide-core"), &source_core).unwrap();
+        fs::set_permissions(&source_core, fs::Permissions::from_mode(0o755)).unwrap();
+        let source = crate::maintenance::image::ImageFence::inspect(
+            &f.context.root,
+            None,
+            Abi::Arm64,
+            unsafe { libc::geteuid() },
+        )
+        .unwrap();
+        let readback = crate::maintenance::zygisk_projection::work::ActiveProjectionReadback {
+            source,
+            image,
+            source_directory: Arc::new(File::open(&f.context.root).unwrap()),
+            recipient_directory: Arc::new(File::open(&recipient).unwrap()),
+        };
+        (recipient, readback)
+    }
+    #[test]
+    fn a_bound_projection_pins_exact_source_and_recipient_without_promoting_packaging() {
+        let f = fixture();
+        let (recipient, image) = managed_image(&f);
+        let registry = LoaderRegistry::default();
+        *registry.context.lock().unwrap() = Some(f.context.clone());
+        registry
+            .bind_projection_owned(
+                &f.context.root,
+                &recipient,
+                &image,
+                unsafe { libc::geteuid() },
+                &f.context.boot_id,
+                f.context.epoch,
+            )
+            .unwrap();
+        assert!(
+            registry
+                .bind_projection_owned(
+                    &f.context.root,
+                    &recipient,
+                    &image,
+                    unsafe { libc::geteuid() },
+                    &f.context.boot_id,
+                    f.context.epoch + 1
+                )
+                .is_err()
+        );
+        assert!(
+            registry
+                .bind_projection_owned(
+                    &f.context.root,
+                    &recipient,
+                    &image,
+                    unsafe { libc::geteuid() },
+                    "other-boot",
+                    f.context.epoch
+                )
+                .is_err()
+        );
+        let bound = registry.context.lock().unwrap().clone().unwrap();
+        assert!(
+            LoaderSources::open(
+                &bound,
+                &File::open(&recipient).unwrap(),
+                Instant::now() + Duration::from_secs(1),
+                RecipientAccess::Live
+            )
+            .is_ok()
+        );
+        assert!(
+            LoaderSources::open(
+                &bound,
+                &File::open(&f.context.root).unwrap(),
+                Instant::now() + Duration::from_secs(1),
+                RecipientAccess::Live
+            )
+            .is_err()
+        );
+        assert!(!registry.available_at(&f.catalog, Abi::Arm64, false, &f.proc_root));
+        let mut wrong = bound.clone();
+        wrong.binding.as_mut().unwrap().source.1 += 1;
+        assert!(
+            pinned_generation(
+                &wrong,
+                &File::open(&f.context.root).unwrap(),
+                Instant::now() + Duration::from_secs(1)
+            )
+            .is_err()
+        );
+        let mut incomplete = image.clone();
+        incomplete.image.files.clear();
+        assert!(
+            registry
+                .bind_projection_owned(
+                    &f.context.root,
+                    &recipient,
+                    &incomplete,
+                    unsafe { libc::geteuid() },
+                    &f.context.boot_id,
+                    f.context.epoch
+                )
+                .is_err()
+        );
+        fs::set_permissions(&recipient, fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(
+            LoaderSources::open(
+                &bound,
+                &File::open(&recipient).unwrap(),
+                Instant::now() + Duration::from_secs(1),
+                RecipientAccess::Live
+            )
+            .is_err()
+        );
+        fs::set_permissions(&recipient, fs::Permissions::from_mode(0o755)).unwrap();
+        let old = recipient.with_file_name("old-recipient");
+        fs::rename(&recipient, &old).unwrap();
+        for name in [
+            "module.prop",
+            "vpnhide-projection.json",
+            "zygisk/arm64-v8a.so",
+            "zygisk/armeabi-v7a.so",
+        ] {
+            let path = recipient.join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::copy(old.join(name), path).unwrap();
+        }
+        assert_ne!(
+            directory_identity(&File::open(&recipient).unwrap()).unwrap(),
+            image.image.directory
+        );
+        assert!(
+            LoaderSources::open(
+                &bound,
+                &File::open(&recipient).unwrap(),
+                Instant::now() + Duration::from_secs(1),
+                RecipientAccess::Live
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn in_flight_callback_cannot_acknowledge_a_previous_binding_generation() {
+        let f = fixture();
+        let (recipient, image) = managed_image(&f);
+        let registry = LoaderRegistry::default();
+        *registry.context.lock().unwrap() = Some(f.context.clone());
+        let previous = registry.context.lock().unwrap().clone().unwrap();
+        registry
+            .bind_projection_owned(
+                &f.context.root,
+                &recipient,
+                &image,
+                unsafe { libc::geteuid() },
+                &f.context.boot_id,
+                f.context.epoch,
+            )
+            .unwrap();
+        let bound = registry.context.lock().unwrap().clone().unwrap();
+        assert!(
+            registry
+                .accept_current(&previous, f.observation.clone())
+                .is_err()
+        );
+        assert!(
+            registry
+                .accept_current(&bound, f.observation.clone())
+                .is_err()
+        );
+        assert!(registry.observations.lock().unwrap().is_empty());
+        let mut observation = f.observation.clone();
+        observation.directory_identity = image.image.directory;
+        observation._recipient_directory = Arc::new(File::open(&recipient).unwrap());
+        registry.accept_current(&bound, observation).unwrap();
+        assert_eq!(registry.observations.lock().unwrap().len(), 1);
         assert!(!registry.available_at(&f.catalog, Abi::Arm64, false, &f.proc_root));
     }
 }

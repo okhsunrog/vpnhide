@@ -195,12 +195,22 @@ pub fn observe(env: &NativeEnv, facts: &ScanFacts) -> Capabilities {
         KpmFact::Incompatible { .. } => Runtime::Unsupported,
         KpmFact::Broken(_) | KpmFact::Unrecognized(_) => Runtime::Unknown,
     };
-    let ownership = resident_ownership(
-        facts,
-        env.modules
-            .as_deref()
-            .is_some_and(|path| !crate::native_boot::obsolete_modules(path).is_empty()),
-    );
+    let unknown_projection = crate::native_boot::managed_projection_may_exist(env)
+        && !env.modules.as_deref().is_some_and(|modules| {
+            env.loader
+                .as_ref()
+                .is_some_and(|loader| loader.owns_projection(modules))
+        });
+    let ownership = if unknown_projection {
+        Ownership::Unknown
+    } else {
+        resident_ownership(
+            facts,
+            env.modules
+                .as_deref()
+                .is_some_and(|path| !crate::native_boot::obsolete_modules(path).is_empty()),
+        )
+    };
     Capabilities {
         // This is the Core executable/userspace ABI, not uname's kernel ABI.
         // A 32-bit Core on a 64-bit kernel conservatively cannot select our

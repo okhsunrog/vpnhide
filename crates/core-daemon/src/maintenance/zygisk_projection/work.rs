@@ -139,6 +139,16 @@ impl ProjectionWork {
         running: &File,
         uid: u32,
     ) -> io::Result<ProjectionObservation> {
+        self.observe_with_authority_owned(paths, boot, running, uid, None)
+    }
+    pub(crate) fn observe_with_authority_owned(
+        &self,
+        paths: &ProjectionPaths,
+        boot: &str,
+        running: &File,
+        uid: u32,
+        authority: Option<&crate::journal::ZygiskAuthorityRecord>,
+    ) -> io::Result<ProjectionObservation> {
         if !self.valid(self.operation.0) || !valid_boot(boot) || paths.boot()? != boot {
             return Err(invalid());
         }
@@ -146,13 +156,22 @@ impl ProjectionWork {
             return Ok(ProjectionObservation::NotDispatched);
         }
         paths.require_source_enabled(uid)?;
+        let source_directory = std::sync::Arc::new(directory(&paths.source())?);
         let source = ImageFence::inspect(&paths.source(), None, crate::payloads::Abi::Arm64, uid)?;
+        if source.root != identity(&source_directory)? {
+            return Err(invalid());
+        }
         source.require_running_owned(running, uid)?;
         if boot == self.boot_id {
             if source != self.source {
                 return Err(invalid());
             }
-            let observed = ProjectionStaging::inspect_owned(paths, &self.descriptor, uid)?;
+            let observed = ProjectionStaging::inspect_with_authority_owned(
+                paths,
+                &self.descriptor,
+                uid,
+                authority,
+            )?;
             if self
                 .staging
                 .as_ref()
@@ -166,18 +185,45 @@ impl ProjectionWork {
                 return Err(invalid());
             }
             absent(&paths.staged())?;
-            let active = ProjectionImage::inspect_owned(&paths.active(), &self.descriptor, uid)?;
-            Ok(ProjectionObservation::ActiveAfterBoot(active))
+            let recipient_directory = std::sync::Arc::new(directory(&paths.active())?);
+            let active = ProjectionImage::inspect_with_authority_owned(
+                &paths.active(),
+                &self.descriptor,
+                uid,
+                authority,
+            )?;
+            if active.directory != identity(&recipient_directory)?
+                || identity(&directory(&paths.source())?)? != source.root
+            {
+                return Err(invalid());
+            }
+            Ok(ProjectionObservation::ActiveAfterBoot(
+                ActiveProjectionReadback {
+                    source,
+                    image: active,
+                    source_directory,
+                    recipient_directory,
+                },
+            ))
         }
     }
 }
 
 /// Packaging observations only, never backend delivery or behavior proof.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum ProjectionObservation {
     NotDispatched,
     PreparedInSameBoot(ProjectionStaging),
-    ActiveAfterBoot(ProjectionImage),
+    ActiveAfterBoot(ActiveProjectionReadback),
+}
+/// Ephemeral leases close the readback-to-binding directory ABA window. These
+/// handles are not persisted and never substitute for current byte inspection.
+#[derive(Debug, Clone)]
+pub struct ActiveProjectionReadback {
+    pub source: ImageFence,
+    pub image: ProjectionImage,
+    pub(crate) source_directory: std::sync::Arc<File>,
+    pub(crate) recipient_directory: std::sync::Arc<File>,
 }
 pub(super) fn valid_boot(boot: &str) -> bool {
     vpnhide_protocol::zygisk_activation::Authorization {

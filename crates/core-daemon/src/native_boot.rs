@@ -562,6 +562,15 @@ pub fn obsolete_modules(modules_root: &Path) -> Vec<String> {
         .collect()
 }
 
+/// Directory absence is the only negative observation. Disabled/removed trees,
+/// links and unreadable metadata cannot prove that earlier process hooks exited.
+pub(crate) fn managed_projection_may_exist(env: &NativeEnv) -> bool {
+    env.modules.as_ref().is_some_and(|modules| {
+        !matches!(fs::symlink_metadata(modules.join(vpnhide_protocol::zygisk_activation::MANAGED_MODULE_ID)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+    })
+}
+
 pub fn gather(env: &NativeEnv, kpm: KpmFact) -> ScanFacts {
     let mut installed = Vec::new();
     let mut staged = Vec::new();

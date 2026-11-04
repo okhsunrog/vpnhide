@@ -1,7 +1,7 @@
 use super::*;
 use std::os::unix::fs::{PermissionsExt, symlink};
 
-fn fixture() -> (tempfile::TempDir, PreparedProjection) {
+pub(crate) fn fixture() -> (tempfile::TempDir, PreparedProjection) {
     fixture_libraries(0)
 }
 

@@ -1337,4 +1337,51 @@ mod tests {
             [NativeBackend::Kmod]
         );
     }
+    #[test]
+    fn managed_residue_before_or_after_intent_never_dispatches_a_kernel_load() {
+        for after_begin in [false, true] {
+            let (temp, prepared) = frozen_single();
+            let residue = prepared
+                .env
+                .modules
+                .as_ref()
+                .unwrap()
+                .join(vpnhide_protocol::zygisk_activation::MANAGED_MODULE_ID)
+                .join("module.prop");
+            if !after_begin {
+                fs::create_dir_all(residue.parent().unwrap()).unwrap();
+                fs::write(&residue, b"id=unowned").unwrap();
+            }
+            let mut writer = Writer {
+                journal: Default::default(),
+                path: temp.path().join("journal"),
+                writes: 0,
+                fail_at: 0,
+                policies: vec![],
+                appear_during_begin: after_begin.then_some(residue),
+            };
+            let mut effects = 0;
+            let result = crate::native_boot::transition::activate_with(
+                prepared,
+                &mut writer,
+                1,
+                false,
+                |p, e| {
+                    effects += 1;
+                    rejected(p, e, true)
+                },
+            );
+            assert_eq!(effects, 0);
+            assert_eq!(
+                result.err(),
+                Some(if after_begin {
+                    vpnhide_core_rpc::PhaseOutcome::Unknown
+                } else {
+                    vpnhide_core_rpc::PhaseOutcome::FailedKnown
+                })
+            );
+            assert_eq!(writer.journal.native_startup_uncertain(), after_begin);
+            assert_eq!(writer.journal.native_load_budget.is_some(), after_begin);
+        }
+    }
 }

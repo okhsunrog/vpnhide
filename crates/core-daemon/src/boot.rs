@@ -90,6 +90,17 @@ pub fn run_boot_with_native(
         return report;
     }
     if let Some((env, epoch)) = native {
+        if let Err(reason) = state.bind_projection_for_boot(&env, epoch) {
+            let report = BootApplyReport {
+                status: BootApplyStatus::Refused {
+                    reason: reason.clone(),
+                },
+                op: None,
+                detail: format!("Managed discovery generation unverified: {reason}"),
+            };
+            report.write_status_file(&default_boot_status_path());
+            return report;
+        }
         if state.loader().enabled()
             && let Err(reason) = state.loader().probe_worker()
         {

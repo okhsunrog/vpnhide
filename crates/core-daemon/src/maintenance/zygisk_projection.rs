@@ -124,7 +124,15 @@ impl ProjectionImage {
     pub fn inspect(path: &Path, expected: &Descriptor) -> io::Result<Self> {
         Self::inspect_owned(path, expected, 0)
     }
-    fn inspect_owned(path: &Path, expected: &Descriptor, uid: u32) -> io::Result<Self> {
+    pub(crate) fn inspect_owned(path: &Path, expected: &Descriptor, uid: u32) -> io::Result<Self> {
+        Self::inspect_with_authority_owned(path, expected, uid, None)
+    }
+    fn inspect_with_authority_owned(
+        path: &Path,
+        expected: &Descriptor,
+        uid: u32,
+        authority: Option<&crate::journal::ZygiskAuthorityRecord>,
+    ) -> io::Result<Self> {
         expected.validate()?;
         let root = directory(path)?;
         let stat = root.metadata()?;
@@ -132,23 +140,50 @@ impl ProjectionImage {
             return Err(invalid());
         }
         let deadline = Instant::now() + BUDGET;
-        let allowed = BTreeSet::from([
+        let mut allowed = BTreeSet::from([
             "module.prop".into(),
             FILE_NAME.into(),
             "update".into(),
             Descriptor::member_name(crate::payloads::Abi::Arm64),
             Descriptor::member_name(crate::payloads::Abi::Arm32),
         ]);
-        require_layout(
-            &root,
-            &allowed,
-            &BTreeSet::from([
-                Descriptor::member_name(crate::payloads::Abi::Arm64),
-                Descriptor::member_name(crate::payloads::Abi::Arm32),
-            ]),
-            uid,
-            deadline,
-        )?;
+        let authorization_file = vpnhide_protocol::zygisk_activation::FILE_NAME;
+        let pinned = PathBuf::from(format!("/proc/self/fd/{}", root.as_raw_fd()));
+        let authorization_image = match fs::symlink_metadata(pinned.join(authorization_file)) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e),
+            Ok(_) => {
+                let authority = authority.ok_or_else(invalid)?;
+                let reference = authority.reference().ok_or_else(invalid)?;
+                if authority.intent.zygisk_module.as_deref() != Some(path)
+                    || (reference.directory_device, reference.directory_inode) != identity(&root)?
+                {
+                    return Err(invalid());
+                }
+                let (raw, image) = bytes(
+                    &root,
+                    authorization_file,
+                    vpnhide_protocol::zygisk_activation::MAX_BYTES as u64,
+                    uid,
+                    deadline,
+                )?;
+                let grant = vpnhide_protocol::zygisk_activation::Authorization::decode(
+                    &raw,
+                    &reference.boot_id,
+                )
+                .ok_or_else(invalid)?;
+                if grant.generation != reference.generation || grant.wire != authority.intent.wire {
+                    return Err(invalid());
+                }
+                allowed.insert(authorization_file.into());
+                Some(image)
+            }
+        };
+        let large_files = BTreeSet::from([
+            Descriptor::member_name(crate::payloads::Abi::Arm64),
+            Descriptor::member_name(crate::payloads::Abi::Arm32),
+        ]);
+        require_layout(&root, &allowed, &large_files, uid, deadline)?;
         let (prop, _) = bytes(
             &root,
             "module.prop",
@@ -203,6 +238,21 @@ impl ProjectionImage {
             }
             files.insert(name, actual);
         }
+        if let Some(expected) = authorization_image {
+            let (_, current) = bytes(
+                &root,
+                authorization_file,
+                vpnhide_protocol::zygisk_activation::MAX_BYTES as u64,
+                uid,
+                deadline,
+            )?;
+            if current != expected {
+                return Err(invalid());
+            }
+        } else {
+            absent(&pinned.join(authorization_file))?;
+        }
+        require_layout(&root, &allowed, &large_files, uid, deadline)?;
         if identity(&directory(path)?)? != identity(&root)? {
             return Err(invalid());
         }
@@ -212,7 +262,7 @@ impl ProjectionImage {
             files,
         })
     }
-    fn valid_for(&self, expected: &Descriptor) -> bool {
+    pub(crate) fn valid_for(&self, expected: &Descriptor) -> bool {
         self.directory.1 > 0
             && self.descriptor == *expected
             && self.files.len() == 3
@@ -388,6 +438,14 @@ impl ProjectionStaging {
             })
     }
     fn inspect_owned(paths: &ProjectionPaths, expected: &Descriptor, uid: u32) -> io::Result<Self> {
+        Self::inspect_with_authority_owned(paths, expected, uid, None)
+    }
+    fn inspect_with_authority_owned(
+        paths: &ProjectionPaths,
+        expected: &Descriptor,
+        uid: u32,
+        authority: Option<&crate::journal::ZygiskAuthorityRecord>,
+    ) -> io::Result<Self> {
         let staged = match fs::symlink_metadata(paths.staged()) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => None,
             Err(e) => return Err(e),
@@ -408,10 +466,11 @@ impl ProjectionStaging {
                 }
                 match fs::symlink_metadata(paths.active().join(FILE_NAME)) {
                     Ok(_) => Some(ActiveProjection::Complete {
-                        image: Box::new(ProjectionImage::inspect_owned(
+                        image: Box::new(ProjectionImage::inspect_with_authority_owned(
                             &paths.active(),
                             expected,
                             uid,
+                            authority,
                         )?),
                     }),
                     Err(e) if e.kind() == io::ErrorKind::NotFound => {
@@ -468,4 +527,4 @@ impl ProjectionStaging {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

@@ -278,6 +278,15 @@ impl Prepared {
         }
     }
     pub(crate) fn validate_binding(&self) -> Result<(), String> {
+        if matches!(
+            self.intent.action,
+            TransitionAction::Load(NativeBackend::Kmod | NativeBackend::Kpm)
+        ) && super::managed_projection_may_exist(&self.env)
+        {
+            return Err(
+                "kernel load refused while managed discovery may retain process hooks".into(),
+            );
+        }
         bundled::validate_binding(self.intent.bundle.as_ref())
     }
 

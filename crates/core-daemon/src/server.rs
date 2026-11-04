@@ -30,6 +30,7 @@ use crate::operation::{self, PhaseHook, PlanKind, RealPhaseRunner};
 use crate::publisher::Publisher;
 pub(crate) mod backend_choice;
 mod core_maintenance;
+mod projection_boot;
 mod revocation;
 mod root_probe_admission;
 mod self_target;

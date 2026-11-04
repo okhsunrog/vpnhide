@@ -100,7 +100,12 @@ filesystem evidence fixtures, not certification of a provider's scan/boot lifecy
 
 A journal17 work/dispatch component now enforces persistence before manager spawn,
 retains uncertain outcomes without redispatch and provides read-only boot/code
-observations. The current public chooser is not yet connected to it; its caller
+observations. Production boot now binds the exact confirmed active generation
+to the loader before probing/selection, with source/recipient directory leases and
+exact retained authority readback. Unknown residue records a possible-exposure
+fence, and new kernel loads recheck residue around durable admission. This is
+read-only code/namespace evidence, not authorization or backend readiness.
+The current public chooser is not yet connected to dispatch; its caller
 must be the existing writer and bootstrap authorization remains incomplete. New managed recipients
 require current-boot journaled authority and exact consumed generation/policy proof;
 an empty bootstrap proves code/consumption only, never hooks or behavioral coverage.

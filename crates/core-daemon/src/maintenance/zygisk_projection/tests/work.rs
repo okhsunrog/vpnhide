@@ -512,3 +512,98 @@ fn later_physical_readback_cannot_rewrite_a_terminal_unknown_or_its_warning() {
     );
     assert_eq!(restored, before);
 }
+
+#[test]
+fn runtime_code_accepts_only_the_exact_retained_authority_not_arbitrary_activation() {
+    use std::os::unix::fs::MetadataExt;
+    let (_root, prepared) = fixture();
+    let mut owner = Owner::new(&prepared);
+    let work = prepared
+        .dispatch(prepared.work(request()).unwrap(), |w| owner.persist(w))
+        .unwrap();
+    fs::rename(prepared.paths.staged(), prepared.paths.active()).unwrap();
+    fs::write(
+        prepared.paths.root.join("proc/sys/kernel/random/boot_id"),
+        BOOT_B,
+    )
+    .unwrap();
+    let active = prepared.paths.active();
+    let meta = fs::metadata(&active).unwrap();
+    let wire = vpnhide_protocol::format_config(false, 0, &[]);
+    let grant = vpnhide_protocol::zygisk_activation::Authorization {
+        boot_id: BOOT_B.into(),
+        generation: 9,
+        wire: wire.clone(),
+    };
+    let authority = journal::ZygiskAuthorityRecord {
+        operation: vpnhide_core_rpc::OperationId(9),
+        intent: journal::NativeIntent {
+            backend: NativeBackend::Zygisk,
+            wire,
+            zygisk_module: Some(active.clone()),
+            zygisk_authorization: Some(journal::ZygiskAuthorizationIntent {
+                boot_id: BOOT_B.into(),
+                generation: 9,
+                directory_identity: (meta.dev(), meta.ino()),
+            }),
+        },
+    };
+    let auth_path = active.join(vpnhide_protocol::zygisk_activation::FILE_NAME);
+    fs::write(&auth_path, grant.encode().unwrap()).unwrap();
+    assert!(
+        work.observe_owned(&prepared.paths, BOOT_B, &prepared.running, prepared.uid)
+            .is_err()
+    );
+    assert!(matches!(
+        work.observe_with_authority_owned(
+            &prepared.paths,
+            BOOT_B,
+            &prepared.running,
+            prepared.uid,
+            Some(&authority)
+        )
+        .unwrap(),
+        ProjectionObservation::ActiveAfterBoot(_)
+    ));
+    for variant in 0..5 {
+        let mut wrong = authority.clone();
+        match variant {
+            0 => wrong.operation.0 += 1,
+            1 => wrong.intent.zygisk_module = Some(prepared.paths.source()),
+            2 => wrong.intent.zygisk_authorization.as_mut().unwrap().boot_id = BOOT_A.into(),
+            3 => {
+                wrong
+                    .intent
+                    .zygisk_authorization
+                    .as_mut()
+                    .unwrap()
+                    .directory_identity
+                    .1 += 1
+            }
+            _ => wrong.intent.wire = vpnhide_protocol::format_config(true, 0, &[]),
+        }
+        assert!(
+            work.observe_with_authority_owned(
+                &prepared.paths,
+                BOOT_B,
+                &prepared.running,
+                prepared.uid,
+                Some(&wrong)
+            )
+            .is_err(),
+            "variant {variant}"
+        );
+    }
+    fs::remove_file(&auth_path).unwrap();
+    symlink("module.prop", &auth_path).unwrap();
+    assert!(
+        work.observe_with_authority_owned(
+            &prepared.paths,
+            BOOT_B,
+            &prepared.running,
+            prepared.uid,
+            Some(&authority)
+        )
+        .is_err()
+    );
+}

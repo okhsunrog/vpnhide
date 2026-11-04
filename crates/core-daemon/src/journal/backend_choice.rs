@@ -24,7 +24,7 @@ impl BackendChoiceRecord {
     }
 }
 
-pub(super) fn validate_entries(journal: &super::Journal) -> bool {
+pub(crate) fn validate_entries(journal: &super::Journal) -> bool {
     use vpnhide_core_rpc::{ConfigEdit, ConfigPhase, PhaseOutcome};
     for entry in &journal.operations {
         let Some(super::CommandIntent::StageBackendChoice { request }) = &entry.command else {
