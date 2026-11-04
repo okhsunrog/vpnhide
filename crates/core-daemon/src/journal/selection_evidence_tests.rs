@@ -37,6 +37,7 @@ fn intent(evidence: Option<NativeSelectionEvidence>) -> TransitionIntent {
             init_contract: Some(1),
         }),
         bundle: Some(BundleIdentity {
+            zygisk_recipient: None,
             manifest_file_sha256: Some("c".repeat(64)),
             root: "/verified".into(),
             manifest_sha256: "a".repeat(64),

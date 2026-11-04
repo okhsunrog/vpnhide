@@ -41,6 +41,7 @@ fn fixture() -> (tempfile::TempDir, Arc<CoreState>, PreparedBackendChoice) {
     let catalog = Catalog::open(&bundle).unwrap();
     let metadata = std::fs::metadata(&bundle).unwrap();
     let binding = BundleIdentity {
+        zygisk_recipient: None,
         root: bundle,
         manifest_sha256: format!("{:x}", Sha256::digest(&bytes)),
         manifest_file_sha256: Some(format!("{:x}", Sha256::digest(&bytes))),

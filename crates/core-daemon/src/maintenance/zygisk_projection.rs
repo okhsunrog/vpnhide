@@ -120,6 +120,10 @@ pub struct ProjectionImage {
     pub descriptor: Descriptor,
     pub files: BTreeMap<String, ImageFile>,
 }
+enum AuthorityInspection<'a> {
+    Exact(Option<&'a crate::journal::ZygiskAuthorityRecord>),
+    CodeOnly,
+}
 impl ProjectionImage {
     pub fn inspect(path: &Path, expected: &Descriptor) -> io::Result<Self> {
         Self::inspect_owned(path, expected, 0)
@@ -132,6 +136,23 @@ impl ProjectionImage {
         expected: &Descriptor,
         uid: u32,
         authority: Option<&crate::journal::ZygiskAuthorityRecord>,
+    ) -> io::Result<Self> {
+        Self::inspect_mode_owned(path, expected, uid, AuthorityInspection::Exact(authority))
+    }
+    /// Code/namespace evidence only. An optional authorization file is bounded
+    /// and pinned as opaque bytes; it confers no authority or consumption proof.
+    pub(crate) fn inspect_code_owned(
+        path: &Path,
+        expected: &Descriptor,
+        uid: u32,
+    ) -> io::Result<Self> {
+        Self::inspect_mode_owned(path, expected, uid, AuthorityInspection::CodeOnly)
+    }
+    fn inspect_mode_owned(
+        path: &Path,
+        expected: &Descriptor,
+        uid: u32,
+        authority: AuthorityInspection<'_>,
     ) -> io::Result<Self> {
         expected.validate()?;
         let root = directory(path)?;
@@ -153,13 +174,6 @@ impl ProjectionImage {
             Err(e) if e.kind() == io::ErrorKind::NotFound => None,
             Err(e) => return Err(e),
             Ok(_) => {
-                let authority = authority.ok_or_else(invalid)?;
-                let reference = authority.reference().ok_or_else(invalid)?;
-                if authority.intent.zygisk_module.as_deref() != Some(path)
-                    || (reference.directory_device, reference.directory_inode) != identity(&root)?
-                {
-                    return Err(invalid());
-                }
                 let (raw, image) = bytes(
                     &root,
                     authorization_file,
@@ -167,13 +181,23 @@ impl ProjectionImage {
                     uid,
                     deadline,
                 )?;
-                let grant = vpnhide_protocol::zygisk_activation::Authorization::decode(
-                    &raw,
-                    &reference.boot_id,
-                )
-                .ok_or_else(invalid)?;
-                if grant.generation != reference.generation || grant.wire != authority.intent.wire {
-                    return Err(invalid());
+                if let AuthorityInspection::Exact(exact) = authority {
+                    let exact = exact.ok_or_else(invalid)?;
+                    let reference = exact.reference().ok_or_else(invalid)?;
+                    if exact.intent.zygisk_module.as_deref() != Some(path)
+                        || (reference.directory_device, reference.directory_inode)
+                            != identity(&root)?
+                    {
+                        return Err(invalid());
+                    }
+                    let grant = vpnhide_protocol::zygisk_activation::Authorization::decode(
+                        &raw,
+                        &reference.boot_id,
+                    )
+                    .ok_or_else(invalid)?;
+                    if grant.generation != reference.generation || grant.wire != exact.intent.wire {
+                        return Err(invalid());
+                    }
                 }
                 allowed.insert(authorization_file.into());
                 Some(image)

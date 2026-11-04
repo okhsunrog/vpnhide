@@ -263,6 +263,7 @@ mod tests {
                 action: TransitionAction::Load(NativeBackend::Kmod),
                 payload: Some(payload),
                 bundle: Some(BundleIdentity {
+                    zygisk_recipient: None,
                     manifest_file_sha256: None,
                     root: "/bundle".into(),
                     manifest_sha256: "b".repeat(64),

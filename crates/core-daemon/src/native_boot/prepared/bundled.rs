@@ -19,6 +19,47 @@ pub struct BundleIdentity {
     #[serde(default)]
     pub root_identity: Option<(u64, u64)>,
     pub wire: String,
+    /// Independent managed recipient, frozen before any authority is admitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zygisk_recipient: Option<ZygiskRecipientBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ZygiskRecipientBinding {
+    pub path: PathBuf,
+    pub image: crate::maintenance::zygisk_projection::ProjectionImage,
+}
+impl BundleIdentity {
+    pub(crate) fn valid_recipient(&self) -> bool {
+        self.zygisk_recipient.as_ref().is_none_or(|recipient| {
+            self.root_identity.is_some_and(|(_, inode)| inode > 0)
+                && self.root.is_absolute()
+                && self
+                    .root
+                    .file_name()
+                    .is_some_and(|name| name == "vpnhide_core")
+                && self
+                    .root
+                    .parent()
+                    .map(|p| p.join(vpnhide_protocol::zygisk_activation::MANAGED_MODULE_ID))
+                    .as_ref()
+                    == Some(&recipient.path)
+                && recipient.image.descriptor.validate().is_ok()
+                && recipient.image.valid_for(&recipient.image.descriptor)
+                && recipient.image.descriptor.source_commit == self.source_commit
+                && recipient.image.descriptor.manifest_sha256 == self.manifest_sha256
+                && self.manifest_file_sha256.as_ref()
+                    == Some(&recipient.image.descriptor.manifest_file_sha256)
+        })
+    }
+    pub(crate) fn recipient(&self) -> (&Path, Option<(u64, u64)>) {
+        self.zygisk_recipient
+            .as_ref()
+            .map_or((self.root.as_path(), self.root_identity), |r| {
+                (r.path.as_path(), Some(r.image.directory))
+            })
+    }
 }
 
 pub(super) fn manifest_digest(manifest: &Manifest) -> String {
@@ -173,6 +214,7 @@ pub(crate) fn preview_choice(
             source_commit: catalog.manifest.bundle_commit,
             root_identity: Some(catalog.root_identity),
             wire: String::new(),
+            zygisk_recipient: None,
         },
     })
 }
@@ -317,9 +359,22 @@ impl Prepared {
         } else {
             None
         };
-        if backend == NativeBackend::Zygisk {
-            env.zygisk_module = Some(root.clone());
-        }
+        let zygisk_recipient = if backend == NativeBackend::Zygisk {
+            let recipient = env
+                .loader
+                .as_ref()
+                .ok_or("verified Zygisk loader context unavailable")?
+                .managed_recipient(catalog)
+                .map_err(|e| e.to_string())?;
+            env.zygisk_module = Some(
+                recipient
+                    .as_ref()
+                    .map_or_else(|| root.clone(), |r| r.path.clone()),
+            );
+            recipient
+        } else {
+            None
+        };
         let plan = if load {
             Plan::Load(backend)
         } else {
@@ -351,6 +406,7 @@ impl Prepared {
             manifest_file_sha256: Some(catalog.manifest_sha256.clone()),
             source_commit: catalog.manifest.bundle_commit.clone(),
             wire: projected.wire,
+            zygisk_recipient,
         });
         prepared.env.bundle_identity = prepared.intent.bundle.clone();
         Ok(prepared)
@@ -358,9 +414,18 @@ impl Prepared {
 }
 
 pub(super) fn validate_binding(binding: Option<&BundleIdentity>) -> Result<(), String> {
+    validate_binding_owned(binding, 0)
+}
+pub(crate) fn validate_binding_owned(
+    binding: Option<&BundleIdentity>,
+    uid: u32,
+) -> Result<(), String> {
     let Some(binding) = binding else {
         return Ok(());
     };
+    if !binding.valid_recipient() {
+        return Err("prepared recipient is outside the frozen source namespace".into());
+    }
     let catalog = verified_catalog(&binding.root)?;
     if binding
         .root_identity
@@ -373,6 +438,17 @@ pub(super) fn validate_binding(binding: Option<&BundleIdentity>) -> Result<(), S
         || catalog.manifest.bundle_commit != binding.source_commit
     {
         return Err("prepared bundle generation changed; no effect dispatched".into());
+    }
+    if let Some(recipient) = &binding.zygisk_recipient {
+        let actual = crate::maintenance::zygisk_projection::ProjectionImage::inspect_code_owned(
+            &recipient.path,
+            &recipient.image.descriptor,
+            uid,
+        )
+        .map_err(|e| e.to_string())?;
+        if actual != recipient.image {
+            return Err("prepared managed recipient generation changed".into());
+        }
     }
     Ok(())
 }
@@ -404,8 +480,15 @@ fn resident_support(
 /// Rebind only the same active generation. A staged/replaced bundle cannot change
 /// the recipient or pretend it is the payload retained by an earlier startup.
 pub fn restore_environment(
+    env: NativeEnv,
+    intent: Option<&TransitionIntent>,
+) -> Result<NativeEnv, String> {
+    restore_environment_owned(env, intent, 0)
+}
+fn restore_environment_owned(
     mut env: NativeEnv,
     intent: Option<&TransitionIntent>,
+    uid: u32,
 ) -> Result<NativeEnv, String> {
     let active = active_root(&env)?;
     let Some(binding) = intent.and_then(|i| i.bundle.as_ref()) else {
@@ -420,6 +503,7 @@ pub fn restore_environment(
     if active.as_ref() != Some(&binding.root) {
         return Err("active bundle root changed".into());
     }
+    validate_binding_owned(Some(binding), uid)?;
     let catalog = verified_catalog(&binding.root)?;
     catalog
         .manifest
@@ -450,7 +534,7 @@ pub fn restore_environment(
         env.payload_override = Some(payload.source.clone());
     }
     if intent.action == TransitionAction::Adopt(NativeBackend::Zygisk) {
-        env.zygisk_module = Some(binding.root.clone());
+        env.zygisk_module = Some(binding.recipient().0.to_owned());
     }
     Ok(env)
 }
@@ -502,6 +586,221 @@ mod tests {
     use crate::payloads::{Abi, KMIS, Payload, PayloadKind, selection::Ownership};
     use std::io::{Seek, SeekFrom};
     use vpnhide_core_rpc::{AppConfig, NativeRole};
+
+    #[test]
+    fn managed_policy_recipient_is_frozen_independently_of_catalog_and_never_rediscovered() {
+        let (_root, env) = crate::maintenance::zygisk_projection::tests::active_binding_fixture();
+        let binding = env.bundle_identity.as_ref().unwrap();
+        let uid = unsafe { libc::geteuid() };
+        validate_binding_owned(Some(binding), uid).unwrap();
+        let intent = TransitionIntent {
+            selection_evidence: None,
+            boot_id: "boot".into(),
+            filesystem_hiding: false,
+            action: TransitionAction::Adopt(NativeBackend::Zygisk),
+            payload: None,
+            bundle: Some(binding.clone()),
+            retire_zygisk: None,
+            retire_directory_identity: None,
+        };
+        let mut stale_env = env.clone();
+        stale_env.zygisk_module = Some(binding.root.clone());
+        let restored = restore_environment_owned(stale_env, Some(&intent), uid).unwrap();
+        assert_eq!(
+            restored.zygisk_module.as_deref(),
+            Some(binding.recipient().0)
+        );
+        assert_ne!(binding.recipient().0, binding.root);
+        assert_eq!(binding.recipient().0, env.zygisk_module.as_deref().unwrap());
+        let manifest_path = binding.root.join("payloads/manifest.json");
+        let raw = fs::read(&manifest_path).unwrap();
+        let mut changed = raw.clone();
+        changed.extend_from_slice(b"\n ");
+        fs::write(&manifest_path, changed).unwrap();
+        assert!(restore_environment_owned(env.clone(), Some(&intent), uid).is_err());
+        fs::write(&manifest_path, raw).unwrap();
+        for variant in 0..4 {
+            let mut wrong = binding.clone();
+            match variant {
+                0 => wrong.zygisk_recipient.as_mut().unwrap().path = binding.root.clone(),
+                1 => wrong.zygisk_recipient.as_mut().unwrap().image.directory.1 += 1,
+                2 => wrong.manifest_file_sha256 = Some("f".repeat(64)),
+                _ => {
+                    wrong.zygisk_recipient.as_mut().unwrap().image.files.clear();
+                }
+            }
+            assert!(validate_binding_owned(Some(&wrong), uid).is_err());
+        }
+        // Replacing a directory with identical code bytes is a different recipient.
+        let recipient = binding.zygisk_recipient.as_ref().unwrap();
+        let old = recipient.path.with_extension("old");
+        fs::rename(&recipient.path, &old).unwrap();
+        fs::create_dir_all(recipient.path.join("zygisk")).unwrap();
+        for name in [
+            "module.prop",
+            "vpnhide-projection.json",
+            "zygisk/arm64-v8a.so",
+            "zygisk/armeabi-v7a.so",
+        ] {
+            fs::copy(old.join(name), recipient.path.join(name)).unwrap();
+        }
+        assert!(validate_binding_owned(Some(binding), uid).is_err());
+        assert!(restore_environment_owned(env.clone(), Some(&intent), uid).is_err());
+        assert!(
+            env.loader
+                .as_ref()
+                .unwrap()
+                .managed_recipient(&Catalog::open(&binding.root).unwrap())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn prepared_managed_policy_binds_the_configured_recipient_instead_of_core_directory() {
+        let (_root, mut env) =
+            crate::maintenance::zygisk_projection::tests::active_binding_fixture();
+        let (_unused, _, _, config, packages, mut capabilities) = fixture();
+        capabilities.zygisk = Runtime::Ready;
+        let mut support = support();
+        support.push((
+            NativeBackend::Zygisk,
+            compiled(ZYGISK_HOOK_MASK, 65536, false),
+        ));
+        env.backend_choice = vpnhide_core_rpc::BackendChoice::Fixed {
+            backend: NativeBackend::Zygisk,
+        };
+        let root = env.bundle_identity.as_ref().unwrap().root.clone();
+        let prepared = Prepared::bind_bundle(
+            env,
+            false,
+            facts(),
+            None,
+            root.clone(),
+            verified_catalog(&root).unwrap(),
+            &config,
+            &packages,
+            &capabilities,
+            &support,
+        )
+        .unwrap();
+        assert_eq!(prepared.selected(), Some(NativeBackend::Zygisk));
+        let binding = prepared.intent.bundle.as_ref().unwrap();
+        assert!(binding.zygisk_recipient.is_some());
+        assert_eq!(
+            prepared.environment().zygisk_module.as_deref(),
+            Some(binding.recipient().0)
+        );
+        assert_ne!(binding.recipient().0, root);
+        validate_binding_owned(Some(binding), unsafe { libc::geteuid() }).unwrap();
+        assert!(
+            !binding
+                .recipient()
+                .0
+                .join(vpnhide_protocol::zygisk_activation::FILE_NAME)
+                .exists()
+        );
+    }
+
+    #[test]
+    fn recipient_journal18_recovery_preserves_old_holds_and_rejects_older_schema_or_wrong_family() {
+        let (root, env) = crate::maintenance::zygisk_projection::tests::active_binding_fixture();
+        let binding = env.bundle_identity.unwrap();
+        let intent = TransitionIntent {
+            selection_evidence: None,
+            boot_id: "boot".into(),
+            filesystem_hiding: false,
+            action: TransitionAction::Adopt(NativeBackend::Zygisk),
+            payload: None,
+            bundle: Some(binding),
+            retire_zygisk: None,
+            retire_directory_identity: None,
+        };
+        let mut journal = crate::journal::Journal {
+            issued_through: 19,
+            expired_through: 3,
+            expired_holds: vec![
+                vpnhide_core_rpc::ConfigPhase::Native,
+                vpnhide_core_rpc::ConfigPhase::Ports,
+            ],
+            native_startup: Some(crate::journal::NativeStartup {
+                boot_id: "boot".into(),
+                config_revision: 8,
+                filesystem_hiding: false,
+                intent: Some(intent),
+                repair_op: None,
+                completed: None,
+            }),
+            ..crate::journal::read(&root.path().join("persistent/journal.json")).unwrap()
+        };
+        let path = root.path().join("test-journal.json");
+        crate::journal::write_atomic(&path, &journal).unwrap();
+        let recovered = crate::journal::read(&path).unwrap();
+        assert_eq!(recovered.native_startup, journal.native_startup);
+        assert_eq!(recovered.expired_holds, journal.expired_holds);
+        assert_eq!(recovered.issued_through, 19);
+        assert_eq!(recovered.expired_through, 3);
+        assert!(recovered.zygisk_exposed_in("boot"));
+        let mut unowned = journal.clone();
+        unowned.zygisk_projection = None;
+        crate::journal::write_atomic(&path, &unowned).unwrap();
+        assert!(crate::journal::read(&path).is_err());
+        let mut historical = unowned.clone();
+        historical
+            .native_attempts
+            .push(crate::journal::NativeAttemptHistory {
+                attempt: historical.native_startup.take().unwrap(),
+                superseded_by: None,
+            });
+        crate::journal::write_atomic(&path, &historical).unwrap();
+        let recovered = crate::journal::read(&path).unwrap();
+        assert_eq!(recovered.native_attempts, historical.native_attempts);
+        assert_eq!(recovered.expired_holds, historical.expired_holds);
+        let recipient = historical.native_attempts[0]
+            .attempt
+            .intent
+            .as_mut()
+            .unwrap()
+            .bundle
+            .as_mut()
+            .unwrap()
+            .zygisk_recipient
+            .as_mut()
+            .unwrap();
+        recipient.image.descriptor.operation = 20;
+        crate::journal::write_atomic(&path, &historical).unwrap();
+        assert!(crate::journal::read(&path).is_err());
+        journal.version = 17;
+        crate::journal::write_atomic(&path, &journal).unwrap();
+        assert!(crate::journal::read(&path).is_err());
+        let mut legacy = journal.clone();
+        legacy
+            .native_startup
+            .as_mut()
+            .unwrap()
+            .intent
+            .as_mut()
+            .unwrap()
+            .bundle
+            .as_mut()
+            .unwrap()
+            .zygisk_recipient = None;
+        crate::journal::write_atomic(&path, &legacy).unwrap();
+        let migrated = crate::journal::read(&path).unwrap();
+        assert_eq!(migrated.version, vpnhide_build_contract::JOURNAL_VERSION);
+        assert_eq!(migrated.expired_holds, legacy.expired_holds);
+        assert_eq!(migrated.native_startup, legacy.native_startup);
+        journal.version = vpnhide_build_contract::JOURNAL_VERSION;
+        journal
+            .native_startup
+            .as_mut()
+            .unwrap()
+            .intent
+            .as_mut()
+            .unwrap()
+            .action = TransitionAction::Adopt(NativeBackend::Builtin);
+        crate::journal::write_atomic(&path, &journal).unwrap();
+        assert!(crate::journal::read(&path).is_err());
+    }
 
     #[test]
     fn refusal_retains_kmi_inputs_and_exact_manifest_replacement_blocks_dispatch() {

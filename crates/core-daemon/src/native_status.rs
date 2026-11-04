@@ -744,6 +744,7 @@ mod tests {
                     init_contract: Some(1),
                 }),
                 bundle: Some(BundleIdentity {
+                    zygisk_recipient: None,
                     manifest_file_sha256: None,
                     root: "/bundle".into(),
                     manifest_sha256: "a".repeat(64),

@@ -308,7 +308,10 @@ impl NativeStartup {
             return false;
         }
         if let Some(bundle) = &intent.bundle
-            && (bundle.root.as_os_str().is_empty()
+            && (!bundle.valid_recipient()
+                || (bundle.zygisk_recipient.is_some()
+                    && intent.action != TransitionAction::Adopt(NativeBackend::Zygisk))
+                || bundle.root.as_os_str().is_empty()
                 || bundle.root_identity.is_some_and(|(_, inode)| inode == 0)
                 || !valid_sha256(&bundle.manifest_sha256)
                 || bundle
@@ -1043,6 +1046,59 @@ pub fn read(path: &Path) -> io::Result<Journal> {
             ));
         }
     }
+    if journal.version < 18
+        && journal
+            .native_startup
+            .iter()
+            .chain(journal.native_attempts.iter().map(|item| &item.attempt))
+            .any(|attempt| {
+                attempt
+                    .intent
+                    .as_ref()
+                    .and_then(|i| i.bundle.as_ref())
+                    .is_some_and(|b| b.zygisk_recipient.is_some())
+            })
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "managed recipient requires journal18",
+        ));
+    }
+    // Historical attempts retain their own code evidence after owned retirement;
+    // only the current startup needs the live projection work. Neither permits
+    // a descriptor operation that this journal never allocated.
+    let unallocated_recipient = journal
+        .native_startup
+        .iter()
+        .chain(journal.native_attempts.iter().map(|item| &item.attempt))
+        .filter_map(|attempt| {
+            attempt
+                .intent
+                .as_ref()?
+                .bundle
+                .as_ref()?
+                .zygisk_recipient
+                .as_ref()
+        })
+        .any(|recipient| recipient.image.descriptor.operation > journal.issued_through);
+    let invalid_managed_recipient = journal
+        .native_startup
+        .iter()
+        .filter_map(|attempt| {
+            attempt
+                .intent
+                .as_ref()?
+                .bundle
+                .as_ref()?
+                .zygisk_recipient
+                .as_ref()
+        })
+        .any(|recipient| {
+            journal.zygisk_projection.as_ref().is_none_or(|work| {
+                work.outcome != PhaseOutcome::Confirmed
+                    || work.descriptor != recipient.image.descriptor
+            })
+        });
     let invalid_startup = journal
         .native_startup
         .iter()
@@ -1061,6 +1117,8 @@ pub fn read(path: &Path) -> io::Result<Journal> {
             .as_ref()
             .is_some_and(|r| !r.valid(journal.issued_through))
         || invalid_startup
+        || invalid_managed_recipient
+        || unallocated_recipient
         || journal.kmod_preflights.as_ref().is_some_and(|l| !l.valid())
         || journal.operations.iter().any(|entry| {
             entry

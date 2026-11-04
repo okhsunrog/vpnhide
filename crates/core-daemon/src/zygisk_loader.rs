@@ -589,6 +589,62 @@ impl LoaderRegistry {
         matches(&context.root, binding.source)
             && matches(&context.recipient_root, binding.recipient)
     }
+    /// Freeze only the current configured recipient; never discover a sibling
+    /// from filenames or substitute a recipient-local catalog for the source.
+    pub(crate) fn managed_recipient(
+        &self,
+        catalog: &Catalog,
+    ) -> io::Result<Option<crate::native_boot::prepared::ZygiskRecipientBinding>> {
+        let context = self
+            .context
+            .lock()
+            .expect("loader context")
+            .clone()
+            .ok_or_else(|| invalid("loader context unavailable"))?;
+        let directory = open_directory(&context.recipient_root)?;
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let sources = LoaderSources::open(&context, &directory, deadline, RecipientAccess::Live)?;
+        if sources.generation.directory != catalog.root_identity
+            || sources.generation.sha256 != manifest_sha256(catalog)
+            || sources.generation.file_sha256 != catalog.manifest_sha256
+        {
+            return Err(invalid("recipient source differs from prepared catalog"));
+        }
+        let result = if let Some(binding) = &context.binding {
+            let image = crate::maintenance::zygisk_projection::ProjectionImage::inspect_code_owned(
+                &context.recipient_root,
+                &binding.descriptor,
+                binding.owner_uid,
+            )?;
+            if image.directory != binding.recipient {
+                return Err(invalid("managed recipient changed during preparation"));
+            }
+            Some(crate::native_boot::prepared::ZygiskRecipientBinding {
+                path: context.recipient_root.clone(),
+                image,
+            })
+        } else {
+            if context.root != context.recipient_root
+                || sources.recipient.is_managed().map_err(io::Error::other)?
+            {
+                return Err(invalid("independent recipient has no managed boot binding"));
+            }
+            None
+        };
+        sources.revalidate(&context, deadline)?;
+        if self
+            .context
+            .lock()
+            .expect("loader context")
+            .as_ref()
+            .is_none_or(|current| !Arc::ptr_eq(&current.catalog, &context.catalog))
+        {
+            return Err(invalid(
+                "loader context changed during recipient preparation",
+            ));
+        }
+        Ok(result)
+    }
     pub fn enabled(&self) -> bool {
         self.context.lock().expect("loader context").is_some()
     }

@@ -8,13 +8,14 @@ use std::os::unix::fs::OpenOptionsExt;
 mod bundled;
 mod selection_evidence;
 pub(crate) use bundled::preview_choice;
-pub use bundled::{BundleIdentity, restore_environment};
+pub use bundled::{BundleIdentity, ZygiskRecipientBinding, restore_environment};
 pub(crate) struct ChoicePreview {
     pub assessment: crate::payloads::selection::Assessment,
     pub ownership: crate::payloads::selection::Ownership,
     pub binding: BundleIdentity,
     pub boot_id: String,
 }
+pub(crate) use bundled::validate_binding_owned as validate_bundle_binding_owned;
 pub(crate) fn validate_bundle_binding(binding: Option<&BundleIdentity>) -> Result<(), String> {
     bundled::validate_binding(binding)
 }

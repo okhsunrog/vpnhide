@@ -105,6 +105,10 @@ to the loader before probing/selection, with source/recipient directory leases a
 exact retained authority readback. Unknown residue records a possible-exposure
 fence, and new kernel loads recheck residue around durable admission. This is
 read-only code/namespace evidence, not authorization or backend readiness.
+Prepared policy and same-boot restore freeze this recipient's path, directory,
+descriptor and both library identities separately from the Core catalog (journal18).
+A bounded opaque authorization file is not grant evidence during code validation;
+boot qualification still needs an exact retained grant.
 The current public chooser is not yet connected to dispatch; its caller
 must be the existing writer and bootstrap authorization remains incomplete. New managed recipients
 require current-boot journaled authority and exact consumed generation/policy proof;

@@ -421,6 +421,16 @@ impl RealPhaseRunner {
         wire: &str,
     ) -> Result<Option<crate::journal::ZygiskAuthorizationIntent>, crate::activation::ProjectionError>
     {
+        Self::authorization_owned(env, backend, op, wire, 0)
+    }
+    fn authorization_owned(
+        env: &crate::native_boot::NativeEnv,
+        backend: vpnhide_core_rpc::NativeBackend,
+        op: vpnhide_core_rpc::OperationId,
+        wire: &str,
+        uid: u32,
+    ) -> Result<Option<crate::journal::ZygiskAuthorizationIntent>, crate::activation::ProjectionError>
+    {
         use crate::activation::ProjectionError::Failed;
         if backend != vpnhide_core_rpc::NativeBackend::Zygisk {
             return Ok(None);
@@ -428,12 +438,15 @@ impl RealPhaseRunner {
         let path = env
             .module_dir(backend)
             .ok_or_else(|| Failed("missing Zygisk recipient".into()))?;
-        crate::native_boot::prepared::validate_bundle_binding(env.bundle_identity.as_ref())
-            .map_err(Failed)?;
+        crate::native_boot::prepared::validate_bundle_binding_owned(
+            env.bundle_identity.as_ref(),
+            uid,
+        )
+        .map_err(Failed)?;
         let target = crate::zygisk::ZygiskTarget::open(&path).map_err(Failed)?;
         if let Some(binding) = &env.bundle_identity
-            && (binding.root != path
-                || binding.root_identity != Some(target.identity().map_err(Failed)?))
+            && (binding.recipient().0 != path
+                || binding.recipient().1 != Some(target.identity().map_err(Failed)?))
         {
             return Err(Failed(
                 "Zygisk recipient differs from the frozen catalog generation".into(),
@@ -668,6 +681,65 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
     use std::collections::HashMap;
+
+    #[test]
+    fn managed_authority_uses_frozen_recipient_and_rechecks_files_before_admission() {
+        let (_root, mut env) =
+            crate::maintenance::zygisk_projection::tests::active_binding_fixture();
+        let uid = unsafe { libc::geteuid() };
+        let wire = "vpnhide 2 config\ndebug 0\nend 0\n";
+        let authority = RealPhaseRunner::authorization_owned(
+            &env,
+            vpnhide_core_rpc::NativeBackend::Zygisk,
+            vpnhide_core_rpc::OperationId(23),
+            wire,
+            uid,
+        )
+        .unwrap()
+        .unwrap();
+        let binding = env.bundle_identity.as_ref().unwrap();
+        assert_eq!(Some(authority.directory_identity), binding.recipient().1);
+        assert_ne!(Some(authority.directory_identity), binding.root_identity);
+        assert_eq!(authority.generation, 23);
+        assert!(
+            !env.zygisk_module
+                .as_ref()
+                .unwrap()
+                .join(vpnhide_protocol::zygisk_activation::FILE_NAME)
+                .exists()
+        );
+        // A stale env default cannot redirect a frozen operation to the source.
+        env.zygisk_module = Some(binding.root.clone());
+        assert!(
+            RealPhaseRunner::authorization_owned(
+                &env,
+                vpnhide_core_rpc::NativeBackend::Zygisk,
+                vpnhide_core_rpc::OperationId(24),
+                wire,
+                uid
+            )
+            .is_err()
+        );
+        env.zygisk_module = Some(binding.recipient().0.to_owned());
+        std::fs::write(
+            env.zygisk_module
+                .as_ref()
+                .unwrap()
+                .join("zygisk/armeabi-v7a.so"),
+            b"changed",
+        )
+        .unwrap();
+        assert!(
+            RealPhaseRunner::authorization_owned(
+                &env,
+                vpnhide_core_rpc::NativeBackend::Zygisk,
+                vpnhide_core_rpc::OperationId(25),
+                wire,
+                uid
+            )
+            .is_err()
+        );
+    }
 
     /// A runner that returns scripted outcomes per phase and records what it was asked to run
     /// — the core-side equivalent of the app tests driving `PhaseFinished(outcome)`.

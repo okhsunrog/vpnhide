@@ -1,6 +1,6 @@
 # Core architecture
 
-Current implementation, app/core RPC33 and journal17 (reads1–16). Backend policy
+Current implementation, app/core RPC33 and journal18 (reads1–17). Backend policy
 implementation and publication of verified changes are approved under
 [RFC0005](rfcs/0005-unified-backend-lifecycle-policy.md); remaining flows and device
 gates are tracked separately. Kernel control-v2 / telemetry-v1 is unchanged.
@@ -475,7 +475,7 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-The current paired APK/Core contract is RPC33; journal17 reads schemas1–16. These
+The current paired APK/Core contract is RPC33; journal18 reads schemas1–17. These
 versions are independent of kernel control2/telemetry1 and do not require a
 compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
 publication and sampled current/stale/unattributed process consumption are separate
@@ -576,7 +576,7 @@ Zygisk authorization cannot claim global process coverage.
 The foreign-VPN observer, UID-in-tunnel probe and routing RPC/FFI field are removed.
 Dashboard/diagnostics consume Core evidence independently of external VPN presence
 and split-tunnel membership. Real fixture/hook API observations and manual network
-forensics remain. APK/Core must both speak RPC33; journal17 and the frozen
+forensics remain. APK/Core must both speak RPC33; journal18 and the frozen
 kernel control2/telemetry1 are independent, so a compatible builtin kernel does not
 need rebuilding merely because the app protocol changed.
 
@@ -760,3 +760,29 @@ retains an uncertain result and budget; neither window calls the loader. An owne
 namespace alone does not authorize a new kernel load while discovery remains.
 The explicit chooser, bootstrap grant and owned withdrawal/update remain closed
 implementation gaps; this read-side connection does not complete RFC0005.
+
+
+## Frozen managed policy recipient (journal18)
+
+The loader's already bound namespace supplies the managed recipient during
+preparation. `BundleIdentity` freezes its path, directory identity, descriptor
+and both code-file identities independently of the authoritative Core catalog.
+There is no sibling-directory discovery during execution or restart. Admission
+checks the same source generation and exact recipient before deriving the
+authorization reference. A stale environment default cannot redirect it to Core.
+Same-boot restoration reuses the frozen path and also rechecks raw manifest bytes;
+a replacement with identical library contents but a new directory inode is refused.
+
+Code inspection may encounter an authorization file as bounded, owned opaque
+bytes checked for changes across inspection. That evidence proves code/namespace only. Boot
+readback still requires an exact retained journal grant, and loader availability
+still requires the actual consumed generation/policy. No arbitrary file is promoted
+into a grant, a successful policy delivery or behavioral health.
+
+Journal18 reads1–17 without inventing recipients for old startup records. It rejects
+new recipient semantics in older schemas, malformed bindings, non-Zygisk actions
+and current managed startup with no matching confirmed projection work. Holds,
+counters and prior intent are preserved. Public RPC33 and kernel control2/telemetry1
+are unchanged. This internal delivery connection still does not enable the public
+Zygisk chooser: production admission/dispatch, separately durable bootstrap, owned
+withdrawal/combined update, continuity and migration offer remain code work.

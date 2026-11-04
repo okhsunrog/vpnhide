@@ -253,3 +253,101 @@ fn foreign_duplicate_and_unsafe_source_metadata_never_becomes_projection_authori
 }
 
 mod work;
+
+/// A real file image staged by the bounded host ELF manager fixture and a
+/// configured loader namespace. No authority, worker callback or readiness claim.
+pub(crate) fn active_binding_fixture() -> (tempfile::TempDir, crate::native_boot::NativeEnv) {
+    let (root, prepared) = fixture();
+    let paths = ProjectionPaths {
+        root: root.path().into(),
+        persistent: root.path().join("persistent"),
+    };
+    let request = vpnhide_core_rpc::BackendChoiceRequest {
+        expected_revision: 0,
+        choice: vpnhide_core_rpc::BackendChoice::Fixed {
+            backend: vpnhide_core_rpc::NativeBackend::Zygisk,
+        },
+        acknowledged_warning: Some(vpnhide_core_rpc::ZygiskChoiceWarning::ProcessInjectionV1),
+    };
+    let mut journal = crate::journal::Journal {
+        issued_through: 8,
+        ..Default::default()
+    };
+    prepared
+        .dispatch(prepared.work(request).unwrap(), |work| {
+            crate::journal::backend_choice::record_projection(
+                &mut journal,
+                vpnhide_core_rpc::BaseRef { revision: 0 },
+                work,
+            )?;
+            crate::journal::write_atomic(&paths.persistent.join("journal.json"), &journal)
+        })
+        .unwrap();
+    fs::rename(paths.staged(), paths.active()).unwrap();
+    let uid = unsafe { libc::geteuid() };
+    let image = ProjectionImage::inspect_owned(&paths.active(), &prepared.descriptor, uid).unwrap();
+    let catalog = Catalog::open(&paths.source()).unwrap();
+    let mut env = crate::native_boot::NativeEnv::from_env(Some(root.path().join("ctl"))).unwrap();
+    env.modules = Some(root.path().join("data/adb/modules"));
+    env.boot_id_path = root.path().join("proc/sys/kernel/random/boot_id");
+    env.zygisk_module = Some(paths.active());
+    env.kpm_lock = None;
+    env.legacy_root = None;
+    env.apatch_kpms = root.path().join("apatch");
+    env.state_file = root.path().join("native.json");
+    let boot = crate::native_boot::read_boot_id(&env.boot_id_path);
+    let registry = std::sync::Arc::new(crate::zygisk_loader::LoaderRegistry::default());
+    registry.configure_test_context(paths.source(), boot.clone(), 7);
+    let readback = super::work::ActiveProjectionReadback {
+        source: prepared.source.clone(),
+        image,
+        source_directory: std::sync::Arc::new(File::open(paths.source()).unwrap()),
+        recipient_directory: std::sync::Arc::new(File::open(paths.active()).unwrap()),
+    };
+    registry
+        .bind_projection_owned(&paths.source(), &paths.active(), &readback, uid, &boot, 7)
+        .unwrap();
+    let recipient = registry.managed_recipient(&catalog).unwrap().unwrap();
+    env.bundle_identity = Some(crate::native_boot::prepared::BundleIdentity {
+        root: paths.source(),
+        root_identity: Some(catalog.root_identity),
+        manifest_sha256: prepared.descriptor.manifest_sha256.clone(),
+        manifest_file_sha256: Some(catalog.manifest_sha256),
+        source_commit: catalog.manifest.bundle_commit,
+        wire: "vpnhide 2 config\ndebug 0\nend 0\n".into(),
+        zygisk_recipient: Some(recipient),
+    });
+    env.loader = Some(registry);
+    (root, env)
+}
+
+#[test]
+fn code_readback_never_promotes_an_opaque_authorization_into_grant_evidence() {
+    let (_root, env) = active_binding_fixture();
+    let binding = env.bundle_identity.unwrap();
+    let recipient = binding.zygisk_recipient.unwrap();
+    let uid = unsafe { libc::geteuid() };
+    let path = recipient
+        .path
+        .join(vpnhide_protocol::zygisk_activation::FILE_NAME);
+    fs::write(&path, b"not an authorization").unwrap();
+    assert_eq!(
+        ProjectionImage::inspect_code_owned(&recipient.path, &recipient.image.descriptor, uid)
+            .unwrap(),
+        recipient.image
+    );
+    assert!(
+        ProjectionImage::inspect_owned(&recipient.path, &recipient.image.descriptor, uid).is_err()
+    );
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o666)).unwrap();
+    assert!(
+        ProjectionImage::inspect_code_owned(&recipient.path, &recipient.image.descriptor, uid)
+            .is_err()
+    );
+    fs::remove_file(&path).unwrap();
+    symlink("elsewhere", &path).unwrap();
+    assert!(
+        ProjectionImage::inspect_code_owned(&recipient.path, &recipient.image.descriptor, uid)
+            .is_err()
+    );
+}
