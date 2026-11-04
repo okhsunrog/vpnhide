@@ -9,7 +9,49 @@ use crate::{Config, parse_config};
 
 pub const FILE_NAME: &str = "zygisk-activation.txt";
 pub const MAX_BYTES: usize = 64 * 1024;
+pub const MAX_MODULE_PROP_BYTES: usize = 8192;
 const HEADER: &str = "vpnhide zygisk-activation 1";
+
+/// Policy-file contract only; module presence is neither consent nor evidence
+/// that a provider loaded its image or that a process installed hooks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Recipient {
+    Legacy,
+    Authorized,
+}
+
+/// One grammar for the Core writer and the pre-specialization reader. An
+/// authorized recipient never falls back to a legacy targets file.
+pub fn recipient_from_manifest(bytes: &[u8]) -> Option<Recipient> {
+    if bytes.len() > MAX_MODULE_PROP_BYTES {
+        return None;
+    }
+    let manifest = std::str::from_utf8(bytes).ok()?;
+    let (mut id, mut control, mut activation) = (None, None, None);
+    for line in manifest
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with('#'))
+    {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let slot = match key {
+            "id" => &mut id,
+            "vpnhideControl" => &mut control,
+            "vpnhideActivation" => &mut activation,
+            _ => continue,
+        };
+        if slot.replace(value).is_some() {
+            return None;
+        }
+    }
+    match (id, control, activation) {
+        (Some("vpnhide_zygisk"), Some("2"), None) => Some(Recipient::Legacy),
+        (Some("vpnhide_core"), Some("2"), Some("1")) => Some(Recipient::Authorized),
+        _ => None,
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Authorization {
@@ -94,6 +136,54 @@ impl Authorization {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn recipient_contract_requires_exact_known_versions_and_unique_critical_fields() {
+        for (text, expected) in [
+            ("id=vpnhide_zygisk\nvpnhideControl=2\n", Recipient::Legacy),
+            (
+                "id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n",
+                Recipient::Authorized,
+            ),
+        ] {
+            assert_eq!(recipient_from_manifest(text.as_bytes()), Some(expected));
+            for field in ["id=other\n", "vpnhideControl=2\n", "vpnhideActivation=1\n"] {
+                let duplicated = format!("{text}{field}");
+                // Duplicate keys and an activation marker added to legacy mode
+                // cannot change which policy contract the recipient consumes.
+                assert!(recipient_from_manifest(duplicated.as_bytes()).is_none());
+            }
+            let commented = format!("# id=other\n {text}\n# vpnhideControl=99\nname=example\n");
+            assert_eq!(
+                recipient_from_manifest(commented.as_bytes()),
+                Some(expected)
+            );
+        }
+        for text in [
+            "id=vpnhide_core\nvpnhideActivation=1\n",
+            "id=vpnhide_core\nvpnhideControl=3\nvpnhideActivation=1\n",
+            "id=vpnhide_core\nvpnhideControl=2\n",
+            "id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=2\n",
+            "id=vpnhide_zygisk\nvpnhideControl=1\n",
+            "id=other\nvpnhideControl=2\nvpnhideActivation=1\n",
+            "id =vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n",
+        ] {
+            assert!(recipient_from_manifest(text.as_bytes()).is_none(), "{text}");
+        }
+    }
+
+    #[test]
+    fn recipient_manifest_limit_and_encoding_are_enforced_by_both_consumers() {
+        let mut bytes = b"id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n#".to_vec();
+        bytes.resize(MAX_MODULE_PROP_BYTES, b'x');
+        assert_eq!(recipient_from_manifest(&bytes), Some(Recipient::Authorized));
+        bytes.push(b'x');
+        assert!(recipient_from_manifest(&bytes).is_none());
+        let mut invalid_utf8 =
+            b"id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\nname=".to_vec();
+        invalid_utf8.push(0xff);
+        assert!(recipient_from_manifest(&invalid_utf8).is_none());
+    }
+
     const BOOT: &str = "12345678-1234-1234-1234-123456789abc";
     const WIRE: &str = "vpnhide 2 config\ndebug 0\ndefault 0\ntargets 1 2800\nend 1\n";
     fn auth() -> Authorization {

@@ -18,7 +18,8 @@ Core is the ordinary privileged writer. It accepts fixed commands and bounded
 probes, never arbitrary shell text. The APK has no root executable or `su` path.
 The full Core ZIP contains passive backend payloads. Producer archives may have
 installer shims, but no independent runtime activator; `activator` is a Core-side
-library. Zygisk publication policy remains reopened under RFC0003.
+library. Managed Zygisk publication remains runtime implementation work under
+the accepted [RFC0005](rfcs/0005-unified-backend-lifecycle-policy.md).
 
 The dependency path is `Kotlin → core-ffi → core-client → core-rpc`. Generated
 UniFFI records, enums and errors carry config, edits, commands, publications,
@@ -170,6 +171,13 @@ keep the journal and use a compatible Core, never delete it to bypass holds.
 Bundled Zygisk NativeIntent records the exact boot, operation generation, recipient
 directory identity and wire before publication. Recovery confirms only that exact
 publication, never injection or the absence of already-running process hooks.
+The Core writer and Zygisk pre-specialization reader share the bounded
+`protocol::zygisk_activation` recipient grammar. Authorized compatibility
+recipients require both control2 and activation1; missing, duplicate or unknown
+critical fields refuse even an otherwise valid authorization. The explicit
+legacy recipient uses control2 without an activation marker. Only that legacy
+contract can consume `targets.txt`. These metadata contracts do not establish
+user consent, loader availability, hook installation or a new publication policy.
 
 The experimental KMI loader preflight has a separate frozen manifest/boot/series
 plan and one attempt per exact candidate hash. It never spends or resets the real

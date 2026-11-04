@@ -16,6 +16,7 @@ pub enum Backend {
     Kmod,
     Builtin,
     Kpm,
+    Userspace,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -23,6 +24,7 @@ pub enum Mode {
     Full,
     Preflight,
     CorePreflight,
+    NativeUnit,
     FixtureRaw,
     FixtureProtected,
 }
@@ -118,7 +120,12 @@ impl Plan {
         if self.backend != Backend::Builtin && self.payload_sha256.is_none() {
             return Err(invalid("payload identity is required"));
         }
-        if self.mode != Mode::Full && self.backend != Backend::Kmod {
+        if (self.mode == Mode::NativeUnit) != (self.backend == Backend::Userspace) {
+            return Err(invalid(
+                "native unit scope requires the userspace suite backend",
+            ));
+        }
+        if !matches!(self.mode, Mode::Full | Mode::NativeUnit) && self.backend != Backend::Kmod {
             return Err(invalid(
                 "fixture/preflight modes require the isolated ko backend",
             ));
@@ -155,6 +162,10 @@ impl Plan {
     pub fn expected(&self) -> io::Result<BTreeMap<String, bool>> {
         self.validate()?;
         let mut result = BTreeMap::new();
+        if self.mode == Mode::NativeUnit {
+            result.insert("native_unit_suite".into(), false);
+            return Ok(result);
+        }
         if matches!(self.mode, Mode::Preflight | Mode::CorePreflight) {
             result.insert("loader_preflight".into(), false);
             if self.mode == Mode::CorePreflight {
@@ -273,14 +284,14 @@ impl Report {
         }
         if matches!(
             self.mode,
-            Mode::Preflight | Mode::CorePreflight | Mode::FixtureRaw
+            Mode::Preflight | Mode::CorePreflight | Mode::FixtureRaw | Mode::NativeUnit
         ) && (self.loaded || self.registered != 0)
         {
             return Err(invalid("unexpected backend exposure in a no-load plan"));
         }
         if !matches!(
             self.mode,
-            Mode::Preflight | Mode::CorePreflight | Mode::FixtureRaw
+            Mode::Preflight | Mode::CorePreflight | Mode::FixtureRaw | Mode::NativeUnit
         ) && (!self.loaded
             || (self.mode == Mode::Full && self.backend != Backend::Kpm && self.registered == 0))
         {

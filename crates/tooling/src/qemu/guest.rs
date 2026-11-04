@@ -642,6 +642,28 @@ pub fn run() -> io::Result<()> {
     println!("##### VPNHIDE-QEMU-TEST START #####");
     let mut report = Report::new(&plan);
     let outcome = (|| -> io::Result<()> {
+        if plan.mode == Mode::NativeUnit {
+            let bytes = read_regular(Path::new("/native-unit-tests"), 128 * 1024 * 1024)?;
+            if Some(vpnhide_artifact_model::archive::FileIdentity::of(&bytes).sha256)
+                != plan.payload_sha256
+            {
+                return Err(io::Error::other("native unit executable identity changed"));
+            }
+            let result = execute("/native-unit-tests", &["--test-threads=1"], false)?;
+            io::stdout().write_all(&result.output.stdout)?;
+            io::stderr().write_all(&result.output.stderr)?;
+            report.rows.push(ResultRow::new(
+                "native_unit_suite",
+                if success(&result) {
+                    Verdict::Pass
+                } else {
+                    Verdict::Fail
+                },
+                "all tests in the declared native executable; no backend activation",
+            ));
+            report.setup_ok = true;
+            return Ok(());
+        }
         if matches!(plan.mode, Mode::Preflight | Mode::CorePreflight) {
             preflight(&plan, &mut report)?;
             if plan.mode == Mode::CorePreflight {

@@ -1297,11 +1297,16 @@ pub unsafe extern "C" fn hooked_recvmsg(fd: c_int, msg: *mut libc::msghdr, flags
     }
 
     let hdr = unsafe { &*msg };
-    if hdr.msg_iovlen == 0 || hdr.msg_iov.is_null() {
+    // Bionic/glibc expose size_t here; musl exposes a signed int. Reject a
+    // negative count before touching caller descriptors instead of casting it.
+    let Some(iovlen) = checked_iovec_count(hdr.msg_iovlen) else {
+        return ret;
+    };
+    if iovlen == 0 || hdr.msg_iov.is_null() {
         return ret;
     }
 
-    if hdr.msg_iovlen == 1 {
+    if iovlen == 1 {
         let iov = unsafe { &*hdr.msg_iov };
         if iov.iov_base.is_null() {
             return ret;
@@ -1314,8 +1319,7 @@ pub unsafe extern "C" fn hooked_recvmsg(fd: c_int, msg: *mut libc::msghdr, flags
     if !is_netlink_fd(fd) || IN_GETIFADDRS.with(|guard| guard.get()) {
         return ret;
     }
-    let Some(in_iovecs) = (unsafe { iovec_payload_len(hdr.msg_iov, hdr.msg_iovlen, ret as usize) })
-    else {
+    let Some(in_iovecs) = (unsafe { iovec_payload_len(hdr.msg_iov, iovlen, ret as usize) }) else {
         return ret;
     };
     if in_iovecs < 16 {
@@ -1332,18 +1336,18 @@ pub unsafe extern "C" fn hooked_recvmsg(fd: c_int, msg: *mut libc::msghdr, flags
             return ret;
         };
         let Some(filtered) = (unsafe {
-            rewrite_iovec_payload(
-                hdr.msg_iov,
-                hdr.msg_iovlen,
-                in_iovecs,
-                &mut scratch,
-                |data| filter_netlink_dump(data, &indices[..n], vpn_uid),
-            )
+            rewrite_iovec_payload(hdr.msg_iov, iovlen, in_iovecs, &mut scratch, |data| {
+                filter_netlink_dump(data, &indices[..n], vpn_uid)
+            })
         }) else {
             return ret;
         };
         ret - (in_iovecs - filtered) as isize
     })
+}
+
+fn checked_iovec_count(value: impl TryInto<usize>) -> Option<usize> {
+    value.try_into().ok()
 }
 
 /// Number of bytes actually copied into an iovec array by a successful
@@ -1888,8 +1892,16 @@ mod setsockopt_tests {
 
 #[cfg(test)]
 mod iovec_tests {
-    use super::{iovec_payload_len, rewrite_iovec_payload};
+    use super::{checked_iovec_count, iovec_payload_len, rewrite_iovec_payload};
     use crate::filter::{RTM_NEWLINK, filter_netlink_dump};
+
+    #[test]
+    fn libc_iovec_count_accepts_native_size_and_refuses_negative_signed_lengths() {
+        assert_eq!(checked_iovec_count(3usize), Some(3));
+        assert_eq!(checked_iovec_count(3i32), Some(3));
+        assert_eq!(checked_iovec_count(0i32), Some(0));
+        assert_eq!(checked_iovec_count(-1i32), None);
+    }
 
     fn make_nlmsg(if_index: u32) -> Vec<u8> {
         let mut msg = Vec::new();

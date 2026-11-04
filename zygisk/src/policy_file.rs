@@ -47,29 +47,14 @@ fn read_config_for_boot(directory: RawFd, boot: &str) -> Option<Config> {
 }
 
 fn read_snapshot_for_boot(directory: RawFd, boot: &str) -> Option<Snapshot> {
-    let manifest = read_at(directory, c"module.prop", 8192).ok()?;
-    let manifest = std::str::from_utf8(&manifest).ok()?;
-    let (mut id, mut activation, mut control) = (None, None, None);
-    for line in manifest
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.starts_with('#'))
-    {
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        let slot = match key {
-            "id" => &mut id,
-            "vpnhideActivation" => &mut activation,
-            "vpnhideControl" => &mut control,
-            _ => continue,
-        };
-        if slot.replace(value).is_some() {
-            return None;
-        }
-    }
-    match (id, activation, control) {
-        (Some("vpnhide_core"), Some("1"), _) => {
+    let manifest = read_at(
+        directory,
+        c"module.prop",
+        zygisk_activation::MAX_MODULE_PROP_BYTES,
+    )
+    .ok()?;
+    match zygisk_activation::recipient_from_manifest(&manifest)? {
+        zygisk_activation::Recipient::Authorized => {
             let bytes = read_at(
                 directory,
                 c"zygisk-activation.txt",
@@ -85,14 +70,13 @@ fn read_snapshot_for_boot(directory: RawFd, boot: &str) -> Option<Snapshot> {
         }
         // Explicit compatibility boundary for separate legacy module installation.
         // A Core module never consumes this file, even if it is left from an old boot.
-        (Some("vpnhide_zygisk"), None, Some("2")) => {
+        zygisk_activation::Recipient::Legacy => {
             let bytes = read_at(directory, c"targets.txt", zygisk_activation::MAX_BYTES).ok()?;
             Some(Snapshot {
                 config: vpnhide_protocol::parse_config(&bytes)?,
                 authorization: None,
             })
         }
-        _ => None,
     }
 }
 
@@ -123,7 +107,7 @@ mod tests {
         let dir = File::open(root.path()).unwrap();
         fs::write(
             root.path().join("module.prop"),
-            "id=vpnhide_core\nvpnhideActivation=1\n",
+            "id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n",
         )
         .unwrap();
         authorized(root.path(), BOOT, 7, WIRE);
@@ -139,12 +123,46 @@ mod tests {
     }
 
     #[test]
+    fn valid_authorization_cannot_override_a_missing_conflicting_or_unknown_control_contract() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = File::open(root.path()).unwrap();
+        authorized(root.path(), BOOT, 7, WIRE);
+        fs::write(root.path().join("targets.txt"), WIRE).unwrap();
+        for control in [
+            "",
+            "vpnhideControl=1\n",
+            "vpnhideControl=3\n",
+            "vpnhideControl=2\nvpnhideControl=2\n",
+        ] {
+            fs::write(
+                root.path().join("module.prop"),
+                format!("id=vpnhide_core\n{control}vpnhideActivation=1\n"),
+            )
+            .unwrap();
+            assert!(read_snapshot_for_boot(dir.as_raw_fd(), BOOT).is_none());
+        }
+        fs::write(
+            root.path().join("module.prop"),
+            "id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n",
+        )
+        .unwrap();
+        assert_eq!(
+            read_snapshot_for_boot(dir.as_raw_fd(), BOOT)
+                .unwrap()
+                .authorization
+                .unwrap()
+                .generation,
+            7
+        );
+    }
+
+    #[test]
     fn bundled_mode_requires_current_boot_authorization_never_legacy_targets() {
         let root = tempfile::tempdir().unwrap();
         let dir = File::open(root.path()).unwrap();
         fs::write(
             root.path().join("module.prop"),
-            "id=vpnhide_core\nvpnhideActivation=1\n",
+            "id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n",
         )
         .unwrap();
         fs::write(root.path().join("targets.txt"), WIRE).unwrap();
@@ -171,7 +189,11 @@ mod tests {
             fs::write(&manifest, text).unwrap();
             assert!(read_config_for_boot(dir.as_raw_fd(), BOOT).is_none());
         }
-        fs::write(&manifest, "id=vpnhide_core\nvpnhideActivation=1\n").unwrap();
+        fs::write(
+            &manifest,
+            "id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n",
+        )
+        .unwrap();
         let auth = root.path().join(zygisk_activation::FILE_NAME);
         let old = root.path().join("old");
         fs::rename(&auth, &old).unwrap();

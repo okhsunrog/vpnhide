@@ -5,6 +5,9 @@ use std::io::{self, Read};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+use vpnhide_protocol::zygisk_activation::{
+    MAX_MODULE_PROP_BYTES, Recipient, recipient_from_manifest,
+};
 
 /// No default before ownership cutover; merely installing the artifact does not
 /// authorize a second writer next to the legacy service.
@@ -14,12 +17,6 @@ pub fn module_from_env() -> Option<PathBuf> {
     std::env::var_os(MODULE_ENV)
         .filter(|p| !p.is_empty())
         .map(Into::into)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Recipient {
-    Legacy,
-    Bundled,
 }
 
 pub struct ZygiskTarget {
@@ -78,7 +75,7 @@ impl ZygiskTarget {
     }
 
     pub(crate) fn bundled(&self) -> Result<bool, String> {
-        Ok(matches!(self.verify()?, Recipient::Bundled))
+        Ok(matches!(self.verify()?, Recipient::Authorized))
     }
 
     fn pinned_path(&self) -> PathBuf {
@@ -106,45 +103,15 @@ impl ZygiskTarget {
         if !manifest.metadata().map_err(|e| e.to_string())?.is_file() {
             return Err("Zygisk module manifest is not a regular file".into());
         }
-        let mut text = String::new();
+        let mut bytes = Vec::new();
         manifest
-            .take(8193)
-            .read_to_string(&mut text)
+            .take(MAX_MODULE_PROP_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
             .map_err(|e| e.to_string())?;
-        if text.len() > 8192 {
-            return Err("Zygisk module manifest is too large".into());
-        }
-        let mut id = None;
-        let mut version = None;
-        let mut activation = None;
-        for line in text
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.starts_with('#'))
-        {
-            if let Some((key, value)) = line.split_once('=') {
-                let slot = match key {
-                    "id" => &mut id,
-                    "vpnhideControl" => &mut version,
-                    "vpnhideActivation" => &mut activation,
-                    _ => continue,
-                };
-                if slot.replace(value).is_some() {
-                    return Err("ambiguous Zygisk module manifest".into());
-                }
-            }
-        }
-        let recipient = match (id, version, activation) {
-            (Some("vpnhide_zygisk"), Some("2"), None) => Recipient::Legacy,
-            (Some("vpnhide_core"), Some("2"), Some("1")) => Recipient::Bundled,
-            _ => {
-                return Err(
-                    "Zygisk recipient identity or activation contract is incompatible".into(),
-                );
-            }
-        };
+        let recipient = recipient_from_manifest(&bytes)
+            .ok_or("Zygisk recipient identity or activation contract is incompatible")?;
         if self.revocation_only {
-            return if recipient == Recipient::Bundled {
+            return if recipient == Recipient::Authorized {
                 Ok(recipient)
             } else {
                 Err("revocation requires bundled authorization contract".into())
@@ -196,7 +163,7 @@ impl ZygiskTarget {
     }
 
     pub fn is_bundled(&self) -> Result<bool, String> {
-        Ok(self.verify()? == Recipient::Bundled)
+        Ok(self.verify()? == Recipient::Authorized)
     }
 
     pub fn read_authorized(
@@ -346,7 +313,7 @@ impl ZygiskTarget {
         let preflight = || -> Result<PathBuf, String> {
             vpnhide_activator::validate_zygisk_config_wire(wire).map_err(|e| e.to_string())?;
             let recipient = self.verify()?;
-            if (recipient == Recipient::Bundled) != authorization.is_some() {
+            if (recipient == Recipient::Authorized) != authorization.is_some() {
                 return Err("recipient requires its exact activation contract".into());
             }
             let filename = if authorization.is_some() {

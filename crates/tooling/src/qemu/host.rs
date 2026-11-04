@@ -22,6 +22,7 @@ pub enum BackendArg {
     Kmod,
     Builtin,
     Kpm,
+    Userspace,
 }
 #[derive(ClapArgs)]
 pub struct Args {
@@ -299,6 +300,7 @@ pub fn run(args: Args) -> io::Result<()> {
         BackendArg::Kmod => Backend::Kmod,
         BackendArg::Builtin => Backend::Builtin,
         BackendArg::Kpm => Backend::Kpm,
+        BackendArg::Userspace => Backend::Userspace,
     };
     let cache = repo.join(if backend == Backend::Builtin {
         "builtin/test/.cache"
@@ -379,7 +381,9 @@ pub fn run(args: Args) -> io::Result<()> {
                 path: None,
             }
         };
-        let mode = if nonempty("VPNHIDE_QEMU_CORE_PREFLIGHT") {
+        let mode = if nonempty("VPNHIDE_QEMU_NATIVE_UNIT_BIN") {
+            Mode::NativeUnit
+        } else if nonempty("VPNHIDE_QEMU_CORE_PREFLIGHT") {
             Mode::CorePreflight
         } else if nonempty("VPNHIDE_QEMU_PREFLIGHT_ONLY") {
             Mode::Preflight
@@ -398,6 +402,11 @@ pub fn run(args: Args) -> io::Result<()> {
         }
         let payload = if backend == Backend::Builtin {
             None
+        } else if backend == Backend::Userspace {
+            let path = env_path("VPNHIDE_QEMU_NATIVE_UNIT_BIN", PathBuf::new());
+            let bytes = read_regular(&path, 128 * 1024 * 1024)?;
+            initramfs::place(&root, "native-unit-tests", &bytes, true)?;
+            Some(FileIdentity::of(&bytes).sha256)
         } else {
             let source = if backend == Backend::Kpm {
                 env_path("VPNHIDE_KPM", repo.join("kmod/vpnhide.kpm"))
@@ -517,6 +526,7 @@ pub fn run(args: Args) -> io::Result<()> {
             "vpnhide_kmod.ko",
             "vpnhide.kpm",
             "native-fixture-oracle",
+            "native-unit-tests",
             "gai",
             "ifconf",
             "bind-probe",
