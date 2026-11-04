@@ -34,17 +34,28 @@ static struct vpnhide_diag_scope vpnhide_diag_state;
 struct vpnhide_diag_file {
 	unsigned long long nonce;
 };
-static void *vpnhide_diag_pid_current(void *unused)
+/* The .ko supplies raw kallsyms addresses, not canonical CFI jump-table
+ * entries. Keep only these resolved calls behind non-inlined __nocfi boundaries,
+ * like the module's other resolved VFS/socket helpers. The callbacks themselves
+ * retain their typed callsites; barriers also prevent tail-call folding.
+ */
+static noinline __nocfi void *vpnhide_diag_pid_current(void *unused)
 {
+	struct pid *identity;
+
 	(void)unused;
-	return vpnhide_diag_getpid(current, PIDTYPE_PID);
+	identity = vpnhide_diag_getpid(current, PIDTYPE_PID);
+	barrier();
+	return identity;
 }
-static unsigned int vpnhide_diag_pid_number(void *unused, void *identity)
+static noinline __nocfi unsigned int vpnhide_diag_pid_number(void *unused,
+							     void *identity)
 {
 	pid_t number;
 
 	(void)unused;
 	number = vpnhide_diag_pidnr(identity);
+	barrier();
 	return number > 0 ? (unsigned int)number : 0;
 }
 static unsigned int vpnhide_diag_uid(void *unused)
@@ -52,16 +63,20 @@ static unsigned int vpnhide_diag_uid(void *unused)
 	(void)unused;
 	return __kuid_val(current_uid());
 }
-static void vpnhide_diag_pid_put(void *unused, void *identity)
+static noinline __nocfi void vpnhide_diag_pid_put(void *unused, void *identity)
 {
 	(void)unused;
 	vpnhide_diag_putpid(identity);
+	barrier();
 }
-static unsigned long long vpnhide_diag_now(void *unused)
+static noinline __nocfi unsigned long long vpnhide_diag_now(void *unused)
 {
+	ktime_t now;
+
 	(void)unused;
-	return (unsigned long long)ktime_to_ns(
-		vpnhide_diag_clock(TK_OFFS_BOOT));
+	now = vpnhide_diag_clock(TK_OFFS_BOOT);
+	barrier();
+	return (unsigned long long)ktime_to_ns(now);
 }
 static const struct vpnhide_diag_ops vpnhide_diag_callbacks = {
 	.current_identity = vpnhide_diag_pid_current,

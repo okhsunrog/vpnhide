@@ -66,6 +66,10 @@ restore protection. The separate root-only proc endpoint and ioctl handshake do
 not change control2/telemetry1 or require broader app SELinux proc access.
 Absent kernel helpers leave this optional capability unavailable without changing
 backend health or triggering fallback.
+The Linux adapters compile shared atomics inline, without compiler-rt helpers.
+The `.ko` calls its dynamically resolved PID/clock helpers through narrow,
+non-inlined `__nocfi` boundaries: kallsyms addresses are not canonical jump-table
+entries on older CFI kernels. Other module callsites keep their CFI checks.
 
 The Root lease/controller and unprivileged collector adapter have Linux fixture
 oracle coverage for real same-thread RAW/protected results, same-UID thread
