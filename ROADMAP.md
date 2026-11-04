@@ -84,6 +84,11 @@ entries/bytes/records and a bounded same-image child exist. Valid prefixes survi
 timeout/failure with incomplete status. Durable/public evidence remains code work; this is not kernel/device ABI
 acceptance or permission to modify candidate bytes.
 
+Partial resident readiness now shares the protocol owner used by KPM delivery;
+preparation retains its actual installed mask and continues to reject missing
+required coverage and fatal/unknown states. This does not complete the remaining
+cross-upgrade continuity, explicit choice or voluntary Zygisk transition flow.
+
 Existing Zygisk continues where actual working ownership can be established. It
 never licenses new Auto selection, standby publication or silent reentry. Core
 never automatically reboots, silently provisions KPM, bypasses ABI checks or

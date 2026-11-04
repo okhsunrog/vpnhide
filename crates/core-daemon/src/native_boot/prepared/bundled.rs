@@ -91,27 +91,21 @@ impl Prepared {
             };
             if let Some(backend) = backend {
                 support.retain(|(b, _)| *b != backend);
-                support.push((
-                    backend,
-                    compiled(
-                        if status.error == 0 { status.hooks } else { 0 },
-                        65536,
-                        true,
-                    ),
-                ));
+                if let Some(evidence) = resident_support(status, 65536) {
+                    support.push((backend, evidence));
+                }
             }
         }
         if facts.kpm == KpmFact::Live {
             support.retain(|(b, _)| *b != NativeBackend::Kpm);
-            if let Some(status) = client.as_ref().and_then(|c| c.status().ok().flatten()) {
-                support.push((
-                    NativeBackend::Kpm,
-                    compiled(
-                        if status.error == 0 { status.hooks } else { 0 },
-                        (vpnhide_protocol::KPM_ARGS_LEN - 1) as u32,
-                        true,
-                    ),
-                ));
+            if let Some(evidence) = client
+                .as_ref()
+                .and_then(|c| c.status().ok().flatten())
+                .and_then(|status| {
+                    resident_support(status, (vpnhide_protocol::KPM_ARGS_LEN - 1) as u32)
+                })
+            {
+                support.push((NativeBackend::Kpm, evidence));
             }
         }
         Self::bind_bundle(
@@ -293,6 +287,12 @@ fn compiled(hooks: u32, wire_capacity: u32, default_mask: bool) -> Support {
     }
 }
 
+fn resident_support(status: vpnhide_protocol::Status, wire_capacity: u32) -> Option<Support> {
+    status
+        .allows_configuration()
+        .then(|| compiled(status.hooks, wire_capacity, true))
+}
+
 /// Rebind only the same active generation. A staged/replaced bundle cannot change
 /// the recipient or pretend it is the payload retained by an earlier startup.
 pub fn restore_environment(
@@ -394,6 +394,84 @@ mod tests {
     use crate::payloads::{Abi, KMIS, Payload, PayloadKind, selection::Ownership};
     use std::io::{Seek, SeekFrom};
     use vpnhide_core_rpc::{AppConfig, NativeRole};
+
+    #[test]
+    fn partial_resident_retains_observed_hooks_without_relaxing_required_coverage() {
+        for backend in [
+            NativeBackend::Builtin,
+            NativeBackend::Kmod,
+            NativeBackend::Kpm,
+        ] {
+            for (error, hooks, allowed) in [
+                (4, Hook::DevIoctl.bit(), true),
+                (4, 0, false),
+                (0, Hook::DevIoctl.bit(), true),
+                (1, KERNEL_HOOK_MASK, false),
+                (2, KERNEL_HOOK_MASK, false),
+                (3, KERNEL_HOOK_MASK, false),
+                (99, KERNEL_HOOK_MASK, false),
+            ] {
+                let (_temp, env, root, config, packages, mut caps) = fixture();
+                caps.ownership = Ownership::Resident(backend);
+                caps.builtin = if backend == NativeBackend::Builtin {
+                    Runtime::Ready
+                } else {
+                    Runtime::Absent
+                };
+                caps.kpm = Runtime::Ready;
+                let mut facts = facts();
+                facts.kernel = match backend {
+                    NativeBackend::Builtin => KernelFact::Builtin,
+                    NativeBackend::Kmod => KernelFact::Kmod,
+                    _ => KernelFact::Absent,
+                };
+                if backend == NativeBackend::Kpm {
+                    facts.kpm = KpmFact::Live;
+                }
+                let support: Vec<_> = resident_support(
+                    vpnhide_protocol::Status {
+                        backend: match backend {
+                            NativeBackend::Builtin => Backend::Builtin as u32,
+                            NativeBackend::Kmod => Backend::Kmod as u32,
+                            NativeBackend::Kpm => Backend::Kpm as u32,
+                            NativeBackend::Zygisk => unreachable!(),
+                        },
+                        kver: 0x60100,
+                        hooks,
+                        error,
+                    },
+                    1023,
+                )
+                .map(|support| {
+                    assert_eq!(support.hooks, hooks);
+                    (backend, support)
+                })
+                .into_iter()
+                .collect();
+                let prepared = Prepared::bind_bundle(
+                    env,
+                    false,
+                    facts,
+                    None,
+                    root.clone(),
+                    verified_catalog(&root).unwrap(),
+                    &config,
+                    &packages,
+                    &caps,
+                    &support,
+                );
+                assert_eq!(
+                    prepared.is_ok(),
+                    allowed,
+                    "{backend:?} error={error} hooks={hooks}"
+                );
+                if let Ok(prepared) = prepared {
+                    assert_eq!(prepared.intent.action, TransitionAction::Adopt(backend));
+                    assert!(prepared.intent.payload.is_none());
+                }
+            }
+        }
+    }
 
     #[test]
     fn production_catalog_rejects_hash_valid_gki_without_loader_crcs() {

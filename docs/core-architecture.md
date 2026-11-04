@@ -268,6 +268,14 @@ continuity and the post-update migration offer remain unfinished code. See
 [ROADMAP](../ROADMAP.md).
 Core never reboots the phone automatically.
 
+Resident configuration readiness follows shared protocol semantics: Ok and
+PartialHooks allow the normal configuration checks; fatal and unknown codes do
+not. Bundle preparation retains the actual PartialHooks mask instead of replacing
+it with zero. Every required feature and target/wire/default-mask limit is still
+checked against that evidence. Insufficient coverage holds the selected resident
+without trying another family. Runtime health remains partial; this admission
+does not claim successful delivery, complete process coverage or behavioral PASS.
+
 Ports resolves the complete package/UID map before touching firewall rules,
 preserving old rules on resolution failure. IPv4 and IPv6 outcomes remain independent.
 

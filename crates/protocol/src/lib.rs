@@ -109,6 +109,16 @@ pub struct Status {
     pub error: u32,
 }
 
+impl Status {
+    /// These wire error codes permit configuration of an already identified
+    /// resident. This is not ownership, policy coverage or behavioral proof.
+    /// Unknown and fatal errors never gain readiness from a nonzero hook mask.
+    pub fn allows_configuration(&self) -> bool {
+        self.error == hook_ids::StatusError::Ok as u32
+            || self.error == hook_ids::StatusError::PartialHooks as u32
+    }
+}
+
 // --- lexical helpers (§4.1) ------------------------------------------------
 
 fn is_sep(b: u8) -> bool {
@@ -514,6 +524,29 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    #[test]
+    fn configuration_readiness_follows_known_wire_errors_not_the_hook_mask() {
+        for hooks in [0, u32::MAX] {
+            for (error, allowed) in [
+                (0, true),
+                (1, false),
+                (2, false),
+                (3, false),
+                (4, true),
+                (5, false),
+                (u32::MAX, false),
+            ] {
+                let status = Status {
+                    backend: 1,
+                    kver: 0x60100,
+                    hooks,
+                    error,
+                };
+                assert_eq!(status.allows_configuration(), allowed);
+                assert_eq!(status.hooks, hooks);
+            }
+        }
+    }
     fn vectors_path() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../kmod/shared/protocol_vectors.tsv")
     }

@@ -58,7 +58,7 @@ The feature-based algorithm, finite recovery budgets, explicit-Zygisk staging/re
 
 ### Existing RFCs
 
-[RFC 0001](0001-automatic-gki-kmi-selection.md) supplies GKI/KMI and bounded safe preflight evidence; no guessing or repeated real `.ko` loads. [RFC 0002](0002-autonomous-diagnostics.md) supplies reproducible behavioral evidence; unimplemented checks remain unverified. [RFC 0003](0003-conditional-zygisk-publication.md) supplies passive packaging, Core-owned discovery and durable/provider boundaries.
+[RFC 0001](../rfcs/0001-automatic-gki-kmi-selection.md) supplies GKI/KMI and bounded safe preflight evidence; no guessing or repeated real `.ko` loads. [RFC 0002](../rfcs/0002-autonomous-diagnostics.md) supplies reproducible behavioral evidence; unimplemented checks remain unverified. [RFC 0003](../rfcs/0003-conditional-zygisk-publication.md) supplies passive packaging, Core-owned discovery and durable/provider boundaries.
 
 **The maintainer amendment removes automatic/standby Zygisk publication.** RFC0003 remains reopened for the detailed implementation and lifecycle proof. Auto must not create/retain discovery as a reserve. Cached images or old hooks after explicit Zygisk use are a retirement problem, not authorization to reactivate it. Passive mapping does not itself prove hook consumption; possible consumption still blocks switching. Preserve conservative guards until the replacement proof model and old-state migration are reviewed. [Pinned RFC 0003][rfc3]
 

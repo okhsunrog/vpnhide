@@ -572,10 +572,7 @@ impl CoreKpm {
             let lock = KpmCtlLock::acquire_delivery(&self.lock_path)?;
             require_no_kernel_owner(ctl)?;
             let status = self.status_locked()?.ok_or("KPM is not loaded")?;
-            use vpnhide_protocol::hook_ids::StatusError;
-            if status.error != StatusError::Ok as u32
-                && status.error != StatusError::PartialHooks as u32
-            {
+            if !status.allows_configuration() {
                 return Err(format!("KPM is not ready: status error {}", status.error).into());
             }
             require_no_kernel_owner(ctl)?;
