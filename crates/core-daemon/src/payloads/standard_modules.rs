@@ -25,8 +25,10 @@ const MAX_FILES: usize = 512;
 const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_MODULES: usize = 32;
+pub(crate) mod probe;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BoundModule {
     pub source: PathBuf,
     pub sha256: String,
@@ -126,9 +128,14 @@ fn bind(
 /// Inspect only the fixed Android module locations. Missing evidence is ordinary
 /// Unknown; compressed modules and symlink roots are not silently decoded/followed.
 pub fn observe() -> Observation {
-    observe_at(&ROOTS.map(PathBuf::from), Path::new("/sys/module"), 0)
+    probe::observe()
 }
-fn observe_at(roots: &[PathBuf], sys_path: &Path, owner: u32) -> Observation {
+fn observe_at(
+    roots: &[PathBuf],
+    sys_path: &Path,
+    owner: u32,
+    mut emit: impl FnMut(&BoundModule) -> io::Result<()>,
+) -> Observation {
     let mut observation = Observation::default();
     let Ok(sys) = directory(sys_path, owner) else {
         observation.incomplete = true;
@@ -192,7 +199,13 @@ fn observe_at(roots: &[PathBuf], sys_path: &Path, owner: u32) -> Observation {
             let module = super::open_beneath(&dir, name)
                 .and_then(|file| bind(&sys, file, root.join(name), owner, &mut budget));
             match module {
-                Ok(module) => observation.modules.push(module),
+                Ok(module) => {
+                    if emit(&module).is_err() {
+                        observation.incomplete = true;
+                        return observation;
+                    }
+                    observation.modules.push(module);
+                }
                 Err(_) => observation.unbound_files += 1,
             }
             if budget == 0 {
@@ -231,6 +244,7 @@ mod tests {
             &[root.join("files")],
             &root.join("sys"),
             fs::metadata(root).unwrap().uid(),
+            |_| Ok(()),
         )
     }
     #[test]

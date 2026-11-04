@@ -9,6 +9,11 @@ pub(crate) mod observations;
 /// Dispatch a probe subcommand. `None` when `args` is not one (the caller runs the daemon).
 pub fn run(args: &[String]) -> Option<i32> {
     let code = match args {
+        [command, mode, schema]
+            if command == "probe" && mode == "native-standard-modules" && schema == "1" =>
+        {
+            crate::payloads::standard_modules::probe::child()
+        }
         // Read-only capability guard for host tools. Older binaries reject this
         // reserved probe prefix, so they never interpret a new verb as a socket.
         [command, mode, schema]

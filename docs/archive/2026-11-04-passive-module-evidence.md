@@ -6,6 +6,8 @@ acceptance, a published package, or permission to push the new policy to main.
 
 ## Implemented call path
 
+Initial implementation: `66d4859684f6195873e462baf4f5fbc87bfa382f`.
+
 `Prepared::from_bundle` → `payloads::device::observe` →
 `standard_modules::observe` → `selection::assess_projected` →
 `kmi::resolve_with_modules` consumes one common artifact-model ELF metadata owner.
@@ -34,8 +36,8 @@ ARM32 kernel port or prove a32-bit Android worker exists.
 
 ## Cloud checks
 
--404 Core library tests, no failures/skips.
--34 artifact-model library tests with archives/fixtures, no failures/skips.
+- 404 Core library tests, no failures/skips.
+- 34 artifact-model library tests with archives/fixtures, no failures/skips.
 - Strict host all-target Clippy including fixture oracle, strict ARM64/ARMv7 Core
   library Clippy, formatting and whitespace checks.
 - Retained logs: `/workspace/vpnhide-build-evidence/backend-policy-passive-modules/`.
@@ -54,3 +56,31 @@ work; no production experimental gate was enabled. Provider lifecycle, old-Zygis
 continuity/offer and explicit backend settings are not completed by this observer.
 Real vendor module inventory, kernel-private ABI, Android SELinux and device
 behavior require later device acceptance. See [ROADMAP](../../ROADMAP.md).
+
+## Follow-up: bounded same-image child
+
+The local follow-up moves collection into the closed
+`probe native-standard-modules 1` CLI in the executing Core image. The parent
+uses `/proc/self/exe`, clears inherited environment, and reuses the existing
+bounded process-group collector with a three-second timeout and128 KiB combined
+stdout/stderr budget. No shell, caller-selected path or RPC root endpoint is added.
+
+Each verified module is flushed as one typed JSON frame before scanning onward.
+Exact schema/completion and successful nontruncated process completion are needed
+for complete inventory. Valid prefix records survive timeout, failed exit,
+truncated/malformed completion or extra frames, retaining contrary evidence while
+preventing quorum admission. The existing bounded-process tests own timeout and
+descendant cleanup behavior; this slice adds independent literal protocol tests
+and executes the real Core probe binary, including rejection of unknown protocol
+versions and arbitrary extra paths before daemon startup.
+
+The final follow-up passed406 Core tests,3 IPC startup/reconnect tests,2 capacity
+tests,5 autonomous self-target/bootstrap tests and1 real probe integration test,
+with no failures/skips. Strict host all-target/oracle and ARM64/ARMv7 library plus
+Core binary Clippy passed, as did formatting, module-scaffold and APK no-root
+checks. Logs are in
+`/workspace/vpnhide-build-evidence/backend-policy-module-child/`.
+
+The hard child deadline is implemented. Durable/public selection evidence,
+preflight dispatch, remaining continuity/explicit-choice/offer code and actual
+device acceptance remain open. RPC31/journal14 and the backend wire are unchanged.

@@ -52,7 +52,8 @@ struct Section<'a> {
 
 /// Passive metadata of an AArch64 relocatable module, independent of any
 /// VPN Hide capability marker. These values do not prove it is currently loaded.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ModuleMetadata {
     pub name: String,
     pub vermagic: String,
