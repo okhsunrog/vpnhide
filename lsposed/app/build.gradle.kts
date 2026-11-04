@@ -74,7 +74,9 @@ val rustNdkDir =
         ?: rustSdkDir.resolve("ndk/$rustNdkVersion").absolutePath
 val repoDir = projectDir.parentFile.parentFile
 val isWindowsHost = System.getProperty("os.name").lowercase().contains("windows")
-val appNativeCrates =
+// Production/build workspace dependencies of core-ffi, shared by Android and
+// host bindings. Keep both paths on one input set; dev-only Core is not linked.
+val coreFfiCrates =
     listOf(
         "checks",
         "core-ffi",
@@ -84,14 +86,16 @@ val appNativeCrates =
         "native-policy",
         "migration-policy",
         "diagnostic-model",
-        "activator",
-        "bounded-process",
-        "apatch-abi",
+        "package-trust",
+        "artifact-model",
         "protocol",
     ).map { repoDir.resolve("crates/$it") }
-val coreFfiCrates =
-    listOf("core-ffi", "core-client", "core-rpc", "build-contract", "native-policy", "protocol", "checks", "diagnostic-model", "migration-policy")
-        .map { repoDir.resolve("crates/$it") }
+val coreTrustFile = providers.environmentVariable("VPNHIDE_CORE_TRUST_FILE").orNull?.let(::file)
+val coreBuildSequence = providers.environmentVariable("VPNHIDE_BUILD_SEQUENCE").orElse("0")
+// Existing public trust export and sequence consumed by Rust's build script;
+// no private key or new installation authority is introduced.
+val coreFfiBuildInputs =
+    files(coreFfiCrates, repoDir.resolve("Cargo.toml"), repoDir.resolve("Cargo.lock"), listOfNotNull(coreTrustFile))
 val rustAssetsOut = rustAssetsDir.get().asFile
 
 // Opt-in x86_64 native + APK ABI for running the app on an Android x86_64
@@ -110,9 +114,9 @@ val buildAppNative =
         environment("NDK_HOME", rustNdkDir)
         // These crate roots contain only source/manifests/build scripts; target
         // output lives at the workspace root and is deliberately not an input.
-        inputs.files(appNativeCrates).withPathSensitivity(PathSensitivity.RELATIVE)
-        inputs.file(repoDir.resolve("Cargo.toml"))
-        inputs.file(repoDir.resolve("Cargo.lock"))
+        inputs.files(coreFfiBuildInputs).withPathSensitivity(PathSensitivity.RELATIVE)
+        inputs.property("compiledCoreTrustConfigured", coreTrustFile != null)
+        inputs.property("compiledCoreBuildSequence", coreBuildSequence)
         outputs.dir(rustJniLibsDir)
         outputs.dir(rustAssetsDir)
         commandLine(
@@ -173,8 +177,9 @@ val buildCoreFfiHost =
         group = "build"
         description = "Builds the host core-ffi library the UniFFI bindgen reads metadata from."
         workingDir = repoDir
-        inputs.files(coreFfiCrates).withPathSensitivity(PathSensitivity.RELATIVE)
-        inputs.file(repoDir.resolve("Cargo.lock"))
+        inputs.files(coreFfiBuildInputs).withPathSensitivity(PathSensitivity.RELATIVE)
+        inputs.property("compiledCoreTrustConfigured", coreTrustFile != null)
+        inputs.property("compiledCoreBuildSequence", coreBuildSequence)
         outputs.file(repoDir.resolve("target/debug/$hostLibName"))
         commandLine("cargo", "build", "--package", "vpnhide_core_ffi", "--lib", "--locked")
     }

@@ -188,6 +188,13 @@ directions, since `internal` is module-wide and the compiler will not.
 
 ## Quality gates
 
+- **Native build inputs:** keep the common `coreFfiCrates` input set in
+  `app/build.gradle.kts` aligned with core-ffi's production/build path dependencies
+  (inspect `cargo metadata` when changing that graph). Android JNI and host
+  bindings use the same set, workspace manifest/lockfile, public trust export and
+  build sequence. Do not add the dev-only root engine to APK dependencies. Cargo
+  cannot notice a changed crate or build environment when Gradle skips its task.
+
 - **ktlint** — formatting/style. Pre-commit hook (`.githooks/pre-commit`) + CI.
   Fix with `ktlint --format "lsposed/**/*.kt"`.
 - **detekt** — complexity, function/file length, dead private members, bug

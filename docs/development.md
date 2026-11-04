@@ -30,6 +30,15 @@ How to build vpnhide from source.
 
 The app-native crates under `crates/` are built via cargo-ndk by the `buildAppNative` Gradle `Exec` task in `lsposed/app/build.gradle.kts` (wired into `preBuild`). It bundles the core-ffi client and shared native checks together in `libvpnhide_core_ffi.so` for both APK ABIs. The APK ships no executable and runs no root process: root probes and effects run in core (`vpnhide-core`), see [core-2.0-ipc-auth](core-ipc-auth.md). The task tracks every app-native path dependency, manifest, lockfile and build script, so changing a shared crate invalidates the APK native build. There is no extra Gradle plugin; no manual `cargo` invocation is needed for the APK build.
 
+Android JNI and host UniFFI generation share one `coreFfiCrates` input set, aligned
+with the production/build path-dependency closure from `cargo metadata`. It
+includes package-trust and artifact-model, not the dev-only Root engine. Both
+builds track the existing public `VPNHIDE_CORE_TRUST_FILE` bytes and
+`VPNHIDE_BUILD_SEQUENCE` as well as the workspace manifest/lockfile. Changing a
+public pin or sequence must invoke Cargo; unchanged inputs remain cacheable.
+This introduces no new key, secret, runtime setting or installation authority.
+
+
 ## Repository layout
 
 | Path | Component |
