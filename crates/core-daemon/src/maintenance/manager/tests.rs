@@ -109,6 +109,11 @@ fn properties_do_not_guess_escaped_or_duplicate_installer_semantics() {
 fn platform_data_parent_is_distinct_from_privileged_adb_boundary() {
     let root = tempfile::tempdir().unwrap();
     let manager = install(root.path());
+    // Model AOSP /data: system:system 0771. As root (CI containers) that is
+    // uid/gid 1000; an unprivileged owner keeps its own uid and primary gid.
+    if unsafe { libc::geteuid() } == 0 {
+        std::os::unix::fs::chown(root.path().join("data"), Some(1000), Some(1000)).unwrap();
+    }
     fs::set_permissions(root.path().join("data"), fs::Permissions::from_mode(0o771)).unwrap();
     manager.require_unchanged().unwrap();
     fs::set_permissions(

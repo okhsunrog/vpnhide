@@ -259,13 +259,19 @@ fn boot(plan: &Plan, image: &Path, root: &Path, work: &Path, tag: &str) -> io::R
         32 * 1024 * 1024,
         &work.join(format!("serial-{tag}.log")),
     )?;
+    let serial = String::from_utf8_lossy(&r.output.stdout);
+    // CI runners discard /tmp after the job. Keep the complete bounded serial
+    // evidence in the job log before the verifier rejects a panic or timeout.
+    if !success(&r) || !model::panic_lines(&serial).is_empty() {
+        eprintln!("QEMU serial evidence ({tag}):\n{serial}");
+    }
     if !success(&r) {
         return Err(error(format!(
             "QEMU failed/timed out/truncated in {tag}; retained evidence {}",
             work.display()
         )));
     }
-    for line in String::from_utf8_lossy(&r.output.stdout).lines() {
+    for line in serial.lines() {
         if [
             "RESULT ",
             "SUMMARY ",

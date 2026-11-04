@@ -4,7 +4,8 @@
 # builtin/scripts/integrate.py at apply time (one source of truth: kmod/generated,
 # kmod/shared). -I$(src) lets core.c/hook_*.c include <linux/vpnhide.h> from the
 # tree's own include/linux and the vendored generated/shared headers locally.
-ccflags-y += -I$(src)
+# Shared diagnostic atomics must remain in kernel text, without compiler-rt.
+ccflags-y += -I$(src) -mno-outline-atomics
 
 obj-$(CONFIG_VPNHIDE) += vpnhide.o
 vpnhide-y := core.o hook_iface.o hook_socket.o hook_route.o
