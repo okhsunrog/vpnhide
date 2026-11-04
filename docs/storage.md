@@ -290,15 +290,17 @@ The verified bundled catalog and complete UID inventory freeze backend/payload/
 policy projections before journaled effects. Builtin and bundled alternatives
 are assessed for actual applicability; coexisting payload files are not a conflict.
 Actual incompatible residents or unknown load effects stop unsafe progression.
-Fallback requires bounded durable no-effect evidence, not a diagnostic failure.
+There is no automatic inter-family fallback. Unknown effects or diagnostic
+failures do not authorize another family.
 Save/Repair preserve attempt identity and delivery evidence. `native_boot.json`
 is diagnostic output; the private journal is authority. See
 [Core architecture](core-architecture.md) and [module lifecycle](core-module-lifecycle.md).
 
 The main Core package now contains one passive Zygisk pair and no top-level
 `zygisk/` directory. A complete discovery runtime has not been implemented;
-publication/transition and partial-health policy remain under
-[reopened review](rfcs/0003-conditional-zygisk-publication.md). Legacy module-dir
+the [accepted continuity policy](rfcs/0005-unified-backend-lifecycle-policy.md)
+requires explicit informed Zygisk selection. The inert projection format and Root
+preparation/readback exist, but durable dispatch/bootstrap remain unimplemented. Legacy module-dir
 readers remain scoped to compatibility/recovery. Existing possible-hook-exposure
 guards prohibit same-boot kernel transitions after Zygisk consumption.
 

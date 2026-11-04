@@ -15,9 +15,11 @@ scaffold check enforces these boundaries; backend activation is not shell logic.
 The full package contains both daemon ABIs before customization, a verified payload
 manifest, seven ko candidates, KPM and one passive Zygisk ABI pair. The current
 package cutover has no main-Core `zygisk/` discovery directory; it is not a
-completed Zygisk runtime. Final publication/transition policy is
-[reopened](rfcs/0003-conditional-zygisk-publication.md); no managed projection,
-automatic backend next-boot preparation or backend-transition PendingRestart workflow is implemented. Core-package update PendingRestart is a separate maintenance receipt.
+completed Zygisk runtime. The accepted [continuity policy](rfcs/0005-unified-backend-lifecycle-policy.md)
+keeps working backends and excludes automatic cross-family fallback. The existing
+writer can stage a device-local kernel choice for the next device boot; it does
+not change the running family. Core-package update PendingRestart is a separate
+maintenance receipt. Managed Zygisk dispatch/bootstrap remains incomplete.
 
 ## Service startup
 
@@ -31,7 +33,7 @@ Native preparation waits for PackageManager/complete UID observations outside th
 writer. The verified catalog, app inventory, backend choice, payload identity and wire
 policy are frozen before journaled effects. Core adopts an applicable builtin or
 selects eligible bundled candidates. Unknown loads, policy gaps and possible
-Zygisk hook exposure constrain fallback; installed alternatives are not conflicts
+Zygisk hook exposure constrain any explicitly requested transition; installed alternatives are not conflicts
 merely because their files coexist. Legacy installed/runtime evidence remains
 isolated for migration/recovery.
 
@@ -53,7 +55,8 @@ there is no automatic reboot. Missing-Core/incompatible-RPC bootstrap/manager
 handoff remains incomplete. See [maintenance](core-maintenance.md).
 Compatible client/UI-only APK changes need not imply a Core reinstall; actual
 Java hook, runtime and contract changes have separate lifecycle requirements.
-Reboot counts and new backend hints remain under review, not a blanket policy.
+A compatible APK-only change requires no device reboot. Preparing a backend is
+separate from rebooting; Core never reboots the device automatically.
 
 ## Disable and removal
 
@@ -76,3 +79,30 @@ App socket failure retries the endpoint rather than replaying boot effects.
 Real manager staging, SELinux, provider catalogs and device reboot acceptance remain
 separate from host tests. Never use the manager's global module-removal command
 for a single VPN Hide component.
+
+## Managed discovery preparation boundary
+
+`artifact-model::zygisk_projection` defines the closed inert image:
+`module.prop`, `vpnhide-projection.json`, `zygisk/arm64-v8a.so` and
+`zygisk/armeabi-v7a.so`. The descriptor binds an operation, source commit, exact
+raw and normalized manifest digests and both final library identities. The
+recipient is exactly `vpnhide_zygisk_runtime` with control2/activation1/projection1.
+There is no service, independent updater, installer logic, targets file or hook
+authorization in this image. The Core ZIP still carries only its passive pair.
+
+The Root preparation component pins the actual running Core, enabled source and
+checked manager, verifies/copies the final bytes into a sealed archive, and removes
+temporary preparation files before admission. Its readback distinguishes a complete
+staged tree, complete active tree and metadata-only active placeholder; a placeholder
+alone or manager exit0 cannot verify readiness. Symlinks, extra scripts/trees,
+foreign targets, writable files and either missing ABI fail closed. These are
+filesystem evidence fixtures, not certification of a provider's scan/boot lifecycle.
+
+This component is not yet connected to production manager dispatch. Its caller
+must persist intent before invoking the manager, retain uncertain outcomes without
+redispatch and verify the next boot before authorizing code. New managed recipients
+require current-boot journaled authority and exact consumed generation/policy proof;
+an empty bootstrap proves code/consumption only, never hooks or behavioral coverage.
+Production still refuses new Zygisk choice and current-Zygisk retirement. Durable
+projection work/recovery, bootstrap, continuity/withdrawal/update and the genuine
+mixed-ABI secondary32 worker remain implementation work.

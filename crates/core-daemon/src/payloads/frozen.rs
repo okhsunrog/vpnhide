@@ -16,8 +16,15 @@ pub struct FrozenPayload {
 
 impl FrozenPayload {
     pub fn copy(input: &File) -> io::Result<Self> {
+        Self::copy_with_limit(input, super::MAX_PAYLOAD_BYTES)
+    }
+
+    pub(crate) fn copy_with_limit(input: &File, limit: u64) -> io::Result<Self> {
+        if limit == 0 || limit > super::MAX_BUNDLE_BYTES {
+            return Err(io::Error::other("invalid immutable artifact budget"));
+        }
         let metadata = input.metadata()?;
-        if !metadata.is_file() || metadata.len() == 0 || metadata.len() > super::MAX_PAYLOAD_BYTES {
+        if !metadata.is_file() || metadata.len() == 0 || metadata.len() > limit {
             return Err(io::Error::other("invalid frozen payload size or type"));
         }
         // Use the kernel ABI directly: the bionic wrapper is newer than our
@@ -43,7 +50,7 @@ impl FrozenPayload {
                 break;
             }
             bytes += read as u64;
-            if bytes > super::MAX_PAYLOAD_BYTES || bytes > metadata.len() {
+            if bytes > limit || bytes > metadata.len() {
                 return Err(io::Error::other("payload grew while freezing"));
             }
             file.write_all(&buffer[..read])?;

@@ -24,6 +24,15 @@ pub enum Abi {
     Arm32,
 }
 
+impl Abi {
+    pub const fn zygisk_library_name(self) -> &'static str {
+        match self {
+            Self::Arm64 => "arm64-v8a.so",
+            Self::Arm32 => "armeabi-v7a.so",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PayloadKind {
@@ -40,13 +49,7 @@ impl PayloadKind {
             }
             Self::Kmod { .. } => Err(invalid("unsupported bundle KMI")),
             Self::Kpm => Ok("payloads/kpm/arm64/vpnhide.kpm".into()),
-            Self::Zygisk { abi } => Ok(format!(
-                "payloads/zygisk/{}.so",
-                match abi {
-                    Abi::Arm64 => "arm64-v8a",
-                    Abi::Arm32 => "armeabi-v7a",
-                }
-            )),
+            Self::Zygisk { abi } => Ok(format!("payloads/zygisk/{}", abi.zygisk_library_name())),
         }
     }
 }

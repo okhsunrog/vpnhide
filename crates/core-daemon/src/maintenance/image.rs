@@ -20,9 +20,10 @@ const IMAGE_BUDGET: Duration = Duration::from_secs(30);
 /// Exact files and their derived directory prefixes bound the traversal; no
 /// unknown subtree (including an empty one) or symlink can become executable
 /// manager input alongside the signed runtime members.
-fn require_layout(
+pub(super) fn require_layout(
     directory: &File,
     allowed: &std::collections::BTreeSet<String>,
+    large_files: &std::collections::BTreeSet<String>,
     uid: u32,
     deadline: Instant,
 ) -> io::Result<()> {
@@ -84,9 +85,7 @@ fn require_layout(
             } else if !meta.is_file()
                 || meta.nlink() != 1
                 || (path == "update" && meta.len() != 0)
-                || (!matches!(path.as_str(), "vpnhide-core")
-                    && !path.starts_with("payloads/")
-                    && meta.len() > 64 * 1024)
+                || (!large_files.contains(&path) && meta.len() > 64 * 1024)
             {
                 return Err(invalid());
             }
@@ -399,6 +398,11 @@ impl ImageFence {
                 &dir,
                 &vpnhide_artifact_model::core_layout::CoreLayout::Installed(&catalog.manifest)
                     .allowed_files()?,
+                &files
+                    .keys()
+                    .filter(|name| name.as_str() == "vpnhide-core" || name.starts_with("payloads/"))
+                    .cloned()
+                    .collect(),
                 uid,
                 deadline,
             )?;

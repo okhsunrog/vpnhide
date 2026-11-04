@@ -6,6 +6,34 @@ use std::{collections::BTreeMap, io};
 
 use super::{MAX_PAYLOAD_BYTES, invalid};
 
+/// Bounded shared-library identity check used by projection preparation and its
+/// recipient reader. This is not a dynamic-linker or installed-hook proof.
+pub fn shared_object_header(
+    data: &[u8],
+    file_bytes: u64,
+    abi: crate::manifest::Abi,
+) -> io::Result<()> {
+    let (class, machine, minimum) = match abi {
+        crate::manifest::Abi::Arm64 => (2, 183u16, 64),
+        crate::manifest::Abi::Arm32 => (1, 40u16, 52),
+    };
+    if data.len() < 20
+        || file_bytes < minimum
+        || file_bytes > MAX_PAYLOAD_BYTES
+        || &data[..4] != b"\x7fELF"
+        || data[4] != class
+        || data[5] != 1
+        || data[6] != 1
+        || u16::from_le_bytes([data[16], data[17]]) != 3
+        || u16::from_le_bytes([data[18], data[19]]) != machine
+    {
+        return Err(invalid(
+            "incompatible shared library class/type/architecture",
+        ));
+    }
+    Ok(())
+}
+
 fn bytes(data: &[u8], offset: u64, len: u64) -> io::Result<&[u8]> {
     let end = offset
         .checked_add(len)

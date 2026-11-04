@@ -689,6 +689,14 @@ does not prove unhooking, full coverage or successful new authorization.
 
 Production still supplies the colocated compatibility recipient until the
 journaled managed projection executor is implemented. This identity split creates
-no discovery copy, manager operation, new module ID, consent grant or Zygisk choice.
+no production discovery copy, manager operation, consent grant or Zygisk choice.
 Both actual ABI proofs remain mandatory on mixed-ABI devices; ARMv7 compilation
 and a 64-bit worker do not replace the missing genuine secondary32 launcher.
+
+The shared inert projection format and Root preparation/readback component now
+exist; see [its boundaries](core-module-lifecycle.md#managed-discovery-preparation-boundary).
+They do not supply a production dispatch or boot authorization controller.
+A managed recipient cannot qualify from unauthenticated mapping alone: current-boot
+authority and actual consumption of its exact generation/policy are required.
+An explicitly empty bootstrap may unload in the worker; this is code-identity
+proof only. A protected worker still needs its actual live hook image.

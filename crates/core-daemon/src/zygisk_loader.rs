@@ -627,6 +627,14 @@ impl LoaderRegistry {
         else {
             return false;
         };
+        let required_authorization = match sources.recipient.is_managed() {
+            Ok(true) => match sources.recipient.read_authorized(&context.boot_id) {
+                Ok(Some(authority)) => Some(authority),
+                _ => return false,
+            },
+            Ok(false) => None,
+            Err(_) => return false,
+        };
         let manifest = manifest_sha256(catalog);
         if sources.generation.directory != catalog.root_identity
             || sources.generation.sha256 != manifest
@@ -645,6 +653,10 @@ impl LoaderRegistry {
                     && o.directory_identity == sources.recipient_identity
                     && o.catalog_directory_identity == sources.generation.directory
                     && o.manifest_sha256 == manifest
+                    && required_authorization.as_ref().is_none_or(|a| {
+                        o.generation == Some(a.generation)
+                            && o.policy_sha256 == Some(Sha256::digest(a.wire.as_bytes()).into())
+                    })
                     && image::process_identity(proc_root, o.zygote.pid).ok() == Some(o.zygote)
                     && image::process_identity(proc_root, o.companion.pid).ok() == Some(o.companion)
                     && image::mapping(proc_root, o.companion.pid, o.companion_anchor)
@@ -754,6 +766,9 @@ impl LoaderRegistry {
         let _worker_lease = crate::autonomous::android_worker::lease()?;
         let target = crate::zygisk::ZygiskTarget::open(&context.recipient_root)?;
         let expected = target.read_authorized(&context.boot_id)?;
+        if target.is_managed()? && expected.is_none() {
+            return Err("managed projection requires journaled bootstrap authority".into());
+        }
         self.reconcile(Path::new("/proc"));
         if self.live_worker_for_at(&context, Path::new("/proc"), expected.as_ref()) {
             return Ok(());
@@ -816,14 +831,32 @@ impl LoaderRegistry {
             return false;
         };
         let catalog = &sources.generation;
+        if sources.recipient.is_managed().unwrap_or(true) && expected.is_none() {
+            return false;
+        }
+        let policy = match expected {
+            Some(a) => match a.policy(vpnhide_protocol::hook_ids::ZYGISK_HOOK_MASK) {
+                Some(policy) => Some(policy),
+                None => return false,
+            },
+            None => None,
+        };
         let records = self.observations.lock().expect("loader observations");
         records.iter().any(|o| {
+            // A fixed worker may prove an explicitly empty bootstrap grant and
+            // then dlclose. A protected worker must still map its hook image.
+            let mapping_required = policy.as_ref().is_some_and(|p| {
+                p.targets
+                    .iter()
+                    .any(|t| t.uid == o.target_uid && t.hookmask != 0)
+            });
             !excluded.contains(&o.process)
                 && o.specialized
                 && match expected {
                     Some(a) => {
-                        image::mapping(proc_root, o.process.pid, o.child_anchor)
-                            .is_ok_and(|m| m == o.child_mapping)
+                        (!mapping_required
+                            || image::mapping(proc_root, o.process.pid, o.child_anchor)
+                                .is_ok_and(|m| m == o.child_mapping))
                             && o.generation == Some(a.generation)
                             && o.policy_sha256 == Some(Sha256::digest(a.wire.as_bytes()).into())
                     }
@@ -835,7 +868,7 @@ impl LoaderRegistry {
                 && o.directory_identity == sources.recipient_identity
                 && o.catalog_directory_identity == catalog.directory
                 && o.manifest_sha256 == catalog.sha256
-                && live_identity(o, proc_root, expected.is_some())
+                && live_identity(o, proc_root, mapping_required)
                 && image::inspect_before(&o.image, Some(deadline)).is_ok_and(|identity| {
                     identity
                         .sha256
@@ -844,7 +877,7 @@ impl LoaderRegistry {
                         .collect::<String>()
                         == o.payload_sha256
                 })
-                && live_identity(o, proc_root, expected.is_some())
+                && live_identity(o, proc_root, mapping_required)
                 && sources.revalidate(context, deadline).is_ok()
         })
     }
@@ -1529,5 +1562,79 @@ mod tests {
         );
         fs::remove_dir_all(f.context.recipient_root.join("zygisk")).unwrap();
         assert_eq!(registry.consumption_at(&expected, 7, &f.proc_root).len(), 1);
+    }
+    #[test]
+    fn managed_availability_requires_current_consumption_and_empty_bootstrap_is_not_a_hook_claim() {
+        use vpnhide_protocol::zygisk_activation::Authorization;
+        let mut f = fixture();
+        split_recipient(&mut f);
+        f.context.boot_id = "12345678-1234-1234-1234-123456789abc".into();
+        f.observation.boot_id = f.context.boot_id.clone();
+        fs::write(
+            f.context.recipient_root.join("module.prop"),
+            vpnhide_artifact_model::zygisk_projection::Descriptor::module_prop(),
+        )
+        .unwrap();
+        let registry = LoaderRegistry::default();
+        *registry.context.lock().unwrap() = Some(f.context.clone());
+        registry
+            .observations
+            .lock()
+            .unwrap()
+            .push(f.observation.clone());
+        process(&f.proc_root, 4, 40, WORKER_PROCESS);
+        assert!(!registry.available_at(&f.catalog, Abi::Arm64, false, &f.proc_root));
+        let auth = Authorization {
+            boot_id: f.context.boot_id.clone(),
+            generation: 8,
+            wire: "vpnhide 2 config\ndebug 0\ndefault 0\nend 0\n".into(),
+        };
+        let path = f
+            .context
+            .recipient_root
+            .join(vpnhide_protocol::zygisk_activation::FILE_NAME);
+        fs::write(&path, auth.encode().unwrap()).unwrap();
+        assert!(!registry.available_at(&f.catalog, Abi::Arm64, false, &f.proc_root));
+        let mut records = registry.observations.lock().unwrap();
+        records[0].generation = Some(8);
+        records[0].policy_sha256 = Some(Sha256::digest(auth.wire.as_bytes()).into());
+        drop(records);
+        assert!(registry.available_at(&f.catalog, Abi::Arm64, false, &f.proc_root));
+        assert!(!registry.live_worker_at(&f.context, &f.proc_root));
+        // No child maps file: the empty grant requests no worker hooks.
+        assert!(registry.live_worker_for_at(&f.context, &f.proc_root, Some(&auth)));
+        let protected = Authorization {
+            wire: vpnhide_protocol::format_config(
+                false,
+                0,
+                &[vpnhide_protocol::Target {
+                    uid: f.observation.target_uid,
+                    hookmask: vpnhide_protocol::hook_ids::ZYGISK_HOOK_MASK,
+                }],
+            ),
+            ..auth.clone()
+        };
+        assert!(protected.encode().is_some());
+        registry.observations.lock().unwrap()[0].policy_sha256 =
+            Some(Sha256::digest(protected.wire.as_bytes()).into());
+        fs::write(&path, protected.encode().unwrap()).unwrap();
+        assert!(!registry.live_worker_for_at(&f.context, &f.proc_root, Some(&protected)));
+        fs::write(
+            f.proc_root.join("4/maps"),
+            fs::read(f.proc_root.join("3/maps")).unwrap(),
+        )
+        .unwrap();
+        assert!(registry.live_worker_for_at(&f.context, &f.proc_root, Some(&protected)));
+        fs::write(
+            &path,
+            Authorization {
+                generation: 9,
+                ..auth
+            }
+            .encode()
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(!registry.available_at(&f.catalog, Abi::Arm64, false, &f.proc_root));
     }
 }

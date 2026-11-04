@@ -75,7 +75,10 @@ impl ZygiskTarget {
     }
 
     pub(crate) fn bundled(&self) -> Result<bool, String> {
-        Ok(matches!(self.verify()?, Recipient::Authorized))
+        Ok(matches!(
+            self.verify()?,
+            Recipient::Authorized | Recipient::Managed
+        ))
     }
 
     fn pinned_path(&self) -> PathBuf {
@@ -111,7 +114,7 @@ impl ZygiskTarget {
         let recipient = recipient_from_manifest(&bytes)
             .ok_or("Zygisk recipient identity or activation contract is incompatible")?;
         if self.revocation_only {
-            return if recipient == Recipient::Authorized {
+            return if matches!(recipient, Recipient::Authorized | Recipient::Managed) {
                 Ok(recipient)
             } else {
                 Err("revocation requires bundled authorization contract".into())
@@ -126,11 +129,8 @@ impl ZygiskTarget {
             return Err("Zygisk library directory is not a directory".into());
         }
         let mut found = false;
-        for (name, class, machine, size) in [
-            ("arm64-v8a.so", 2, 183u16, 64),
-            ("armeabi-v7a.so", 1, 40u16, 52),
-        ] {
-            let path = libraries.join(name);
+        for abi in [crate::payloads::Abi::Arm64, crate::payloads::Abi::Arm32] {
+            let path = libraries.join(abi.zygisk_library_name());
             if !entry_exists(&path)? {
                 continue;
             }
@@ -140,20 +140,13 @@ impl ZygiskTarget {
                 .open(path)
                 .map_err(|e| e.to_string())?;
             let metadata = file.metadata().map_err(|e| e.to_string())?;
-            if !metadata.is_file() || metadata.len() < size {
+            if !metadata.is_file() {
                 return Err("invalid Zygisk library artifact".into());
             }
             let mut header = [0; 20];
             file.read_exact(&mut header).map_err(|e| e.to_string())?;
-            if &header[..4] != b"\x7fELF"
-                || header[4] != class
-                || header[5] != 1
-                || header[6] != 1
-                || u16::from_le_bytes([header[16], header[17]]) != 3
-                || u16::from_le_bytes([header[18], header[19]]) != machine
-            {
-                return Err("incompatible Zygisk ELF class, type or architecture".into());
-            }
+            vpnhide_artifact_model::elf::shared_object_header(&header, metadata.len(), abi)
+                .map_err(|e| e.to_string())?;
             found = true;
         }
         if !found {
@@ -163,7 +156,14 @@ impl ZygiskTarget {
     }
 
     pub fn is_bundled(&self) -> Result<bool, String> {
-        Ok(self.verify()? == Recipient::Authorized)
+        Ok(matches!(
+            self.verify()?,
+            Recipient::Authorized | Recipient::Managed
+        ))
+    }
+
+    pub(crate) fn is_managed(&self) -> Result<bool, String> {
+        Ok(self.verify()? == Recipient::Managed)
     }
 
     pub fn read_authorized(
@@ -313,7 +313,9 @@ impl ZygiskTarget {
         let preflight = || -> Result<PathBuf, String> {
             vpnhide_activator::validate_zygisk_config_wire(wire).map_err(|e| e.to_string())?;
             let recipient = self.verify()?;
-            if (recipient == Recipient::Authorized) != authorization.is_some() {
+            if (matches!(recipient, Recipient::Authorized | Recipient::Managed))
+                != authorization.is_some()
+            {
                 return Err("recipient requires its exact activation contract".into());
             }
             let filename = if authorization.is_some() {

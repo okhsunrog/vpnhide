@@ -54,7 +54,7 @@ fn read_snapshot_for_boot(directory: RawFd, boot: &str) -> Option<Snapshot> {
     )
     .ok()?;
     match zygisk_activation::recipient_from_manifest(&manifest)? {
-        zygisk_activation::Recipient::Authorized => {
+        zygisk_activation::Recipient::Authorized | zygisk_activation::Recipient::Managed => {
             let bytes = read_at(
                 directory,
                 c"zygisk-activation.txt",
@@ -224,5 +224,28 @@ mod tests {
         )
         .unwrap();
         assert!(read_config_for_boot(dir.as_raw_fd(), BOOT).is_none());
+    }
+    #[test]
+    fn managed_projection_requires_current_boot_authority_and_never_reads_legacy_targets() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = File::open(root.path()).unwrap();
+        fs::write(root.path().join("module.prop"), "id=vpnhide_zygisk_runtime\nvpnhideControl=2\nvpnhideActivation=1\nvpnhideProjection=1\n").unwrap();
+        fs::write(root.path().join("targets.txt"), WIRE).unwrap();
+        assert!(read_snapshot_for_boot(dir.as_raw_fd(), BOOT).is_none());
+        authorized(root.path(), BOOT, 7, WIRE);
+        assert_eq!(
+            read_snapshot_for_boot(dir.as_raw_fd(), BOOT)
+                .unwrap()
+                .authorization
+                .unwrap()
+                .generation,
+            7
+        );
+        assert!(
+            read_snapshot_for_boot(dir.as_raw_fd(), "12345678-1234-1234-1234-123456789abd")
+                .is_none()
+        );
+        fs::write(root.path().join("module.prop"), "id=vpnhide_zygisk_runtime\nvpnhideControl=2\nvpnhideActivation=1\nvpnhideProjection=2\n").unwrap();
+        assert!(read_snapshot_for_boot(dir.as_raw_fd(), BOOT).is_none());
     }
 }

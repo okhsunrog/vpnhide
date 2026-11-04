@@ -112,8 +112,12 @@ Installer/recovery shims are not runtime activators. See
 | Core `payloads/zygisk/` | One passive pair; no main-Core top-level `zygisk/` discovery directory |
 | Legacy `vpnhide_kmod`, `vpnhide_kpm`, `vpnhide_zygisk` | Explicit inventory/migration/recovery compatibility; not required separate installs for the unified bundle |
 
-Managed Zygisk discovery is still incomplete and its lifecycle policy is reopened;
-no projected module or automatic next-boot executor is established by these paths.
+Managed Zygisk discovery is still incomplete. The accepted policy requires explicit
+informed choice; new Zygisk is never automatic fallback or standby. The inert
+preparation component reserves `modules/vpnhide_zygisk_runtime` and
+`modules_update/vpnhide_zygisk_runtime` for checked manager output, but production
+dispatch/boot authorization is not connected and does not create those paths.
+A staged device-local kernel preference is a separate journal16 writer operation.
 
 The in-tree (`CONFIG_VPNHIDE=y`) backend has no module: core adopts it when
 `/proc/vpnhide_ctl` reports backend `0x4`.

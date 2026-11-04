@@ -9,6 +9,8 @@ use crate::{Config, parse_config};
 
 pub const FILE_NAME: &str = "zygisk-activation.txt";
 pub const MAX_BYTES: usize = 64 * 1024;
+pub const MANAGED_MODULE_ID: &str = "vpnhide_zygisk_runtime";
+pub const PROJECTION_PROTOCOL: u32 = 1;
 pub const MAX_MODULE_PROP_BYTES: usize = 8192;
 const HEADER: &str = "vpnhide zygisk-activation 1";
 
@@ -18,6 +20,7 @@ const HEADER: &str = "vpnhide zygisk-activation 1";
 pub enum Recipient {
     Legacy,
     Authorized,
+    Managed,
 }
 
 /// One grammar for the Core writer and the pre-specialization reader. An
@@ -27,7 +30,7 @@ pub fn recipient_from_manifest(bytes: &[u8]) -> Option<Recipient> {
         return None;
     }
     let manifest = std::str::from_utf8(bytes).ok()?;
-    let (mut id, mut control, mut activation) = (None, None, None);
+    let (mut id, mut control, mut activation, mut projection) = (None, None, None, None);
     for line in manifest
         .lines()
         .map(str::trim)
@@ -40,15 +43,17 @@ pub fn recipient_from_manifest(bytes: &[u8]) -> Option<Recipient> {
             "id" => &mut id,
             "vpnhideControl" => &mut control,
             "vpnhideActivation" => &mut activation,
+            "vpnhideProjection" => &mut projection,
             _ => continue,
         };
         if slot.replace(value).is_some() {
             return None;
         }
     }
-    match (id, control, activation) {
-        (Some("vpnhide_zygisk"), Some("2"), None) => Some(Recipient::Legacy),
-        (Some("vpnhide_core"), Some("2"), Some("1")) => Some(Recipient::Authorized),
+    match (id, control, activation, projection) {
+        (Some("vpnhide_zygisk"), Some("2"), None, None) => Some(Recipient::Legacy),
+        (Some("vpnhide_core"), Some("2"), Some("1"), None) => Some(Recipient::Authorized),
+        (Some(MANAGED_MODULE_ID), Some("2"), Some("1"), Some("1")) => Some(Recipient::Managed),
         _ => None,
     }
 }
@@ -144,9 +149,18 @@ mod tests {
                 "id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n",
                 Recipient::Authorized,
             ),
+            (
+                "id=vpnhide_zygisk_runtime\nvpnhideControl=2\nvpnhideActivation=1\nvpnhideProjection=1\n",
+                Recipient::Managed,
+            ),
         ] {
             assert_eq!(recipient_from_manifest(text.as_bytes()), Some(expected));
-            for field in ["id=other\n", "vpnhideControl=2\n", "vpnhideActivation=1\n"] {
+            for field in [
+                "id=other\n",
+                "vpnhideControl=2\n",
+                "vpnhideActivation=1\n",
+                "vpnhideProjection=1\n",
+            ] {
                 let duplicated = format!("{text}{field}");
                 // Duplicate keys and an activation marker added to legacy mode
                 // cannot change which policy contract the recipient consumes.
@@ -165,6 +179,10 @@ mod tests {
             "id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=2\n",
             "id=vpnhide_zygisk\nvpnhideControl=1\n",
             "id=other\nvpnhideControl=2\nvpnhideActivation=1\n",
+            "id=vpnhide_zygisk_runtime\nvpnhideControl=2\nvpnhideActivation=1\n",
+            "id=vpnhide_zygisk_runtime\nvpnhideControl=2\nvpnhideActivation=1\nvpnhideProjection=2\n",
+            "id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\nvpnhideProjection=1\n",
+            "id=vpnhide_zygisk\nvpnhideControl=2\nvpnhideProjection=1\n",
             "id =vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n",
         ] {
             assert!(recipient_from_manifest(text.as_bytes()).is_none(), "{text}");

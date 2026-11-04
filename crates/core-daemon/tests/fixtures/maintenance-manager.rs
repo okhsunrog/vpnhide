@@ -60,12 +60,38 @@ fn main() {
             if mode == "delay" {
                 std::thread::sleep(std::time::Duration::from_millis(500));
             }
-            let staged = adb.join("modules_update/vpnhide_core");
+            let projection = mode.starts_with("projection");
+            let id = if projection { "vpnhide_zygisk_runtime" } else { "vpnhide_core" };
+            let staged = adb.join("modules_update").join(id);
             if mode == "partial" {
                 fs::create_dir_all(staged).unwrap();
                 return;
             }
-            copy_tree(&adb.join("replacement-template"), &staged);
+            let template = if projection { "projection-template" } else { "replacement-template" };
+            copy_tree(&adb.join(template), &staged);
+            if mode == "projection-missing-abi" {
+                fs::remove_file(staged.join("zygisk/armeabi-v7a.so")).unwrap();
+            }
+            if mode == "projection-extra" {
+                fs::write(staged.join("service.sh"), b"unexpected activator").unwrap();
+            }
+            if mode == "projection-active" || mode == "projection-active-only" {
+                copy_tree(&staged, &adb.join("modules").join(id));
+                if mode == "projection-active-only" { fs::remove_dir_all(&staged).unwrap(); }
+            }
+            if mode == "projection-placeholder" || mode == "projection-placeholder-only" {
+                let active=adb.join("modules").join(id);
+                fs::create_dir_all(&active).unwrap();
+                fs::copy(staged.join("module.prop"),active.join("module.prop")).unwrap();
+                fs::write(active.join("update"),b"").unwrap();
+                if mode == "projection-placeholder-only" { fs::remove_dir_all(&staged).unwrap(); }
+            }
+            if mode == "projection-forge-zip" {
+                assert!(fs::write(path, b"modified input").is_err());
+            }
+            if mode == "projection-live-change" {
+                fs::write(adb.join("modules/vpnhide_core/vpnhide-core"), b"changed").unwrap();
+            }
             if mode == "live-change" {
                 fs::write(adb.join("modules/vpnhide_core/vpnhide-core"), b"changed").unwrap();
             }
