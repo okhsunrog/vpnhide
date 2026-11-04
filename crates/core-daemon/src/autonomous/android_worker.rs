@@ -14,6 +14,33 @@ pub(crate) fn lease() -> Result<std::sync::MutexGuard<'static, ()>, String> {
         .map_err(|_| "dedicated Android worker is owned by another run".into())
 }
 
+/// Boot probing waits for an existing autonomous run rather than converting
+/// ordinary worker contention into unavailable backend evidence. Off-writer only.
+pub(crate) fn lease_before(
+    deadline: BootDeadline,
+) -> Result<std::sync::MutexGuard<'static, ()>, String> {
+    lease_from_before(&OWNER, deadline)
+}
+fn lease_from_before(
+    owner: &std::sync::Mutex<()>,
+    deadline: BootDeadline,
+) -> Result<std::sync::MutexGuard<'_, ()>, String> {
+    loop {
+        if deadline.expired(BootInstant::now().map_err(|e| e.to_string())?) {
+            return Err("dedicated Android worker lease deadline expired".into());
+        }
+        match owner.try_lock() {
+            Ok(guard) => return Ok(guard),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                return Err("dedicated Android worker owner poisoned".into());
+            }
+            Err(std::sync::TryLockError::WouldBlock) => {
+                std::thread::sleep(Duration::from_millis(25))
+            }
+        }
+    }
+}
+
 const COMPONENT: &str = "dev.okhsunrog.vpnhide/.diagnostics.LoaderProbeService";
 
 fn run(args: &[&str]) -> Result<(), String> {
@@ -101,4 +128,56 @@ pub fn launch() -> Result<(), String> {
         "dev.okhsunrog.vpnhide",
     ])?;
     run(&["activity", "start-service", "--user", "0", "-n", COMPONENT])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+    #[test]
+    fn waiting_worker_lease_observes_release_without_busy_and_never_grants_after_deadline() {
+        let owner = Mutex::new(());
+        let held = owner.lock().unwrap();
+        assert!(
+            lease_from_before(&owner, BootDeadline::from_now(Duration::ZERO).unwrap()).is_err()
+        );
+        std::thread::scope(|scope| {
+            let (ready, received) = std::sync::mpsc::channel();
+            let owner = &owner;
+            let waiter = scope.spawn(move || {
+                ready.send(()).unwrap();
+                lease_from_before(
+                    owner,
+                    BootDeadline::from_now(Duration::from_secs(2)).unwrap(),
+                )
+                .is_ok()
+            });
+            received.recv().unwrap();
+            drop(held);
+            assert!(waiter.join().unwrap());
+        });
+        assert!(
+            lease_from_before(&owner, BootDeadline::from_now(Duration::ZERO).unwrap()).is_err()
+        );
+    }
+    #[test]
+    fn poisoned_worker_owner_is_an_error_instead_of_waiting_or_stealing() {
+        let owner = Mutex::new(());
+        std::thread::scope(|scope| {
+            let _ = scope
+                .spawn(|| {
+                    let _held = owner.lock().unwrap();
+                    panic!("poison fixture");
+                })
+                .join();
+        });
+        assert!(
+            lease_from_before(
+                &owner,
+                BootDeadline::from_now(Duration::from_secs(1)).unwrap()
+            )
+            .unwrap_err()
+            .contains("poisoned")
+        );
+    }
 }

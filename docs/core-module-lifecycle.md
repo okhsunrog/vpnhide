@@ -19,7 +19,7 @@ completed Zygisk runtime. The accepted [continuity policy](rfcs/0005-unified-bac
 keeps working backends and excludes automatic cross-family fallback. The existing
 writer can stage a device-local kernel choice for the next device boot; it does
 not change the running family. Core-package update PendingRestart is a separate
-maintenance receipt. Managed Zygisk dispatch/bootstrap remains incomplete.
+maintenance receipt. Managed Zygisk public dispatch/withdrawal remains incomplete.
 
 ## Service startup
 
@@ -110,9 +110,13 @@ descriptor and both library identities separately from the Core catalog (journal
 A bounded opaque authorization file is not grant evidence during code validation;
 boot qualification still needs an exact retained grant.
 The current public chooser is not yet connected to dispatch; its caller
-must be the existing writer and bootstrap authorization remains incomplete. New managed recipients
+must be the existing writer. Boot now separately publishes a journal19 empty-worker
+authority for confirmed retained code, with no replay after uncertainty and no
+user-policy application claim. New managed recipients
 require current-boot journaled authority and exact consumed generation/policy proof;
-an empty bootstrap proves code/consumption only, never hooks or behavioral coverage.
+a qualified worker response to an empty bootstrap proves code consumption only,
+never hooks or behavioral coverage.
 Production still refuses new Zygisk choice and current-Zygisk retirement. Production
-projection admission, bootstrap, continuity/withdrawal/update and the genuine
+projection admission, explicit bootstrap-uncertainty resolution,
+continuity/withdrawal/update and the genuine
 mixed-ABI secondary32 worker remain implementation work.

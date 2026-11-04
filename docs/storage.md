@@ -303,7 +303,9 @@ requires explicit informed Zygisk selection. The inert projection format and Roo
 preparation/readback and journal17 dispatch/recovery component exist. Production
 boot binds an exact retained active recipient, and journal18 freezes/checks that
 recipient separately from the catalog for policy preparation and same-boot restore.
-Production choice admission/bootstrap remain unimplemented. Legacy module-dir
+Journal19 separately retains an empty-worker grant and boot publication outcome;
+this never confirms user-policy application. Production choice admission and owned
+withdrawal/update remain unimplemented. Legacy module-dir
 readers remain scoped to compatibility/recovery. Existing possible-hook-exposure
 guards prohibit same-boot kernel transitions after Zygisk consumption.
 

@@ -101,6 +101,17 @@ pub fn run_boot_with_native(
             report.write_status_file(&default_boot_status_path());
             return report;
         }
+        if let Err(reason) = state.prepare_projection_bootstrap(&env, epoch) {
+            let report = BootApplyReport {
+                status: BootApplyStatus::Refused {
+                    reason: reason.clone(),
+                },
+                op: None,
+                detail: format!("Managed loader bootstrap unconfirmed: {reason}"),
+            };
+            report.write_status_file(&default_boot_status_path());
+            return report;
+        }
         if state.loader().enabled()
             && let Err(reason) = state.loader().probe_worker()
         {

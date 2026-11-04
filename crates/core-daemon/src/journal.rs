@@ -41,6 +41,7 @@ pub const JOURNAL_PATH_ENV: &str = "VPNHIDE_JOURNAL_PATH";
 
 pub mod backend_choice;
 pub mod preflight;
+pub mod projection_bootstrap;
 pub mod revocation;
 #[cfg(test)]
 pub(crate) mod selection_evidence_tests;
@@ -409,6 +410,8 @@ pub struct NativeQuarantine {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Journal {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zygisk_bootstrap: Option<projection_bootstrap::ProjectionBootstrap>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zygisk_projection: Option<crate::maintenance::zygisk_projection::work::ProjectionWork>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend_choice: Option<backend_choice::BackendChoiceRecord>,
@@ -477,6 +480,7 @@ pub struct Journal {
 impl Default for Journal {
     fn default() -> Self {
         Journal {
+            zygisk_bootstrap: None,
             zygisk_projection: None,
             backend_choice: None,
             native_selection_evidence: None,
@@ -558,9 +562,25 @@ impl Journal {
         op.0 <= self.expired_through || self.retired_ids.contains(&op)
     }
 
+    /// Retained identities for exact readback/revocation only. Bootstrap entries
+    /// are not user-policy delivery, hook installation or health evidence.
+    pub(crate) fn retained_zygisk_authorities(
+        &self,
+    ) -> impl Iterator<Item = &ZygiskAuthorityRecord> {
+        self.zygisk_authority
+            .iter()
+            .chain(self.prior_zygisk_authority.iter())
+            .chain(self.zygisk_bootstrap.iter().map(|work| &work.authority))
+            .chain(
+                self.zygisk_bootstrap
+                    .iter()
+                    .filter_map(|work| work.previous_authority.as_ref()),
+            )
+    }
     /// True when any stored operation still carries unresolved uncertainty.
     pub fn has_unknown(&self) -> bool {
-        self.native_lifecycle_uncertain()
+        self.bootstrap_uncertain()
+            || self.native_lifecycle_uncertain()
             || self
                 .zygisk_projection
                 .as_ref()
@@ -600,6 +620,9 @@ impl Journal {
                 })
         {
             return Err("retained current-boot KMI conflict requires fresh corroborated evidence before loading".into());
+        }
+        if self.bootstrap_uncertain() {
+            return Err("managed bootstrap publication is uncertain".into());
         }
         if self.revocation_uncertain() {
             return Err("Zygisk authorization revocation is unresolved; reconcile it before native activation".into());
@@ -774,7 +797,7 @@ impl Journal {
             .copied()
             .chain(self.operations.iter().flat_map(JournalEntry::held_phases))
             .collect();
-        if self.native_lifecycle_uncertain() {
+        if self.native_lifecycle_uncertain() || self.bootstrap_uncertain() {
             held.push(ConfigPhase::Native);
         }
         if self
@@ -873,6 +896,9 @@ impl Journal {
     /// Effects are never re-dispatched here; [`crate::recovery`] may resolve Unknown
     /// from durable evidence afterward.
     pub fn fence_unresolved(&mut self) {
+        if let Some(work) = self.zygisk_bootstrap.as_mut() {
+            work.fence_restart();
+        }
         if let Some(work) = self.zygisk_projection.as_mut() {
             work.fence_restart();
             // This branch proves the manager was never eligible to spawn. A
@@ -963,6 +989,16 @@ pub fn read(path: &Path) -> io::Result<Journal> {
                 "journal version {} unsupported (maximum {})",
                 journal.version, JOURNAL_VERSION
             ),
+        ));
+    }
+    if journal
+        .zygisk_bootstrap
+        .as_ref()
+        .is_some_and(|work| journal.version < 19 || !work.valid(&journal))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid managed bootstrap record",
         ));
     }
     if !crate::maintenance::zygisk_projection::work::validate_journal(&journal) {
@@ -1227,6 +1263,12 @@ pub fn read(path: &Path) -> io::Result<Journal> {
         .and_then(|a| a.intent.zygisk_authorization.as_ref())
     {
         discovered.push(a.boot_id.clone());
+    }
+    if let Some(bootstrap) = &journal.zygisk_bootstrap
+        && bootstrap.publication_intent
+        && let Some(grant) = &bootstrap.authority.intent.zygisk_authorization
+    {
+        discovered.push(grant.boot_id.clone());
     }
     for boot in discovered {
         if !journal.zygisk_exposure_boots.contains(&boot) {

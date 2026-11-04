@@ -1015,11 +1015,29 @@ impl LoaderRegistry {
             .expect("loader context")
             .clone()
             .ok_or("loader listener unavailable")?;
-        let _worker_lease = crate::autonomous::android_worker::lease()?;
         let target = crate::zygisk::ZygiskTarget::open(&context.recipient_root)?;
         let expected = target.read_authorized(&context.boot_id)?;
         if target.is_managed()? && expected.is_none() {
             return Err("managed projection requires journaled bootstrap authority".into());
+        }
+        let _worker_lease = crate::autonomous::android_worker::lease_before(
+            crate::boot_time::BootDeadline::from_now(Duration::from_secs(30))
+                .map_err(|e| e.to_string())?,
+        )?;
+        if self
+            .context
+            .lock()
+            .expect("loader context")
+            .as_ref()
+            .is_none_or(|current| !Arc::ptr_eq(&current.catalog, &context.catalog))
+        {
+            return Err("loader binding changed while waiting for Android worker".into());
+        }
+        let expected = target.read_authorized(&context.boot_id)?;
+        if target.is_managed()? && expected.is_none() {
+            return Err(
+                "managed bootstrap authority disappeared while waiting for Android worker".into(),
+            );
         }
         self.reconcile(Path::new("/proc"));
         if self.live_worker_for_at(&context, Path::new("/proc"), expected.as_ref()) {
@@ -1892,6 +1910,16 @@ mod tests {
         )
         .unwrap();
         assert!(!registry.available_at(&f.catalog, Abi::Arm64, false, &f.proc_root));
+    }
+    #[test]
+    fn missing_recipient_never_waits_for_an_unrelated_diagnostic_worker() {
+        let root = tempfile::tempdir().unwrap();
+        let missing = root.path().join("missing");
+        let registry = LoaderRegistry::default();
+        registry.configure_test_context(missing.clone(), "boot".into(), 7);
+        let expected = crate::zygisk::ZygiskTarget::open(&missing).err().unwrap();
+        let _other_run = crate::autonomous::android_worker::lease().unwrap();
+        assert_eq!(registry.probe_worker().unwrap_err(), expected);
     }
     fn managed_image(
         f: &Fixture,

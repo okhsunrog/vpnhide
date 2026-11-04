@@ -225,7 +225,7 @@ pub struct ActiveProjectionReadback {
     pub(crate) source_directory: std::sync::Arc<File>,
     pub(crate) recipient_directory: std::sync::Arc<File>,
 }
-pub(super) fn valid_boot(boot: &str) -> bool {
+pub(crate) fn valid_boot(boot: &str) -> bool {
     vpnhide_protocol::zygisk_activation::Authorization {
         boot_id: boot.into(),
         generation: 1,

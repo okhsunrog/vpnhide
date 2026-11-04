@@ -1,6 +1,6 @@
 # Core architecture
 
-Current implementation, app/core RPC33 and journal18 (reads1–17). Backend policy
+Current implementation, app/core RPC33 and journal19 (reads1–18). Backend policy
 implementation and publication of verified changes are approved under
 [RFC0005](rfcs/0005-unified-backend-lifecycle-policy.md); remaining flows and device
 gates are tracked separately. Kernel control-v2 / telemetry-v1 is unchanged.
@@ -475,7 +475,7 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-The current paired APK/Core contract is RPC33; journal18 reads schemas1–17. These
+The current paired APK/Core contract is RPC33; journal19 reads schemas1–18. These
 versions are independent of kernel control2/telemetry1 and do not require a
 compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
 publication and sampled current/stale/unattributed process consumption are separate
@@ -576,7 +576,7 @@ Zygisk authorization cannot claim global process coverage.
 The foreign-VPN observer, UID-in-tunnel probe and routing RPC/FFI field are removed.
 Dashboard/diagnostics consume Core evidence independently of external VPN presence
 and split-tunnel membership. Real fixture/hook API observations and manual network
-forensics remain. APK/Core must both speak RPC33; journal18 and the frozen
+forensics remain. APK/Core must both speak RPC33; journal19 and the frozen
 kernel control2/telemetry1 are independent, so a compatible builtin kernel does not
 need rebuilding merely because the app protocol changed.
 
@@ -666,7 +666,7 @@ cannot grant backend selection or Zygisk consent.
 
 This is not the complete RFC0005 lifecycle: requests for new Zygisk publication
 or retirement of a currently selected Zygisk are explicitly refused until the
-managed projection executor exists. Cross-upgrade continuity/last-successful
+owned projection admission/withdrawal lifecycle is complete. Cross-upgrade continuity/last-successful
 hints, the informed Zygisk chooser and voluntary migration offer remain code
 work. No warning acknowledgement alone grants Auto fallback or standby loading.
 
@@ -697,7 +697,8 @@ and a 64-bit worker do not replace the missing genuine secondary32 launcher.
 The shared inert projection format and Root preparation/readback component now
 exist; see [its boundaries](core-module-lifecycle.md#managed-discovery-preparation-boundary).
 The dispatch component can now persist through the common journal callback, but
-production choice admission and boot authorization are not connected to it.
+production choice admission is not connected to it. Boot authorization now has
+a separate empty-worker record, described below.
 A managed recipient cannot qualify from unauthenticated mapping alone: current-boot
 authority and actual consumption of its exact generation/policy are required.
 An explicitly empty bootstrap may unload in the worker; this is code-identity
@@ -733,8 +734,9 @@ journal17. Public RPC33 and backend control2 are unchanged.
 
 The production choice path still refuses new Zygisk publication and selected-Zygisk
 retirement. The journal callback executor is exercised by offline manager/process
-fixtures, not wired into the public chooser. Production admission, bootstrap
-publication, owned withdrawal/update and existing-user continuity remain code work. No new module, provider refresh or device reboot is
+fixtures, not wired into the public chooser. Production admission, owned
+withdrawal/update and existing-user continuity remain code work. A separate
+empty-worker authority is now connected to boot for confirmed retained work. No new module, provider refresh or device reboot is
 performed by ordinary startup or these journal migrations.
 
 
@@ -784,5 +786,48 @@ new recipient semantics in older schemas, malformed bindings, non-Zygisk actions
 and current managed startup with no matching confirmed projection work. Holds,
 counters and prior intent are preserved. Public RPC33 and kernel control2/telemetry1
 are unchanged. This internal delivery connection still does not enable the public
-Zygisk chooser: production admission/dispatch, separately durable bootstrap, owned
-withdrawal/combined update, continuity and migration offer remain code work.
+Zygisk chooser: production admission/dispatch, owned withdrawal/combined update,
+continuity and migration offer remain code work. The separately durable empty-worker
+bootstrap is connected to boot as described below.
+
+
+## Empty-worker authority (journal19)
+
+For a confirmed informed Zygisk choice whose exact managed code becomes active
+after the requested boot, Core can publish an empty-worker grant before probing
+the Android worker. It needs no APK opening. Ordinary kernel startup and same-boot
+staging create no grant. No unknown work or resident/unknown kernel ownership can
+enter this publisher. A matching current user-policy grant is preserved.
+
+`ProjectionBootstrap` is a separate retained private record: independent frozen
+source/recipient, allocated generation, canonical zero-target/default-mask wire,
+exact prior grant, sticky publication intent and publication outcome. It never
+updates the general user-policy authority or records Native application. Confirmed
+means exact durable file readback only; actual generation consumption and both ABI
+proofs remain mandatory. Empty-worker evidence proves no installed protection.
+Loader probing qualifies the recipient before waiting for the shared Android
+worker, then waits off-writer with a bounded suspend-aware deadline. It rechecks
+the loader context and current grant after obtaining the lease. An unrelated
+autonomous run is not immediate backend-unavailability evidence; a missing Zygisk
+recipient adds no worker wait to ordinary kernel startup.
+
+The existing writer syncs intent and then publication intent before the file effect,
+rechecking the code around those boundaries. Failed sync freezes later effects.
+Restart settles a record without publication intent as known not published; a
+publication marker without completion stays Unknown and holds Native. Neither
+case automatically republishes in that boot. A lost final acknowledgment may have
+landed a confirmed file and record, which recovery can read without reissuing.
+The record and attempt identity survive zero receipt retention. A subsequent real
+boot needs a fresh grant; the prior exact identity remains available for readback.
+
+Exact readback and owned revocation share a bounded authority iterator including
+bootstrap records. This does not turn bootstrap into policy/health evidence.
+Revocation never proves existing processes unhooked, and startup does not resurrect
+a revoked grant. Older-epoch failures cannot replace a newer native failure.
+Journal19 reads1–18, preserves holds/counters and rejects bootstrap in an older
+schema or with a nonempty policy. RPC33 and kernel control2 remain unchanged.
+
+Public Zygisk admission/publication, owned update/withdrawal, explicit resolution of
+bootstrap uncertainty, existing-user continuity/migration offer and the genuine
+secondary32 launcher remain code work. Provider, Android/SELinux/background-worker
+acceptance are additional device gates; host filesystem fixtures do not satisfy them.

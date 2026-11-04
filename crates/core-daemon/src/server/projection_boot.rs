@@ -19,6 +19,9 @@ impl CoreState {
             env.loader = Some(self.loader.clone());
             let boot = crate::native_boot::read_boot_id(&env.boot_id_path);
             self.call_writer(move |state| -> Result<(), String> {
+                if state.epoch.load(Ordering::SeqCst) != epoch {
+                    return Err("projection failure belongs to an older Core epoch".into());
+                }
                 if boot.is_empty() || boot.len() > 128 {
                     return Err("projection boot identity unavailable".into());
                 }
@@ -132,8 +135,14 @@ impl CoreState {
             // A new staged choice never authorizes hooks in its requested boot.
             observe(None)
         } else {
-            observe(before.zygisk_authority.as_ref())
-                .or_else(|_| observe(before.prior_zygisk_authority.as_ref()))
+            let mut observed = observe(None);
+            for authority in before.retained_zygisk_authorities() {
+                if observed.is_ok() {
+                    break;
+                }
+                observed = observe(Some(authority));
+            }
+            observed
         }
         .map_err(|e| format!("managed discovery source/code ownership: {e}"))?;
         if let ProjectionObservation::ActiveAfterBoot(readback) = observation {
@@ -153,6 +162,7 @@ impl CoreState {
             || after.journal.backend_choice != before.backend_choice
             || after.journal.zygisk_authority != before.zygisk_authority
             || after.journal.prior_zygisk_authority != before.prior_zygisk_authority
+            || after.journal.zygisk_bootstrap != before.zygisk_bootstrap
             || crate::native_boot::read_boot_id(&env.boot_id_path) != boot
         {
             return Err("projection state changed during readback".into());
@@ -161,5 +171,6 @@ impl CoreState {
     }
 }
 
+mod bootstrap;
 #[cfg(test)]
 mod tests;

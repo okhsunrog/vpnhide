@@ -22,8 +22,9 @@ pub(crate) fn revoke(
         let reference = expected
             .reference()
             .ok_or("invalid authorization identity")?;
-        if (journal.zygisk_authority.as_ref() != Some(expected)
-            && journal.prior_zygisk_authority.as_ref() != Some(expected))
+        if !journal
+            .retained_zygisk_authorities()
+            .any(|record| record == expected)
             || current_boot.is_empty()
             || current_boot.len() > 128
         {
@@ -130,11 +131,7 @@ pub(crate) fn revocable_authority(
     path: &std::path::Path,
 ) -> Result<Option<ZygiskAuthorityRecord>, PhaseOutcome> {
     let target = ZygiskTarget::for_revocation(path).map_err(|_| PhaseOutcome::FailedKnown)?;
-    for authority in journal
-        .zygisk_authority
-        .iter()
-        .chain(journal.prior_zygisk_authority.iter())
-    {
+    for authority in journal.retained_zygisk_authorities() {
         if authority.intent.zygisk_module.as_deref() == Some(path)
             && target.check_authorization(authority).is_ok()
         {
