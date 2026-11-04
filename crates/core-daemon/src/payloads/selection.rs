@@ -145,13 +145,27 @@ pub fn assess_projected(
         NativeBackend::Kpm,
         NativeBackend::Zygisk,
     ] {
-        let (indices, availability) = available(manifest, device, &kmi, backend);
-        let runtime = match backend {
+        let (indices, mut availability) = available(manifest, device, &kmi, backend);
+        let mut runtime = match backend {
             NativeBackend::Builtin => device.builtin,
             NativeBackend::Kmod => device.module_loading,
             NativeBackend::Kpm => device.kpm,
             NativeBackend::Zygisk => device.zygisk,
         };
+        // A positively identified resident kernel implementation is configured,
+        // never loaded again. Payload KMI, userspace ABI and loader admission
+        // describe a new load, not the already-running control endpoint. Its
+        // current wire/hook/capacity evidence is still mandatory below. Zygisk
+        // has a separate recipient/image/authorization lifecycle.
+        if device.ownership == Ownership::Resident(backend)
+            && matches!(
+                backend,
+                NativeBackend::Builtin | NativeBackend::Kmod | NativeBackend::Kpm
+            )
+        {
+            availability = Ok(());
+            runtime = Runtime::Ready;
+        }
         let mut projected = requirements.iter().filter(|(b, _)| *b == backend);
         let policy = projected
             .next()

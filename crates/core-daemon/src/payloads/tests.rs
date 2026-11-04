@@ -378,7 +378,9 @@ fn ambiguous_kmi_is_never_selected_by_uname_hint_or_catalog_order() {
         assert_eq!(report.decision, Decision::NoEligibleCandidate);
         device.ownership = Ownership::Resident(B::Kmod);
         let report = assess(&manifest, &device, policy(), &support()).unwrap();
-        assert!(!super::device::resident_eligible(&report, B::Kmod));
+        // Ambiguous replacement artifacts cannot select a new load, but do not
+        // invalidate a separately observed compatible resident endpoint.
+        assert!(super::device::resident_eligible(&report, B::Kmod));
         device.ownership = Ownership::Clear;
     }
     device.kernel_release = "6.1.157".into();
@@ -399,6 +401,62 @@ fn ambiguous_kmi_is_never_selected_by_uname_hint_or_catalog_order() {
         );
     }
 }
+#[test]
+fn resident_kernel_reconfiguration_uses_endpoint_evidence_not_new_load_admission() {
+    for backend in [B::Builtin, B::Kmod, B::Kpm] {
+        let mut device = device();
+        device.ownership = Ownership::Resident(backend);
+        device.abi = Abi::Arm32;
+        device.kernel_release = "unknown-vendor".into();
+        device.kernel_machine.clear();
+        device.builtin = Runtime::Unknown;
+        device.module_loading = Runtime::Unsupported;
+        device.kpm = Runtime::AuthenticationRequired;
+        let report = assess(&manifest(), &device, policy(), &support()).unwrap();
+        assert_eq!(report.decision, Decision::ReconcileResident(backend));
+        assert!(super::device::resident_eligible(&report, backend));
+
+        for evidence in [
+            vec![],
+            support()
+                .into_iter()
+                .filter(|(b, _)| *b != backend)
+                .collect(),
+        ] {
+            let report = assess(&manifest(), &device, policy(), &evidence).unwrap();
+            assert!(!super::device::resident_eligible(&report, backend));
+        }
+        for invalid in [
+            Policy {
+                resolved: false,
+                ..policy()
+            },
+            Policy {
+                required_hooks: 4,
+                ..policy()
+            },
+            Policy {
+                targets: 161,
+                ..policy()
+            },
+            Policy {
+                wire_bytes: 1024,
+                ..policy()
+            },
+        ] {
+            let report = assess(&manifest(), &device, invalid, &support()).unwrap();
+            assert!(!super::device::resident_eligible(&report, backend));
+        }
+        device.ownership = Ownership::Clear;
+        assert_eq!(
+            assess(&manifest(), &device, policy(), &support())
+                .unwrap()
+                .decision,
+            Decision::NoEligibleCandidate
+        );
+    }
+}
+
 #[test]
 fn arm32_and_missing_evidence_fail_closed() {
     let mut d = device();

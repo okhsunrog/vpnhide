@@ -85,17 +85,19 @@ impl Prepared {
                 compiled(ZYGISK_HOOK_MASK, 65536, false),
             ),
         ];
-        if let Ok(status) = crate::activation::read_status(&env.ctl) {
-            let backend = match facts.kernel {
-                KernelFact::Builtin => Some(NativeBackend::Builtin),
-                KernelFact::Kmod => Some(NativeBackend::Kmod),
-                _ => None,
-            };
-            if let Some(backend) = backend {
-                support.retain(|(b, _)| *b != backend);
-                if let Some(evidence) = resident_support(status, 65536) {
-                    support.push((backend, evidence));
-                }
+        let kernel_backend = match facts.kernel {
+            KernelFact::Builtin => Some(NativeBackend::Builtin),
+            KernelFact::Kmod => Some(NativeBackend::Kmod),
+            _ => None,
+        };
+        if let Some(backend) = kernel_backend {
+            // Never substitute compiled payload capabilities for a resident
+            // endpoint whose fresh status disappeared or became incompatible.
+            support.retain(|(b, _)| *b != backend);
+            if let Ok(status) = crate::activation::read_status(&env.ctl)
+                && let Some(evidence) = resident_support(status, backend, 65536)
+            {
+                support.push((backend, evidence));
             }
         }
         if facts.kpm == KpmFact::Live {
@@ -104,7 +106,11 @@ impl Prepared {
                 .as_ref()
                 .and_then(|c| c.status().ok().flatten())
                 .and_then(|status| {
-                    resident_support(status, (vpnhide_protocol::KPM_ARGS_LEN - 1) as u32)
+                    resident_support(
+                        status,
+                        NativeBackend::Kpm,
+                        (vpnhide_protocol::KPM_ARGS_LEN - 1) as u32,
+                    )
                 })
             {
                 support.push((NativeBackend::Kpm, evidence));
@@ -307,9 +313,18 @@ fn compiled(hooks: u32, wire_capacity: u32, default_mask: bool) -> Support {
     }
 }
 
-fn resident_support(status: vpnhide_protocol::Status, wire_capacity: u32) -> Option<Support> {
-    status
-        .allows_configuration()
+fn resident_support(
+    status: vpnhide_protocol::Status,
+    backend: NativeBackend,
+    wire_capacity: u32,
+) -> Option<Support> {
+    let expected = match backend {
+        NativeBackend::Builtin => Backend::Builtin,
+        NativeBackend::Kmod => Backend::Kmod,
+        NativeBackend::Kpm => Backend::Kpm,
+        NativeBackend::Zygisk => return None,
+    };
+    (status.backend == expected as u32 && status.allows_configuration())
         .then(|| compiled(status.hooks, wire_capacity, true))
 }
 
@@ -473,6 +488,50 @@ mod tests {
     }
 
     #[test]
+    fn resident_status_cannot_borrow_another_backend_or_compiled_capabilities() {
+        let status = vpnhide_protocol::Status {
+            backend: Backend::Kmod as u32,
+            kver: 0x60100,
+            hooks: KERNEL_HOOK_MASK,
+            error: 0,
+        };
+        assert!(resident_support(status, NativeBackend::Kmod, 65536).is_some());
+        for backend in [
+            NativeBackend::Builtin,
+            NativeBackend::Kpm,
+            NativeBackend::Zygisk,
+        ] {
+            assert!(resident_support(status, backend, 65536).is_none());
+        }
+        let (_temp, env, root, config, packages, mut caps) = fixture();
+        caps.ownership = Ownership::Resident(NativeBackend::Kmod);
+        let mut facts = facts();
+        facts.kernel = KernelFact::Kmod;
+        let prepared = Prepared::bind_bundle(
+            env,
+            false,
+            facts,
+            None,
+            root.clone(),
+            verified_catalog(&root).unwrap(),
+            &config,
+            &packages,
+            &caps,
+            &[],
+        );
+        let failure = prepared
+            .err()
+            .expect("fresh resident evidence is mandatory");
+        assert!(failure.reason.contains("CoverageUnknown"));
+        assert_eq!(
+            failure.evidence.unwrap().decision,
+            vpnhide_core_rpc::NativeSelectionDecision::ReconcileResident {
+                backend: NativeBackend::Kmod,
+            }
+        );
+    }
+
+    #[test]
     fn partial_resident_retains_observed_hooks_without_relaxing_required_coverage() {
         for backend in [
             NativeBackend::Builtin,
@@ -495,7 +554,12 @@ mod tests {
                 } else {
                     Runtime::Absent
                 };
-                caps.kpm = Runtime::Ready;
+                // These facts forbid a fresh load but must not replace a
+                // positively observed compatible resident implementation.
+                caps.kernel_release = "vendor-custom-without-gki-evidence".into();
+                caps.kernel_machine.clear();
+                caps.module_loading = Runtime::Unsupported;
+                caps.kpm = Runtime::Unsupported;
                 let mut facts = facts();
                 facts.kernel = match backend {
                     NativeBackend::Builtin => KernelFact::Builtin,
@@ -517,6 +581,7 @@ mod tests {
                         hooks,
                         error,
                     },
+                    backend,
                     1023,
                 )
                 .map(|support| {

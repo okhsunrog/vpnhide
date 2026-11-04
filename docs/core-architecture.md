@@ -275,7 +275,13 @@ Core never reboots the phone automatically.
 Resident configuration readiness follows shared protocol semantics: Ok and
 PartialHooks allow the normal configuration checks; fatal and unknown codes do
 not. Bundle preparation retains the actual PartialHooks mask instead of replacing
-it with zero. Every required feature and target/wire/default-mask limit is still
+it with zero. A positively identified resident kernel backend uses fresh status
+from that same backend for configuration admission. A missing or changed endpoint
+cannot borrow compiled payload capabilities. Replacement KMI ambiguity, disabled
+module loading, unavailable kernel configuration and the Core executable's ABI
+do not by themselves invalidate this existing endpoint: no load is dispatched.
+The equivalent facts still block a new load. Zygisk retains its separate image,
+recipient and authorization checks. Every required feature and target/wire/default-mask limit is still
 checked against that evidence. Insufficient coverage holds the selected resident
 without trying another family. Runtime health remains partial; this admission
 does not claim successful delivery, complete process coverage or behavioral PASS.
