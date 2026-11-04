@@ -44,3 +44,4 @@ device test. Code links use retained repository snapshots where available.
 - [Controlled interface-directory qualification](2026-11-03-native-directory-fixture-qualification.md): six libc/direct-getdents64 sysfs/proc-sys controls, real RAW/protected QEMU and retained evidence; stat/access/open and Android acceptance remain separate.
 - [Historical mixed bundle guide](2026-11-03-debug-bundle-legacy-reference.md): source-pinned old report/gate/verdict instructions for historical bundles; the current guide uses retained Core evidence.
 - [Inert managed projection preparation](2026-11-04-managed-projection-preparation.md): shared closed format, sealed Root preparation and exact readback; production dispatch/boot controller remains incomplete.
+- [Managed projection journal and recovery](2026-11-04-projection-journal.md): immutable receipts, before-effect dispatch and physical readback; public choice/bootstrap remains unconnected.

@@ -1,6 +1,6 @@
 # Core architecture
 
-Current implementation, app/core RPC33 and journal16 (reads1–15). Backend policy
+Current implementation, app/core RPC33 and journal17 (reads1–16). Backend policy
 implementation and publication of verified changes are approved under
 [RFC0005](rfcs/0005-unified-backend-lifecycle-policy.md); remaining flows and device
 gates are tracked separately. Kernel control-v2 / telemetry-v1 is unchanged.
@@ -475,7 +475,7 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-The current paired APK/Core contract is RPC33; journal16 reads schemas1–15. These
+The current paired APK/Core contract is RPC33; journal17 reads schemas1–16. These
 versions are independent of kernel control2/telemetry1 and do not require a
 compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
 publication and sampled current/stale/unattributed process consumption are separate
@@ -576,7 +576,7 @@ Zygisk authorization cannot claim global process coverage.
 The foreign-VPN observer, UID-in-tunnel probe and routing RPC/FFI field are removed.
 Dashboard/diagnostics consume Core evidence independently of external VPN presence
 and split-tunnel membership. Real fixture/hook API observations and manual network
-forensics remain. Current RPC33 requires a paired new APK/Core; journal16 and the frozen
+forensics remain. APK/Core must both speak RPC33; journal17 and the frozen
 kernel control2/telemetry1 are independent, so a compatible builtin kernel does not
 need rebuilding merely because the app protocol changed.
 
@@ -695,8 +695,44 @@ and a 64-bit worker do not replace the missing genuine secondary32 launcher.
 
 The shared inert projection format and Root preparation/readback component now
 exist; see [its boundaries](core-module-lifecycle.md#managed-discovery-preparation-boundary).
-They do not supply a production dispatch or boot authorization controller.
+The dispatch component can now persist through the common journal callback, but
+production choice admission and boot authorization are not connected to it.
 A managed recipient cannot qualify from unauthenticated mapping alone: current-boot
 authority and actual consumption of its exact generation/policy are required.
 An explicitly empty bootstrap may unload in the worker; this is code-identity
 proof only. A protected worker still needs its actual live hook image.
+
+## Managed projection work (journal17)
+
+The private journal retains `ProjectionWork` with the explicit warned choice,
+operation/boot, exact source and manager identities, immutable descriptor, sticky
+before-dispatch intent, outcome and checked staging evidence. The preparation
+component invokes the manager only after the existing writer's callback has
+synced intent. It rechecks source/boot/output both before and after that sync.
+A persistence failure stops later effects; failure after the final rename may
+have landed the full receipt and preference and remains uncertain to the caller.
+Only the final atomic document contains both confirmed preparation and choice.
+This confirms packaging, not runtime application, hook health or consumption.
+
+A manager error, timeout or missing/partial/unsafe readback remains Unknown after
+possible spawn. Restart never redispatches it. An accepted intent without a synced
+dispatch marker is known not spawned; an admitted dispatch marker stays uncertain
+across the crash window. Unknown receipt and physical readback are separate:
+observing the expected files never rewrites a returned Unknown into consent or
+success. Same-boot readback requires exact retained identities. A different real
+boot permits source content continuity only with the actual running inode and an
+exact active projection, with no pending stage; that still proves code bytes only.
+
+The work and its receipt survive retention, including a zero receipt budget.
+Uncertain work holds Maintenance; retained prepared work blocks reset, another
+choice or an independent Core replacement until owned withdrawal/combined update
+is implemented. Those checks run on the actual Core command writer. Schema16
+preferences, counters and existing holds migrate intact; older writers reject
+journal17. Public RPC33 and backend control2 are unchanged.
+
+The production choice path still refuses new Zygisk publication and selected-Zygisk
+retirement. The journal callback executor is exercised by offline manager/process
+fixtures, not wired into the public chooser. Production admission, bootstrap
+publication, current recipient routing, owned withdrawal/update and existing-user
+continuity remain code work. No new module, provider refresh or device reboot is
+performed by ordinary startup or these journal migrations.

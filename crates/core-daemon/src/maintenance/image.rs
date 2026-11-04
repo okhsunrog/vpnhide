@@ -206,6 +206,20 @@ pub(super) fn read_file(
         mode: before.mode(),
     })
 }
+impl ImageFile {
+    pub(super) fn valid(&self, limit: u64) -> bool {
+        self.inode > 0
+            && self.identity.bytes > 0
+            && self.identity.bytes <= limit
+            && self.identity.sha256.len() == 64
+            && self
+                .identity
+                .sha256
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            && self.mode & 0o022 == 0
+    }
+}
 impl ImageFence {
     pub(crate) fn verified_layout(&self) -> bool {
         self.verified_layout

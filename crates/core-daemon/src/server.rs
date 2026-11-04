@@ -2051,6 +2051,14 @@ impl CoreState {
         config_edit::validate_edit(edit).map_err(|reason| SubmitError::Rejected { reason })?;
         if store
             .journal
+            .zygisk_projection
+            .as_ref()
+            .is_some_and(|work| work.blocks_runtime())
+        {
+            return Err(SubmitError::Busy);
+        }
+        if store
+            .journal
             .replacement
             .as_ref()
             .is_some_and(|work| work.blocks_runtime())
@@ -2072,6 +2080,17 @@ impl CoreState {
         ) && store
             .journal
             .replacement
+            .as_ref()
+            .is_some_and(|work| work.retained())
+        {
+            return Err(SubmitError::Busy);
+        }
+        if matches!(
+            spec.intent,
+            journal::CommandIntent::FullReset | journal::CommandIntent::CleanupLegacy
+        ) && store
+            .journal
+            .zygisk_projection
             .as_ref()
             .is_some_and(|work| work.retained())
         {

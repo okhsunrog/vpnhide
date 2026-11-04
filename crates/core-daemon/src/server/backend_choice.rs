@@ -104,7 +104,12 @@ impl CoreState {
                 reason: "operation_not_allocated".into(),
             });
         }
-        if store.journal.has_unknown()
+        if store
+            .journal
+            .zygisk_projection
+            .as_ref()
+            .is_some_and(|work| work.retained())
+            || store.journal.has_unknown()
             || store
                 .journal
                 .replacement

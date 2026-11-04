@@ -97,19 +97,7 @@ impl ReplacementWork {
             && self.before.files.contains_key("vpnhide-core")
             && self.before.files.len() <= 32
             && self.legacy.modules.len() <= 12
-            && self.manager.version.len() <= 256
-            && !self.manager.version.is_empty()
-            && self.manager.relative_path.len() <= 128
-            && matches!(
-                self.manager.discovery_path.as_str(),
-                "data/adb/ksud"
-                    | "data/adb/apd"
-                    | "data/adb/magisk/magisk"
-                    | "data/adb/magisk/magisk64"
-                    | "debug_ramdisk/magisk"
-                    | "sbin/magisk"
-            )
-            && hex(&self.manager.installer_fingerprint, 64)
+            && self.manager.valid()
             && (matches!(stage, S::Unknown | S::FailedKnown) == self.status.failure.is_some())
             && (!matches!(stage, S::PendingRestart | S::Verified | S::RetiringLegacy)
                 || self

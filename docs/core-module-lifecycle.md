@@ -90,7 +90,7 @@ recipient is exactly `vpnhide_zygisk_runtime` with control2/activation1/projecti
 There is no service, independent updater, installer logic, targets file or hook
 authorization in this image. The Core ZIP still carries only its passive pair.
 
-The Root preparation component pins the actual running Core, enabled source and
+The Root preparation component pins the actual device boot, running Core, enabled source and
 checked manager, verifies/copies the final bytes into a sealed archive, and removes
 temporary preparation files before admission. Its readback distinguishes a complete
 staged tree, complete active tree and metadata-only active placeholder; a placeholder
@@ -98,11 +98,12 @@ alone or manager exit0 cannot verify readiness. Symlinks, extra scripts/trees,
 foreign targets, writable files and either missing ABI fail closed. These are
 filesystem evidence fixtures, not certification of a provider's scan/boot lifecycle.
 
-This component is not yet connected to production manager dispatch. Its caller
-must persist intent before invoking the manager, retain uncertain outcomes without
-redispatch and verify the next boot before authorizing code. New managed recipients
+A journal17 work/dispatch component now enforces persistence before manager spawn,
+retains uncertain outcomes without redispatch and provides read-only boot/code
+observations. The current public chooser is not yet connected to it; its caller
+must be the existing writer and bootstrap authorization remains incomplete. New managed recipients
 require current-boot journaled authority and exact consumed generation/policy proof;
 an empty bootstrap proves code/consumption only, never hooks or behavioral coverage.
-Production still refuses new Zygisk choice and current-Zygisk retirement. Durable
-projection work/recovery, bootstrap, continuity/withdrawal/update and the genuine
+Production still refuses new Zygisk choice and current-Zygisk retirement. Production
+projection admission, bootstrap, continuity/withdrawal/update and the genuine
 mixed-ABI secondary32 worker remain implementation work.

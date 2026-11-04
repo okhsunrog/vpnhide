@@ -63,6 +63,94 @@ pub(super) fn validate_entries(journal: &super::Journal) -> bool {
     })
 }
 
+/// The existing writer's one recorder for managed preparation. It preserves the
+/// dispatch history and atomically couples the private choice with its receipt.
+/// Persist the resulting Journal before returning from the executor callback.
+/// This does not admit a request, authorize hooks or dispatch a manager itself.
+pub fn record_projection(
+    journal: &mut super::Journal,
+    base: vpnhide_core_rpc::BaseRef,
+    work: &crate::maintenance::zygisk_projection::work::ProjectionWork,
+) -> std::io::Result<()> {
+    use vpnhide_core_rpc::{ConfigEdit, ConfigPhase, OperationRecord, PhaseOutcome, PhaseRecord};
+    let invalid = || {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "projection intent cannot replace retained work",
+        )
+    };
+    if journal.version != super::JOURNAL_VERSION
+        || !work.valid(journal.issued_through)
+        || base.revision != journal.config_revision
+    {
+        return Err(invalid());
+    }
+    let prior = journal.zygisk_projection.as_ref();
+    if let Some(previous) = prior.filter(|p| p.operation == work.operation) {
+        if !super::super::maintenance::zygisk_projection::work::validate_journal(journal)
+            || journal.get(work.operation).is_none_or(|e| e.base != base)
+            || !previous.permits_successor(work)
+        {
+            return Err(invalid());
+        }
+        if previous == work {
+            return Ok(());
+        }
+    } else if prior.is_some_and(|p| p.retained())
+        || journal.get(work.operation).is_some()
+        || journal.is_retired(work.operation)
+        || work.dispatch_intent
+        || work.outcome != PhaseOutcome::Running
+    {
+        return Err(invalid());
+    }
+    let revision = journal
+        .backend_choice
+        .as_ref()
+        .map_or(0, |choice| choice.revision);
+    if revision != work.request.expected_revision {
+        return Err(invalid());
+    }
+    if work.outcome == PhaseOutcome::Confirmed {
+        journal.backend_choice = Some(BackendChoiceRecord {
+            revision: work.request.expected_revision + 1,
+            request: work.request.clone(),
+            operation: work.operation,
+            requested_in_boot: work.boot_id.clone(),
+        });
+    }
+    journal.zygisk_projection = Some(work.clone());
+    journal.upsert(super::JournalEntry {
+        admission: Some(super::Admission {
+            from_revision: base.revision,
+            commit_revision: base.revision,
+            writes: vec![],
+        }),
+        command: Some(super::CommandIntent::StageBackendChoice {
+            request: work.request.clone(),
+        }),
+        maintenance: None,
+        maintenance_report: None,
+        superseded_by: None,
+        superseded_phases: vec![],
+        finalized_unknown: work.outcome == PhaseOutcome::Unknown,
+        base,
+        edit: ConfigEdit::RepairActivation,
+        candidate: None,
+        native_intent: None,
+        record: OperationRecord {
+            op: work.operation,
+            phases: vec![PhaseRecord {
+                phase: ConfigPhase::Maintenance,
+                outcome: work.outcome,
+            }],
+            settled: (work.outcome != PhaseOutcome::Running).then_some(work.outcome),
+            ports: None,
+        },
+    });
+    Ok(())
+}
+
 /// A restart never executes a staged command again. The preference and terminal
 /// receipt commit atomically; a retained Running-only intent proves no preference
 /// change landed. Historical terminal Unknown remains immutable.
@@ -74,7 +162,11 @@ pub(crate) fn reconcile_unfinished(journal: &mut super::Journal) -> bool {
         if !matches!(
             entry.command,
             Some(super::CommandIntent::StageBackendChoice { .. })
-        ) || entry.finalized_unknown
+        ) || journal
+            .zygisk_projection
+            .as_ref()
+            .is_some_and(|work| work.operation == entry.record.op)
+            || entry.finalized_unknown
             || entry.record.settled.is_some()
             || entry.record.phases.len() != 1
             || entry.record.phases[0].phase != ConfigPhase::Maintenance
@@ -155,7 +247,7 @@ mod tests {
     fn unsupported_or_inconsistent_preferences_never_reset_authority() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("journal.json");
-        for version in 1..super::super::JOURNAL_VERSION {
+        for version in 1..16 {
             let mut journal = fixture(true);
             journal.version = version;
             super::super::write_atomic(&path, &journal).unwrap();
@@ -174,6 +266,23 @@ mod tests {
             super::super::write_atomic(&path, &journal).unwrap();
             assert!(super::super::read(&path).is_err());
         }
+    }
+
+    #[test]
+    fn schema16_preferences_migrate_without_losing_choice_or_holds() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("journal.json");
+        let mut journal = fixture(true);
+        journal.version = 16;
+        journal.expired_holds = vec![ConfigPhase::Native, ConfigPhase::Ports];
+        super::super::write_atomic(&path, &journal).unwrap();
+        let restored = super::super::read(&path).unwrap();
+        assert_eq!(restored.version, super::super::JOURNAL_VERSION);
+        assert_eq!(restored.backend_choice, journal.backend_choice);
+        assert_eq!(restored.operations, journal.operations);
+        assert_eq!(restored.issued_through, journal.issued_through);
+        assert_eq!(restored.expired_holds, journal.expired_holds);
+        assert!(restored.zygisk_projection.is_none());
     }
 
     #[test]

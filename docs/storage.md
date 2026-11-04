@@ -300,7 +300,8 @@ The main Core package now contains one passive Zygisk pair and no top-level
 `zygisk/` directory. A complete discovery runtime has not been implemented;
 the [accepted continuity policy](rfcs/0005-unified-backend-lifecycle-policy.md)
 requires explicit informed Zygisk selection. The inert projection format and Root
-preparation/readback exist, but durable dispatch/bootstrap remain unimplemented. Legacy module-dir
+preparation/readback and journal17 dispatch/recovery component exist, but production
+admission/bootstrap remain unimplemented. Legacy module-dir
 readers remain scoped to compatibility/recovery. Existing possible-hook-exposure
 guards prohibit same-boot kernel transitions after Zygisk consumption.
 

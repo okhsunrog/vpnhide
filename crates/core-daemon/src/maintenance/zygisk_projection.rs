@@ -20,6 +20,8 @@ use std::{
 use vpnhide_artifact_model::zygisk_projection::{Descriptor, FILE_NAME, MAX_DESCRIPTOR_BYTES};
 use vpnhide_protocol::zygisk_activation::{MANAGED_MODULE_ID, Recipient, recipient_from_manifest};
 
+pub mod work;
+
 const BUDGET: Duration = Duration::from_secs(30);
 fn invalid() -> io::Error {
     io::Error::new(
@@ -82,6 +84,14 @@ impl ProjectionPaths {
         self.root
             .join("data/adb/modules_update")
             .join(MANAGED_MODULE_ID)
+    }
+    fn boot(&self) -> io::Result<String> {
+        let boot =
+            crate::native_boot::read_boot_id(&self.root.join("proc/sys/kernel/random/boot_id"));
+        if !work::valid_boot(&boot) {
+            return Err(invalid());
+        }
+        Ok(boot)
     }
     fn require_source_enabled(&self, uid: u32) -> io::Result<()> {
         for name in ["disable", "remove", "zygisk", ".ksu_hot_install"] {
@@ -202,6 +212,27 @@ impl ProjectionImage {
             files,
         })
     }
+    fn valid_for(&self, expected: &Descriptor) -> bool {
+        self.directory.1 > 0
+            && self.descriptor == *expected
+            && self.files.len() == 3
+            && self
+                .files
+                .get(FILE_NAME)
+                .is_some_and(|f| f.valid(MAX_DESCRIPTOR_BYTES as u64))
+            && expected.payloads.iter().all(|payload| {
+                let crate::payloads::PayloadKind::Zygisk { abi } = payload.implementation else {
+                    return false;
+                };
+                self.files
+                    .get(&Descriptor::member_name(abi))
+                    .is_some_and(|f| {
+                        f.valid(crate::payloads::MAX_PAYLOAD_BYTES)
+                            && f.identity.bytes == payload.bytes
+                            && f.identity.sha256 == payload.sha256
+                    })
+            })
+    }
     pub fn require_unchanged(&self, path: &Path) -> io::Result<()> {
         self.require_unchanged_owned(path, 0)
     }
@@ -219,6 +250,7 @@ pub struct PreparedProjection {
     pub manager: Manager,
     paths: ProjectionPaths,
     uid: u32,
+    boot_id: String,
     running: File,
     package: FrozenPayload,
 }
@@ -236,6 +268,7 @@ impl PreparedProjection {
         running: File,
         uid: u32,
     ) -> io::Result<Self> {
+        let boot_id = paths.boot()?;
         absent(&paths.active())?;
         absent(&paths.staged())?;
         paths.require_source_enabled(uid)?;
@@ -292,6 +325,7 @@ impl PreparedProjection {
             manager,
             paths,
             uid,
+            boot_id,
             running,
             package,
         };
@@ -299,6 +333,9 @@ impl PreparedProjection {
         Ok(prepared)
     }
     pub fn require_fresh(&self) -> io::Result<()> {
+        if self.paths.boot()? != self.boot_id {
+            return Err(invalid());
+        }
         self.paths.require_source_enabled(self.uid)?;
         self.source
             .require_unchanged_owned(&self.paths.source(), self.uid)?;
@@ -313,6 +350,9 @@ impl PreparedProjection {
         self.package.file()
     }
     pub fn verify_staged(&self) -> io::Result<ProjectionStaging> {
+        if self.paths.boot()? != self.boot_id {
+            return Err(invalid());
+        }
         self.paths.require_source_enabled(self.uid)?;
         self.source
             .require_unchanged_owned(&self.paths.source(), self.uid)?;
@@ -334,6 +374,19 @@ pub struct ProjectionStaging {
     pub active: Option<ActiveProjection>,
 }
 impl ProjectionStaging {
+    fn valid_for(&self, expected: &Descriptor) -> bool {
+        (self.staged.is_some() || matches!(self.active, Some(ActiveProjection::Complete { .. })))
+            && self
+                .staged
+                .as_ref()
+                .is_none_or(|image| image.valid_for(expected))
+            && self.active.as_ref().is_none_or(|active| match active {
+                ActiveProjection::Placeholder { directory } => {
+                    directory.1 > 0 && self.staged.is_some()
+                }
+                ActiveProjection::Complete { image } => image.valid_for(expected),
+            })
+    }
     fn inspect_owned(paths: &ProjectionPaths, expected: &Descriptor, uid: u32) -> io::Result<Self> {
         let staged = match fs::symlink_metadata(paths.staged()) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => None,

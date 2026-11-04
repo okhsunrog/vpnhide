@@ -406,6 +406,8 @@ pub struct NativeQuarantine {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Journal {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zygisk_projection: Option<crate::maintenance::zygisk_projection::work::ProjectionWork>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend_choice: Option<backend_choice::BackendChoiceRecord>,
     #[serde(default)]
     pub native_selection_evidence: Option<vpnhide_core_rpc::NativeSelectionEvidence>,
@@ -472,6 +474,7 @@ pub struct Journal {
 impl Default for Journal {
     fn default() -> Self {
         Journal {
+            zygisk_projection: None,
             backend_choice: None,
             native_selection_evidence: None,
             native_selection_conflict: None,
@@ -555,6 +558,10 @@ impl Journal {
     /// True when any stored operation still carries unresolved uncertainty.
     pub fn has_unknown(&self) -> bool {
         self.native_lifecycle_uncertain()
+            || self
+                .zygisk_projection
+                .as_ref()
+                .is_some_and(|work| work.blocks_runtime())
             || !self.expired_holds.is_empty()
             || self
                 .operations
@@ -774,6 +781,13 @@ impl Journal {
         {
             held.push(ConfigPhase::Maintenance);
         }
+        if self
+            .zygisk_projection
+            .as_ref()
+            .is_some_and(|work| work.blocks_runtime())
+        {
+            held.push(ConfigPhase::Maintenance);
+        }
         held.sort_by_key(|phase| *phase as u8);
         held.dedup();
         held
@@ -795,6 +809,7 @@ impl Journal {
     pub fn prune(&mut self) {
         let retain = self.retain_settled;
         let replacement_op = self.replacement.as_ref().map(|w| w.status.operation);
+        let projection_op = self.zygisk_projection.as_ref().map(|w| w.operation);
         let revocation_op = self
             .zygisk_revocation
             .as_ref()
@@ -807,6 +822,7 @@ impl Journal {
             .filter(|(_, e)| {
                 e.record.settled.is_some()
                     && Some(e.record.op) != replacement_op
+                    && Some(e.record.op) != projection_op
                     && Some(e.record.op) != self.debug_restore_op
                     && !(Some(e.record.op) == revocation_op && e.is_revocation_only_repair())
             })
@@ -854,6 +870,22 @@ impl Journal {
     /// Effects are never re-dispatched here; [`crate::recovery`] may resolve Unknown
     /// from durable evidence afterward.
     pub fn fence_unresolved(&mut self) {
+        if let Some(work) = self.zygisk_projection.as_mut() {
+            work.fence_restart();
+            // This branch proves the manager was never eligible to spawn. A
+            // persisted dispatch intent always stays Unknown instead.
+            if work.outcome == PhaseOutcome::FailedKnown
+                && let Some(entry) = self
+                    .operations
+                    .iter_mut()
+                    .find(|e| e.record.op == work.operation)
+                && !entry.finalized_unknown
+                && entry.record.settled.is_none()
+            {
+                entry.record.phases[0].outcome = PhaseOutcome::FailedKnown;
+                entry.record.settled = Some(PhaseOutcome::FailedKnown);
+            }
+        }
         if let Some(work) = self.replacement.as_mut() {
             work.fence_restart();
         }
@@ -928,6 +960,12 @@ pub fn read(path: &Path) -> io::Result<Journal> {
                 "journal version {} unsupported (maximum {})",
                 journal.version, JOURNAL_VERSION
             ),
+        ));
+    }
+    if !crate::maintenance::zygisk_projection::work::validate_journal(&journal) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid managed projection journal record",
         ));
     }
     if !backend_choice::validate_entries(&journal)

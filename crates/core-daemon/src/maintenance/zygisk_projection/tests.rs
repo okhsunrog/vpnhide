@@ -11,6 +11,12 @@ fn fixture_libraries(min_bytes: usize) -> (tempfile::TempDir, PreparedProjection
         root: root.path().into(),
         persistent: root.path().join("persistent"),
     };
+    fs::create_dir_all(paths.root.join("proc/sys/kernel/random")).unwrap();
+    fs::write(
+        paths.root.join("proc/sys/kernel/random/boot_id"),
+        "11111111-1111-1111-1111-111111111111",
+    )
+    .unwrap();
     fs::create_dir(&paths.persistent).unwrap();
     fs::set_permissions(&paths.persistent, fs::Permissions::from_mode(0o700)).unwrap();
     vpnhide_artifact_model::fixtures::write_passive_bundle_tree(&paths.source()).unwrap();
@@ -245,3 +251,5 @@ fn foreign_duplicate_and_unsafe_source_metadata_never_becomes_projection_authori
         assert!(!root.path().join("data/adb/dispatch-count").exists());
     }
 }
+
+mod work;

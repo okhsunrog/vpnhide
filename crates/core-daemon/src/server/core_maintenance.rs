@@ -116,6 +116,14 @@ impl CoreState {
             }
             if store
                 .journal
+                .zygisk_projection
+                .as_ref()
+                .is_some_and(|work| work.retained())
+            {
+                return Err(SubmitError::Busy);
+            }
+            if store
+                .journal
                 .replacement
                 .as_ref()
                 .is_some_and(|w| w.retained())
@@ -254,6 +262,14 @@ impl CoreState {
             return Err(SubmitError::Conflict {
                 field: "future maintenance base".into(),
             });
+        }
+        if store
+            .journal
+            .zygisk_projection
+            .as_ref()
+            .is_some_and(|work| work.retained())
+        {
+            return Err(SubmitError::Busy);
         }
         if store
             .journal

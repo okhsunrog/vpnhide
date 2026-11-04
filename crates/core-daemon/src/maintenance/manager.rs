@@ -46,6 +46,37 @@ pub struct ManagerIdentity {
     pub version: String,
     pub installer_fingerprint: String,
 }
+impl ManagerIdentity {
+    pub(crate) fn valid(&self) -> bool {
+        use std::path::Component;
+        let path = Path::new(&self.relative_path);
+        !self.relative_path.is_empty()
+            && self.relative_path.len() <= 128
+            && path.components().all(|p| matches!(p, Component::Normal(_)))
+            && matches!(
+                (self.kind, self.discovery_path.as_str()),
+                (ManagerKind::KernelSu, "data/adb/ksud")
+                    | (ManagerKind::APatch, "data/adb/apd")
+                    | (
+                        ManagerKind::Magisk,
+                        "data/adb/magisk/magisk"
+                            | "data/adb/magisk/magisk64"
+                            | "debug_ramdisk/magisk"
+                            | "sbin/magisk"
+                    )
+            )
+            && !self.version.is_empty()
+            && self.version.len() <= 256
+            && !self.version.chars().any(char::is_control)
+            && self.image.valid(64 * 1024 * 1024)
+            && self.image.mode & 0o111 != 0
+            && self.installer_fingerprint.len() == 64
+            && self
+                .installer_fingerprint
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    }
+}
 pub struct Manager {
     root: PathBuf,
     file: File,

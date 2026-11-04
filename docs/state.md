@@ -117,7 +117,7 @@ informed choice; new Zygisk is never automatic fallback or standby. The inert
 preparation component reserves `modules/vpnhide_zygisk_runtime` and
 `modules_update/vpnhide_zygisk_runtime` for checked manager output, but production
 dispatch/boot authorization is not connected and does not create those paths.
-A staged device-local kernel preference is a separate journal16 writer operation.
+A staged device-local kernel preference uses the same writer (introduced in journal16).
 
 The in-tree (`CONFIG_VPNHIDE=y`) backend has no module: core adopts it when
 `/proc/vpnhide_ctl` reports backend `0x4`.
@@ -132,7 +132,7 @@ Mode `0700`, root-only. Journal, ownership markers, `core.log`, plus:
 
 | File | Format | Writer | Reader | Lifetime |
 |---|---|---|---|---|
-| `operations.json` | journal schema 16: device-local next-boot backend intent with atomic receipt, current selection observations and retained KMI conflict, issued-ID counter, expiry floor, retained receipts, revision/write-set evidence, held resources, native startup/load/preflight budgets, retained Core replacement work/dispatch intent, Zygisk exposure, debug leases and logging restoration | core writer queue, atomically with directory fsync | startup recovery and receipt queries; schemas 1–15 are migrated, corrupt/unsupported state refuses mutation | journal preserved by FullReset (backend preference cleared); 64 terminal receipts plus active/restoration records; expired Unknown receipts retain compact held-resource/Persist evidence |
+| `operations.json` | journal schema 17: retained managed projection preparation/dispatch intent and exact output evidence, device-local next-boot backend intent with atomic receipt, current selection observations and retained KMI conflict, issued-ID counter, expiry floor, retained receipts, revision/write-set evidence, held resources, native startup/load/preflight budgets, retained Core replacement work/dispatch intent, Zygisk exposure, debug leases and logging restoration | core writer queue, atomically with directory fsync | startup recovery and receipt queries; schemas 1–16 are migrated, corrupt/unsupported state refuses mutation | journal preserved by FullReset (backend preference cleared; retained projection refuses reset); 64 terminal receipts plus active/restoration records; expired Unknown receipts retain compact held-resource/Persist evidence |
 | `operations.json.lock` | permanent empty regular inode, mode `0600`, exclusive flock | core lifetime owner | another core refuses ownership before load/boot/bind | preserved by FullReset; never unlink a live lockfile |
 | `maintenance-packages/<sha256>.zip`, `copy-<operation>`, `staging.lock` | private authenticated ZIP cache (at most2 final packages, each256MiB), bounded inert temporary copies, permanent flock inode | Core replacement preparation outside writer; exclusive floor/staging leases and per-instance preparation permit | durable replacement executor through retained read-only FD; full ZIP and actual-byte checks | active/accepted package retained; only known inert prior ZIPs released with no retained work; no journal or user-config deletion |
 | `maintenance-floor.json` | private schema1 accepted replacement sequence/hash, at most1KiB | replacement command writer after durable admission and before dispatch, atomic file/parent sync | package preparation under its lease; malformed/unsafe state refuses rather than becoming zero | outside receipt pruning and replaceable modules; preserve across reset/update |
