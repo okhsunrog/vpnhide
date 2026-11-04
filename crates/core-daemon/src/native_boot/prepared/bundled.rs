@@ -501,6 +501,8 @@ mod tests {
         let packages =
             vpnhide_activator::parse_pm_packages("package:com.example uid:10123,110123\n");
         let caps = Capabilities {
+            module_evidence: Default::default(),
+            kernel_machine: "aarch64".into(),
             abi: Abi::Arm64,
             kernel_release: "6.1.157-android14".into(),
             builtin: Runtime::Absent,

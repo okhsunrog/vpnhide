@@ -15,6 +15,7 @@ pub use vpnhide_artifact_model::elf;
 pub mod kmi;
 pub mod projection;
 pub mod selection;
+pub mod standard_modules;
 
 pub use vpnhide_artifact_model::manifest::{
     Abi, KMIS, MANIFEST_VERSION, MAX_BUNDLE_BYTES, MAX_MANIFEST_BYTES, MAX_PAYLOAD_BYTES, Manifest,

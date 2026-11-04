@@ -128,6 +128,8 @@ fn reject_leaf_parent_and_manifest_symlinks() {
 }
 fn device() -> Capabilities {
     Capabilities {
+        module_evidence: Default::default(),
+        kernel_machine: "aarch64".into(),
         abi: Abi::Arm64,
         kernel_release: "6.1.157-android14".into(),
         builtin: Runtime::Absent,
@@ -307,6 +309,53 @@ fn runtime_and_kmi_uncertainty_are_not_capabilities() {
             .candidates[1]
             .eligibility,
         Err(Rejection::NoMatchingKmi)
+    );
+}
+
+#[test]
+fn current_module_quorum_reaches_selection_without_relaxing_architecture_or_conflict_checks() {
+    use super::standard_modules::{BoundModule, Observation};
+    let mut d = device();
+    d.kernel_release = "5.15.123-custom".into();
+    d.module_evidence = Observation {
+        modules: [("wifi", 'a'), ("ksu_next", 'b')]
+            .into_iter()
+            .map(|(name, digest)| BoundModule {
+                source: format!("/vendor_dlkm/lib/modules/{name}.ko").into(),
+                sha256: digest.to_string().repeat(64),
+                metadata: super::elf::ModuleMetadata {
+                    name: name.into(),
+                    vermagic: "5.15.123-android13 SMP aarch64".into(),
+                    srcversion: None,
+                    build_id: Some(vec![1, 2, 3, 4]),
+                },
+            })
+            .collect(),
+        ..Default::default()
+    };
+    let assessment = assess(&manifest(), &d, policy(), &support()).unwrap();
+    assert_eq!(assessment.decision, Decision::Select(B::Kmod));
+    assert_eq!(assessment.candidates[1].payload_indices.len(), 1);
+    assert_eq!(
+        assessment.kmi.module_hint.as_deref(),
+        Some("android13-5.15")
+    );
+    for machine in ["", "armv7l"] {
+        d.kernel_machine = machine.into();
+        assert_eq!(
+            assess(&manifest(), &d, policy(), &support())
+                .unwrap()
+                .decision,
+            Decision::NoEligibleCandidate
+        );
+    }
+    d.kernel_machine = "aarch64".into();
+    d.module_evidence.modules[0].metadata.vermagic = "5.15.123-android14 SMP aarch64".into();
+    let conflict = assess(&manifest(), &d, policy(), &support()).unwrap();
+    assert_eq!(conflict.decision, Decision::NoEligibleCandidate);
+    assert_eq!(
+        conflict.candidates[1].eligibility,
+        Err(Rejection::ConflictingKmiEvidence)
     );
 }
 

@@ -49,6 +49,217 @@ struct Section<'a> {
     size: u64,
     content: &'a [u8],
 }
+
+/// Passive metadata of an AArch64 relocatable module, independent of any
+/// VPN Hide capability marker. These values do not prove it is currently loaded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleMetadata {
+    pub name: String,
+    pub vermagic: String,
+    pub srcversion: Option<String>,
+    pub build_id: Option<Vec<u8>>,
+}
+
+fn modinfo<'a>(sections: &BTreeMap<&str, Section<'a>>) -> io::Result<Vec<&'a str>> {
+    let Some(metadata) = sections.get(".modinfo") else {
+        return Ok(Vec::new());
+    };
+    if metadata.kind != 1 || metadata.size > 64 * 1024 || metadata.content.last() != Some(&0) {
+        return Err(invalid("invalid module metadata"));
+    }
+    metadata
+        .content
+        .split(|b| *b == 0)
+        .filter(|r| !r.is_empty())
+        .map(|record| {
+            let record = std::str::from_utf8(record).map_err(invalid)?;
+            if !record.is_ascii() {
+                return Err(invalid("non-ASCII module metadata"));
+            }
+            Ok(record)
+        })
+        .collect()
+}
+
+fn unique_metadata<'a>(records: &[&'a str], key: &str, max: usize) -> io::Result<Option<&'a str>> {
+    let mut values = records.iter().filter_map(|record| record.strip_prefix(key));
+    let value = values.next();
+    if values.next().is_some()
+        || value.is_some_and(|v| {
+            v.is_empty() || v.len() > max || v.bytes().any(|b| b.is_ascii_control())
+        })
+    {
+        return Err(invalid("duplicate or invalid module identity metadata"));
+    }
+    Ok(value)
+}
+
+/// Parse the literal GNU build-ID note, also usable on a bounded sysfs note read.
+/// Reject duplicate/malformed notes instead of selecting the first identifier.
+pub fn gnu_build_id(note: &[u8]) -> io::Result<Vec<u8>> {
+    if note.len() > 4096 {
+        return Err(invalid("module build-ID note too large"));
+    }
+    let mut offset = 0usize;
+    let mut found = None;
+    while offset < note.len() {
+        let names = usize::try_from(number(note, offset as u64, 4)?).map_err(invalid)?;
+        let desc = usize::try_from(number(note, offset as u64 + 4, 4)?).map_err(invalid)?;
+        let kind = number(note, offset as u64 + 8, 4)?;
+        let align = |n: usize| -> io::Result<usize> {
+            n.checked_add(3)
+                .map(|n| n & !3)
+                .ok_or_else(|| invalid("note range overflow"))
+        };
+        let start = offset
+            .checked_add(12)
+            .ok_or_else(|| invalid("note range overflow"))?;
+        let descriptor = start
+            .checked_add(align(names)?)
+            .ok_or_else(|| invalid("note range overflow"))?;
+        let end = descriptor
+            .checked_add(align(desc)?)
+            .ok_or_else(|| invalid("note range overflow"))?;
+        if end > note.len() {
+            return Err(invalid("truncated module build-ID note"));
+        }
+        let name = bytes(note, start as u64, names as u64)?;
+        let value = bytes(note, descriptor as u64, desc as u64)?;
+        if name == b"GNU\0" && kind == 3 {
+            if !(4..=64).contains(&desc) || found.is_some() {
+                return Err(invalid("invalid or duplicate GNU build ID"));
+            }
+            found = Some(value.to_vec());
+        }
+        offset = end;
+    }
+    found.ok_or_else(|| invalid("missing GNU build ID"))
+}
+
+pub fn module_metadata(data: &[u8]) -> io::Result<ModuleMetadata> {
+    let sections = sections(data)?;
+    let records = modinfo(&sections)?;
+    let name =
+        unique_metadata(&records, "name=", 63)?.ok_or_else(|| invalid("missing module name"))?;
+    if !name
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+    {
+        return Err(invalid("invalid module name"));
+    }
+    let vermagic = unique_metadata(&records, "vermagic=", 1024)?
+        .ok_or_else(|| invalid("missing module vermagic"))?;
+    let srcversion = unique_metadata(&records, "srcversion=", 64)?;
+    if srcversion.is_some_and(|v| !v.bytes().all(|b| b.is_ascii_hexdigit())) {
+        return Err(invalid("invalid module source version"));
+    }
+    let build_id = sections
+        .get(".note.gnu.build-id")
+        .map(|note| {
+            if note.kind != 7 {
+                return Err(invalid("invalid module build-ID section"));
+            }
+            gnu_build_id(note.content)
+        })
+        .transpose()?;
+    Ok(ModuleMetadata {
+        name: name.into(),
+        vermagic: vermagic.into(),
+        srcversion: srcversion.map(str::to_owned),
+        build_id,
+    })
+}
+
+#[cfg(test)]
+mod module_metadata_tests {
+    use super::*;
+    use crate::fixtures::{Section, relocatable};
+
+    fn note() -> Vec<u8> {
+        // Independent literal ELF note: namesz=4, descsz=5, NT_GNU_BUILD_ID=3.
+        vec![
+            4, 0, 0, 0, 5, 0, 0, 0, 3, 0, 0, 0, b'G', b'N', b'U', 0, 1, 2, 3, 4, 5, 0, 0, 0,
+        ]
+    }
+    fn module(records: &[u8]) -> Vec<u8> {
+        relocatable(records, &[Section::new(".note.gnu.build-id", note(), 7)])
+    }
+
+    #[test]
+    fn reads_literal_standard_module_identity_without_vpnhide_markers() {
+        let bytes = module(b"name=ksu_next\0vermagic=5.15.123-android13 SMP preempt mod_unload modversions aarch64\0srcversion=012ABC\0license=GPL\0");
+        let metadata = module_metadata(&bytes).unwrap();
+        assert_eq!(metadata.name, "ksu_next");
+        assert_eq!(
+            metadata.vermagic,
+            "5.15.123-android13 SMP preempt mod_unload modversions aarch64"
+        );
+        assert_eq!(metadata.srcversion.as_deref(), Some("012ABC"));
+        assert_eq!(metadata.build_id.as_deref(), Some(&[1, 2, 3, 4, 5][..]));
+        assert_eq!(capabilities(&bytes).unwrap(), KmodCapabilities::default());
+    }
+
+    #[test]
+    fn identities_reject_duplicates_controls_and_absent_fields() {
+        for records in [
+            &b"name=x\0vermagic=6.1.1\0name=x\0"[..],
+            &b"name=x\0vermagic=6.1.1\0vermagic=6.1.1\0"[..],
+            &b"name=x\0vermagic=6.1.1\0srcversion=A\0srcversion=A\0"[..],
+            &b"name=x\0vermagic=6.1.1\0srcversion=not-hex\0"[..],
+            &b"name=../x\0vermagic=6.1.1\0"[..],
+            &b"name=x\0vermagic=6.1.1\n\0"[..],
+            &b"name=\0vermagic=6.1.1\0"[..],
+            &b"name=x\0"[..],
+            &b"vermagic=6.1.1\0"[..],
+            &b"name=x\0vermagic=6.1.1"[..],
+        ] {
+            assert!(module_metadata(&module(records)).is_err(), "{records:?}");
+        }
+        let bytes = module(b"name=x\0vermagic=6.1.1\0");
+        for size in 0..bytes.len() {
+            assert!(module_metadata(&bytes[..size]).is_err());
+        }
+        let missing_notes =
+            module_metadata(&relocatable(b"name=x\0vermagic=6.1.1\0", &[])).unwrap();
+        assert!(missing_notes.build_id.is_none());
+        assert!(missing_notes.srcversion.is_none());
+    }
+
+    #[test]
+    fn build_id_checks_complete_notes_padding_and_uniqueness() {
+        let valid = note();
+        assert_eq!(gnu_build_id(&valid).unwrap(), [1, 2, 3, 4, 5]);
+        for size in 0..valid.len() {
+            assert!(gnu_build_id(&valid[..size]).is_err());
+        }
+        let mut duplicate = valid.clone();
+        duplicate.extend_from_slice(&valid);
+        assert!(gnu_build_id(&duplicate).is_err());
+        let mut wrong_name = valid.clone();
+        wrong_name[12] = b'X';
+        assert!(gnu_build_id(&wrong_name).is_err());
+        let mut overflow = valid.clone();
+        overflow[..4].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(gnu_build_id(&overflow).is_err());
+        let mut invalid_section = Section::new(".note.gnu.build-id", valid, 1);
+        assert!(
+            module_metadata(&relocatable(
+                b"name=x\0vermagic=6.1.1\0",
+                &[invalid_section.clone()]
+            ))
+            .is_err()
+        );
+        invalid_section.kind = 7;
+        invalid_section.bytes.extend_from_slice(&[0]);
+        assert!(
+            module_metadata(&relocatable(
+                b"name=x\0vermagic=6.1.1\0",
+                &[invalid_section]
+            ))
+            .is_err()
+        );
+    }
+}
 fn sections(data: &[u8]) -> io::Result<BTreeMap<&str, Section<'_>>> {
     if data.len() < 64
         || data.len() as u64 > MAX_PAYLOAD_BYTES
@@ -309,28 +520,15 @@ fn capabilities_in(sections: &BTreeMap<&str, Section<'_>>) -> io::Result<KmodCap
     let mut preflight = Vec::new();
     let mut init = Vec::new();
     let mut parameters = Vec::new();
-    if let Some(metadata) = sections.get(".modinfo") {
-        if metadata.kind != 1 || metadata.size > 64 * 1024 || metadata.content.last() != Some(&0) {
-            return Err(invalid("invalid module metadata"));
+    for record in modinfo(sections)? {
+        if let Some(value) = record.strip_prefix("vpnhide_preflight=") {
+            preflight.push(value);
         }
-        for record in metadata
-            .content
-            .split(|b| *b == 0)
-            .filter(|r| !r.is_empty())
-        {
-            let record = std::str::from_utf8(record).map_err(invalid)?;
-            if !record.is_ascii() {
-                return Err(invalid("non-ASCII module metadata"));
-            }
-            if let Some(value) = record.strip_prefix("vpnhide_preflight=") {
-                preflight.push(value);
-            }
-            if let Some(value) = record.strip_prefix("vpnhide_init_contract=") {
-                init.push(value);
-            }
-            if record.starts_with("parmtype=") {
-                parameters.push(record);
-            }
+        if let Some(value) = record.strip_prefix("vpnhide_init_contract=") {
+            init.push(value);
+        }
+        if record.starts_with("parmtype=") {
+            parameters.push(record);
         }
     }
     let constructors = sections.iter().any(|(name, s)| {

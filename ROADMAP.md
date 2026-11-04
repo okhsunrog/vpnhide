@@ -74,9 +74,15 @@ fallback. The local implementation removes the prepared successor queue and
 ends execution after one durable attempt, including proven no-effect rejection.
 Unknown effects, attempt budgets, possible Zygisk exposure and all ownership
 fences remain. Retaining actual working backends, explicit backend choice with
-Zygisk warning, first-post-update voluntary migration offers, passive module
-vermagic inventory and bounded final-file qualification remain implementation
+Zygisk warning, first-post-update voluntary migration offers and bounded final-file qualification remain implementation
 work; no setting or offer is claimed available yet.
+
+Passive module inventory and selection now share the common ELF metadata owner:
+only live sysfs build-ID matches can corroborate vermagic, distinct names/hashes
+are required to settle a tie, and conflicts survive incomplete scans. Bounds on
+entries/bytes/records and a cooperative deadline exist. Durable/public evidence
+and a hard child-process deadline remain code work; this is not kernel/device ABI
+acceptance or permission to modify candidate bytes.
 
 Existing Zygisk continues where actual working ownership can be established. It
 never licenses new Auto selection, standby publication or silent reentry. Core

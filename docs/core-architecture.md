@@ -243,6 +243,20 @@ A resident incompatible backend or an unknown load cannot be bypassed by loading
 another backend over it. Installed legacy discovery is an isolated compatibility
 path, not the unified selection policy.
 
+The local policy branch also collects passive standard-module evidence from fixed
+Android module directories. One shared Rust ELF parser supplies literal module
+name, vermagic, source version and build ID. Files must bind to live, non-forced
+sysfs module identities; differing IDs/source versions, links and untrusted
+permissions cannot supply a vote. The scan bounds directory entries, file/total
+bytes and retained records, with a cooperative deadline. At least two distinct
+names and file hashes with one consistent Android/LTS hint may narrow a manifest
+tie. A partial scan cannot settle it, and observed conflicts survive partial
+inventory. Full uname release/machine and userspace ABI remain separate inputs;
+the conservative ARM32 Core restriction on ARM64 kernel payloads is preserved.
+These facts do not bypass final payload hashes, import/CRC checks, kernel-loader
+checks or unknown-effect holds. Durable/public evidence presentation and the
+hard process deadline for passive inventory remain unfinished integration work.
+
 Save and Repair use the writer's prepared selection and retained attempt budgets.
 Possible same-boot Zygisk hook consumption blocks a kernel transition even after
 revocation. Diagnostic failure does not initiate fallback. The accepted lifecycle

@@ -181,9 +181,7 @@ fn zygisk_loader_owned_by(proc_root: &Path, owner: u32) -> Runtime {
 }
 
 pub fn observe(env: &NativeEnv, facts: &ScanFacts) -> Capabilities {
-    let release = vpnhide_activator::sys::uname()
-        .map(|u| u.release)
-        .unwrap_or_default();
+    let uname = vpnhide_activator::sys::uname().unwrap_or_default();
     let config = kernel_config(Path::new(crate::native_boot::CONFIG_GZ));
     let disabled = bounded_text(Path::new("/proc/sys/kernel/modules_disabled"), 16);
     let kpm = match &facts.kpm {
@@ -212,7 +210,9 @@ pub fn observe(env: &NativeEnv, facts: &ScanFacts) -> Capabilities {
         } else {
             Abi::Arm32
         },
-        kernel_release: release,
+        kernel_release: uname.release,
+        kernel_machine: uname.machine,
+        module_evidence: super::standard_modules::observe(),
         builtin: if facts.kernel == KernelFact::Builtin {
             Runtime::Ready
         } else {

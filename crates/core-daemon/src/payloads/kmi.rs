@@ -23,6 +23,9 @@ pub struct KmiResolution {
     pub series: Option<LinuxSeries>,
     pub release_hint: Option<String>,
     pub conflicting_hints: bool,
+    /// A quorum of distinct files/names bound to live module build IDs. This is
+    /// selection evidence, never private-layout, successful-load or hook proof.
+    pub module_hint: Option<String>,
     pub candidates: Vec<KmiCandidate>,
 }
 
@@ -86,13 +89,162 @@ pub fn resolve(manifest: &Manifest, release: &str) -> std::io::Result<KmiResolut
         series,
         release_hint,
         conflicting_hints: hints.len() > 1,
+        module_hint: None,
         candidates,
     })
+}
+
+pub fn resolve_with_modules(
+    manifest: &Manifest,
+    release: &str,
+    observed: &super::standard_modules::Observation,
+) -> std::io::Result<KmiResolution> {
+    use std::collections::BTreeSet;
+    let mut result = resolve(manifest, release)?;
+    let mut hints = BTreeSet::new();
+    let mut names = BTreeSet::new();
+    let mut hashes = BTreeSet::new();
+    for module in &observed.modules {
+        let Some(release) = module.metadata.vermagic.split_whitespace().next() else {
+            continue;
+        };
+        let evidence = resolve(manifest, release)?;
+        if evidence.series != result.series || evidence.conflicting_hints {
+            result.conflicting_hints = true;
+            continue;
+        }
+        let Some(hint) = evidence.release_hint else {
+            continue;
+        };
+        hints.insert(hint);
+        names.insert(module.metadata.name.replace('-', "_"));
+        hashes.insert(&module.sha256);
+    }
+    if hints.len() > 1
+        || hints.iter().any(|hint| {
+            result
+                .release_hint
+                .as_ref()
+                .is_some_and(|uname| uname != hint)
+        })
+    {
+        result.conflicting_hints = true;
+    }
+    if !result.conflicting_hints
+        && !observed.incomplete
+        && names.len() >= 2
+        && hashes.len() >= 2
+        && let Some(hint) = hints.into_iter().next()
+    {
+        result.candidates.retain(|candidate| candidate.kmi == hint);
+        result.module_hint = Some(hint);
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bound(
+        name: &str,
+        release: &str,
+        digest: char,
+    ) -> super::super::standard_modules::BoundModule {
+        super::super::standard_modules::BoundModule {
+            source: format!("/vendor_dlkm/lib/modules/{name}.ko").into(),
+            sha256: digest.to_string().repeat(64),
+            metadata: super::super::elf::ModuleMetadata {
+                name: name.into(),
+                vermagic: format!("{release} SMP modversions aarch64"),
+                srcversion: None,
+                build_id: Some(vec![1, 2, 3, 4]),
+            },
+        }
+    }
+
+    #[test]
+    fn only_distinct_live_module_quorum_can_settle_a_manifest_tie() {
+        use super::super::standard_modules::Observation;
+        let manifest = super::super::tests::manifest();
+        let mut observed = Observation {
+            modules: vec![bound("ksu_next", "5.15.123-android13", 'a')],
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_with_modules(&manifest, "5.15.123-custom", &observed)
+                .unwrap()
+                .candidates
+                .len(),
+            2
+        );
+        observed.modules.push(observed.modules[0].clone());
+        assert_eq!(
+            resolve_with_modules(&manifest, "5.15.123-custom", &observed)
+                .unwrap()
+                .candidates
+                .len(),
+            2
+        );
+        observed.modules[1] = bound("wifi", "5.15.123-android13", 'b');
+        for reverse in [false, true] {
+            let mut manifest = manifest.clone();
+            if reverse {
+                manifest.payloads.reverse();
+                observed.modules.reverse();
+            }
+            let resolved = resolve_with_modules(&manifest, "5.15.123-custom", &observed).unwrap();
+            assert_eq!(resolved.candidates.len(), 1);
+            assert_eq!(resolved.candidates[0].kmi, "android13-5.15");
+            assert_eq!(resolved.module_hint.as_deref(), Some("android13-5.15"));
+        }
+        observed.incomplete = true;
+        assert_eq!(
+            resolve_with_modules(&manifest, "5.15.123-custom", &observed)
+                .unwrap()
+                .candidates
+                .len(),
+            2
+        );
+        observed.incomplete = false;
+        observed.modules[1].sha256 = observed.modules[0].sha256.clone();
+        assert_eq!(
+            resolve_with_modules(&manifest, "5.15.123-custom", &observed)
+                .unwrap()
+                .candidates
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn contrary_module_evidence_survives_partial_inventory_and_uname_hints() {
+        use super::super::standard_modules::Observation;
+        let manifest = super::super::tests::manifest();
+        let mut observed = Observation {
+            modules: vec![
+                bound("wifi", "5.15.123-android13", 'a'),
+                bound("ksu_next", "5.15.123-android14", 'b'),
+            ],
+            incomplete: true,
+            ..Default::default()
+        };
+        let conflict = resolve_with_modules(&manifest, "5.15.123-custom", &observed).unwrap();
+        assert!(conflict.conflicting_hints);
+        assert!(conflict.module_hint.is_none());
+        observed.modules.pop();
+        assert!(
+            resolve_with_modules(&manifest, "5.15.123-android14", &observed)
+                .unwrap()
+                .conflicting_hints
+        );
+        observed.modules[0].metadata.vermagic = "6.1.1-android14 SMP".into();
+        assert!(
+            resolve_with_modules(&manifest, "5.15.123", &observed)
+                .unwrap()
+                .conflicting_hints
+        );
+    }
 
     #[test]
     fn kernel_version_is_bounded_and_anchored() {

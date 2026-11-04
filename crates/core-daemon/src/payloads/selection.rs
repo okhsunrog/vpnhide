@@ -28,6 +28,8 @@ pub enum Ownership {
 pub struct Capabilities {
     pub abi: Abi,
     pub kernel_release: String,
+    pub kernel_machine: String,
+    pub module_evidence: super::standard_modules::Observation,
     pub builtin: Runtime,
     pub module_loading: Runtime,
     pub kpm: Runtime,
@@ -131,7 +133,11 @@ pub fn assess_projected(
     support: &[(NativeBackend, Support)],
 ) -> std::io::Result<Assessment> {
     manifest.validate()?;
-    let kmi = super::kmi::resolve(manifest, &device.kernel_release)?;
+    let kmi = super::kmi::resolve_with_modules(
+        manifest,
+        &device.kernel_release,
+        &device.module_evidence,
+    )?;
     let mut candidates = Vec::new();
     for backend in [
         NativeBackend::Builtin,
@@ -249,6 +255,12 @@ fn available(
     let result = match backend {
         NativeBackend::Builtin => Ok(()),
         NativeBackend::Kmod | NativeBackend::Kpm if device.abi != Abi::Arm64 => {
+            Err(Rejection::WrongArchitecture)
+        }
+        NativeBackend::Kmod | NativeBackend::Kpm if device.kernel_machine.is_empty() => {
+            Err(Rejection::RuntimeUnknown)
+        }
+        NativeBackend::Kmod | NativeBackend::Kpm if device.kernel_machine != "aarch64" => {
             Err(Rejection::WrongArchitecture)
         }
         NativeBackend::Kmod if kmi.series.is_none() => Err(Rejection::UnknownKmi),
