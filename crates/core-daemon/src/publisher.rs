@@ -157,6 +157,60 @@ mod tests {
     use super::*;
 
     #[test]
+    fn bounded_selection_observation_and_retained_conflict_fit_the_real_rpc_envelope() {
+        use vpnhide_core_rpc::{
+            NativeBackendStatus, NativeBootOutcome, NativeBootStatus, NativeModuleEvidence,
+            ZygiskTargets,
+        };
+        let mut evidence = crate::journal::selection_evidence_tests::fixture();
+        evidence.modules = vec![
+            NativeModuleEvidence {
+                source: "\\".repeat(640),
+                sha256: "a".repeat(64),
+                name: "n".repeat(63),
+                vermagic: "\\".repeat(1024),
+                srcversion: Some("A".repeat(64)),
+                build_id: "a".repeat(128)
+            };
+            vpnhide_core_rpc::MAX_NATIVE_MODULE_EVIDENCE
+        ];
+        assert!(evidence.valid());
+        let value = Published {
+            epoch: 1,
+            revision: 1,
+            snapshot: StateSnapshot {
+                config: Some(vpnhide_core_rpc::CanonicalConfig::default()),
+                backend: NativeBackendStatus {
+                    boot: Some(NativeBootStatus {
+                        selection_evidence: Some(evidence.clone()),
+                        selection_conflict: Some(evidence.clone()),
+                        boot_id: "test".into(),
+                        decided_epoch: 1,
+                        decided_at_ms: 1,
+                        updated_at_ms: 1,
+                        outcome: NativeBootOutcome::NoBackend,
+                        installed: vec![],
+                        live: vec![],
+                        staged: vec![],
+                        kmod: None,
+                        zygisk_targets: ZygiskTargets::NotInstalled,
+                        ports: None,
+                        obsolete_modules: vec![],
+                    }),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        };
+        let bounded = bounded_response(value);
+        assert!(response_size(&bounded) <= vpnhide_core_rpc::MAX_FRAME_BYTES);
+        assert!(bounded.snapshot.startup_error.is_none());
+        let boot = bounded.snapshot.backend.boot.unwrap();
+        assert_eq!(boot.selection_evidence, Some(evidence.clone()));
+        assert_eq!(boot.selection_conflict, Some(evidence));
+    }
+
+    #[test]
     fn oversized_observation_returns_bounded_explicit_failure_with_config_intact() {
         let config = vpnhide_core_rpc::CanonicalConfig::default();
         let value = Published {

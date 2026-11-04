@@ -337,6 +337,7 @@ mod tests {
         assert!(recovered.zygisk_exposed_in(BOOT));
         assert!(!recovered.revocation_uncertain());
         let intent = super::super::prepared::TransitionIntent {
+            selection_evidence: None,
             boot_id: BOOT.into(),
             filesystem_hiding: false,
             action: super::super::prepared::TransitionAction::Adopt(NativeBackend::Builtin),

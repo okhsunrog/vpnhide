@@ -257,11 +257,13 @@ mod tests {
             filesystem_hiding: false,
             repair_op: None,
             intent: Some(TransitionIntent {
+                selection_evidence: None,
                 boot_id: "boot".into(),
                 filesystem_hiding: false,
                 action: TransitionAction::Load(NativeBackend::Kmod),
                 payload: Some(payload),
                 bundle: Some(BundleIdentity {
+                    manifest_file_sha256: None,
                     root: "/bundle".into(),
                     manifest_sha256: "b".repeat(64),
                     source_commit: "c".repeat(40),
@@ -273,6 +275,8 @@ mod tests {
             }),
             completed: Some(crate::journal::NativeStartupResult {
                 status: vpnhide_core_rpc::NativeBootStatus {
+                    selection_evidence: None,
+                    selection_conflict: None,
                     boot_id: "boot".into(),
                     decided_epoch: 1,
                     decided_at_ms: 1,

@@ -1,10 +1,14 @@
 package dev.okhsunrog.vpnhide
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 /** Core's typed boot decision and forensic evidence; Kotlin performs no boot codec or selection. */
 @Serializable
+@OptIn(ExperimentalSerializationApi::class)
 internal data class NativeBootStatus(
     val bootId: String,
     val decidedAtMs: Long,
@@ -24,6 +28,8 @@ internal data class NativeBootStatus(
      * that survives without the app.
      */
     val obsoleteModules: List<String> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val selectionEvidence: JsonElement? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val selectionConflict: JsonElement? = null,
 ) {
     fun isFreshFor(currentBootId: String): Boolean = bootId.isNotEmpty() && bootId == currentBootId.trim()
 }

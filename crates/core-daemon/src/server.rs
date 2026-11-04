@@ -679,6 +679,9 @@ impl CoreState {
                 .as_ref()
                 .map(|work| work.status.clone());
             crate::native_status::publish_journal(&mut snapshot.native_view, &store.journal);
+            if let Some(boot) = &mut snapshot.backend.boot {
+                crate::native_status::publish_selection_evidence(boot, &store.journal);
+            }
             let revocation = store
                 .journal
                 .zygisk_revocation
@@ -1529,11 +1532,31 @@ impl CoreState {
         ) {
             Ok(prepared) => prepared,
             Err(error) => {
+                if let Some(evidence) = error.evidence.as_deref() {
+                    store.journal.record_selection_evidence(evidence.clone());
+                    if self
+                        .persist_transition_journal(path, &store.journal, OperationId(0))
+                        .is_err()
+                    {
+                        blocked("selection evidence durability could not be established".into());
+                        return;
+                    }
+                }
                 blocked(format!("native preparation refused: {error}"));
                 return;
             }
         };
         let revision = store.config_revision;
+        if let Some(evidence) = &prepared.intent.selection_evidence {
+            store.journal.record_selection_evidence(evidence.clone());
+            if self
+                .persist_transition_journal(path, &store.journal, OperationId(0))
+                .is_err()
+            {
+                blocked("selection evidence durability could not be established".into());
+                return;
+            }
+        }
         let mut writer = BootAttemptWriter {
             state: self,
             journal: &mut store.journal,
@@ -1547,7 +1570,11 @@ impl CoreState {
     }
 
     /// Install an already-made decision (tests, and [`Self::start_native_boot`]).
-    pub fn install_native_boot(&self, boot: crate::native_boot::NativeBoot) {
+    pub fn install_native_boot(&self, mut boot: crate::native_boot::NativeBoot) {
+        crate::native_status::publish_selection_evidence(
+            &mut boot.status,
+            &self.engine.store.lock().expect("config mutex").journal,
+        );
         let handle = Arc::new(Mutex::new(boot));
         *self.native_boot.write().expect("native boot") = Some(handle);
         self.publish_native_boot(None);
@@ -1556,7 +1583,11 @@ impl CoreState {
     /// The current per-boot native status, if native management is enabled.
     pub fn native_boot_status(&self) -> Option<vpnhide_core_rpc::NativeBootStatus> {
         let handle = self.native_boot.read().expect("native boot").clone()?;
-        let status = handle.lock().expect("native boot").status.clone();
+        let mut status = handle.lock().expect("native boot").status.clone();
+        crate::native_status::publish_selection_evidence(
+            &mut status,
+            &self.engine.store.lock().expect("config mutex").journal,
+        );
         Some(status)
     }
 
@@ -1648,9 +1679,13 @@ impl CoreState {
             return;
         };
         let boot = handle.lock().expect("native boot");
-        let status = boot.status.clone();
+        let mut status = boot.status.clone();
         let selected = boot.selected();
         drop(boot);
+        crate::native_status::publish_selection_evidence(
+            &mut status,
+            &self.engine.store.lock().expect("config mutex").journal,
+        );
         self.publisher.update(|snapshot| {
             let revoked = selected == Some(vpnhide_core_rpc::NativeBackend::Zygisk)
                 && snapshot.zygisk_revocation.as_ref().is_some_and(|r| {
@@ -2639,13 +2674,28 @@ impl PhaseHook for JournalPhaseHook<'_> {
                 .runner
                 .prepare_startup(self.journal, self.candidate, self.op)
             {
-                Ok(Some(_)) => {}
+                Ok(Some(attempt)) => {
+                    if let Some(evidence) =
+                        attempt.intent.and_then(|intent| intent.selection_evidence)
+                    {
+                        self.journal.record_selection_evidence(evidence);
+                        self.state
+                            .persist_transition_journal(&self.path, self.journal, self.op)
+                            .map_err(|_| PhaseOutcome::Unknown)?;
+                    }
+                }
                 Ok(None) => {}
                 Err(error) => {
+                    if let Some(evidence) = error.evidence.as_deref() {
+                        self.journal.record_selection_evidence(evidence.clone());
+                        self.state
+                            .persist_transition_journal(&self.path, self.journal, self.op)
+                            .map_err(|_| PhaseOutcome::Unknown)?;
+                    }
                     if let Some(handle) = &self.runner.native {
                         let mut boot = handle.lock().expect("native boot");
                         boot.status.outcome = vpnhide_core_rpc::NativeBootOutcome::Unknown {
-                            detail: error.clone(),
+                            detail: error.reason.clone(),
                         };
                     }
                     eprintln!("core: startup recovery preparation refused: {error}");

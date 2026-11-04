@@ -10,7 +10,7 @@ Implementation progress and verification belong in the corresponding tracked pla
 | [0002](0002-autonomous-diagnostics.md) | Accepted for implementation | Autonomous native and Java diagnostics without relying on a third-party VPN |
 | [0003](0003-conditional-zygisk-publication.md) | Policy superseded by0005 | Zygisk packaging/projection constraints retained; approved continuity decision in0005 |
 | [0004](0004-core-attention-notifications.md) | Accepted for implementation | Core active attention,update scheduling and native Android notification channels |
-| [0005](0005-unified-backend-lifecycle-policy.md) | Accepted for local implementation; main publication pending confirmation | Working-backend continuity, fresh Builtin/KMOD preference, explicit Zygisk and no inter-family automatic fallback |
+| [0005](0005-unified-backend-lifecycle-policy.md) | Accepted for implementation and verified main publication | Working-backend continuity, fresh Builtin/KMOD preference, explicit Zygisk and no inter-family automatic fallback |
 
 Statuses:
 

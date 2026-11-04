@@ -41,6 +41,8 @@ pub const JOURNAL_PATH_ENV: &str = "VPNHIDE_JOURNAL_PATH";
 
 pub mod preflight;
 pub mod revocation;
+#[cfg(test)]
+pub(crate) mod selection_evidence_tests;
 
 const JOURNAL_VERSION: u32 = vpnhide_build_contract::JOURNAL_VERSION;
 
@@ -271,6 +273,23 @@ impl NativeStartup {
         {
             return false;
         }
+        if self.completed.as_ref().is_some_and(|result| {
+            result.status.selection_evidence.as_ref().is_some_and(|e| {
+                !e.valid()
+                    || e.boot_id != self.boot_id
+                    || self
+                        .intent
+                        .as_ref()
+                        .and_then(|intent| intent.selection_evidence.as_ref())
+                        != Some(e)
+            }) || result
+                .status
+                .selection_conflict
+                .as_ref()
+                .is_some_and(|e| !e.valid() || !e.conflicting_hints || e.boot_id != self.boot_id)
+        }) {
+            return false;
+        }
         let Some(intent) = &self.intent else {
             return self
                 .completed
@@ -278,6 +297,7 @@ impl NativeStartup {
                 .is_none_or(|r| r.rejection.is_none());
         }; // schema 3
         if intent.boot_id != self.boot_id
+            || !intent.valid_selection_evidence()
             || intent.filesystem_hiding != self.filesystem_hiding
             || (intent.retire_directory_identity.is_some() && intent.retire_zygisk.is_none())
         {
@@ -287,6 +307,10 @@ impl NativeStartup {
             && (bundle.root.as_os_str().is_empty()
                 || bundle.root_identity.is_some_and(|(_, inode)| inode == 0)
                 || !valid_sha256(&bundle.manifest_sha256)
+                || bundle
+                    .manifest_file_sha256
+                    .as_ref()
+                    .is_some_and(|sha| !valid_sha256(sha))
                 || bundle.source_commit.len() != 40
                 || !bundle.source_commit.bytes().all(|b| b.is_ascii_hexdigit())
                 || bundle.wire.len() > vpnhide_protocol::zygisk_activation::MAX_BYTES
@@ -378,6 +402,10 @@ pub struct NativeQuarantine {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Journal {
     #[serde(default)]
+    pub native_selection_evidence: Option<vpnhide_core_rpc::NativeSelectionEvidence>,
+    #[serde(default)]
+    pub native_selection_conflict: Option<vpnhide_core_rpc::NativeSelectionEvidence>,
+    #[serde(default)]
     pub replacement: Option<crate::maintenance::replacement::ReplacementWork>,
     #[serde(default)]
     pub zygisk_authority: Option<ZygiskAuthorityRecord>,
@@ -438,6 +466,8 @@ pub struct Journal {
 impl Default for Journal {
     fn default() -> Self {
         Journal {
+            native_selection_evidence: None,
+            native_selection_conflict: None,
             replacement: None,
             version: JOURNAL_VERSION,
             zygisk_authority: None,
@@ -468,6 +498,25 @@ impl Default for Journal {
 }
 
 impl Journal {
+    pub(crate) fn record_selection_evidence(
+        &mut self,
+        evidence: vpnhide_core_rpc::NativeSelectionEvidence,
+    ) {
+        if evidence.valid() {
+            if evidence.conflicting_hints {
+                self.native_selection_conflict = Some(evidence.clone());
+            } else if self
+                .native_selection_conflict
+                .as_ref()
+                .is_some_and(|previous| {
+                    crate::payloads::kmi::supersedes_conflict(&evidence, previous)
+                })
+            {
+                self.native_selection_conflict = None;
+            }
+            self.native_selection_evidence = Some(evidence);
+        }
+    }
     pub(crate) fn note_zygisk_exposure(&mut self, boot: &str) {
         self.zygisk_exposure_boot = Some(boot.into());
         if !self.zygisk_exposure_boots.iter().any(|b| b == boot) {
@@ -517,6 +566,24 @@ impl Journal {
         intent: &crate::native_boot::prepared::TransitionIntent,
     ) -> Result<(), String> {
         use crate::native_boot::prepared::TransitionAction;
+        if !intent.valid_selection_evidence() {
+            return Err("invalid selection evidence binding".into());
+        }
+        if intent.action == TransitionAction::Load(NativeBackend::Kmod)
+            && self
+                .native_selection_conflict
+                .as_ref()
+                .is_some_and(|previous| {
+                    previous.boot_id == intent.boot_id
+                        && previous.conflicting_hints
+                        && intent
+                            .selection_evidence
+                            .as_ref()
+                            .is_none_or(|e| !crate::payloads::kmi::supersedes_conflict(e, previous))
+                })
+        {
+            return Err("retained current-boot KMI conflict requires fresh corroborated evidence before loading".into());
+        }
         if self.revocation_uncertain() {
             return Err("Zygisk authorization revocation is unresolved; reconcile it before native activation".into());
         }
@@ -630,6 +697,13 @@ impl Journal {
     }
 
     pub fn replace_native_startup(&mut self, attempt: NativeStartup) {
+        if let Some(evidence) = attempt
+            .intent
+            .as_ref()
+            .and_then(|intent| intent.selection_evidence.clone())
+        {
+            self.record_selection_evidence(evidence);
+        }
         if attempt
             .intent
             .as_ref()
@@ -847,6 +921,46 @@ pub fn read(path: &Path) -> io::Result<Journal> {
                 "journal version {} unsupported (maximum {})",
                 journal.version, JOURNAL_VERSION
             ),
+        ));
+    }
+    if journal
+        .native_selection_evidence
+        .iter()
+        .chain(journal.native_selection_conflict.iter())
+        .any(|e| {
+            !e.valid()
+                || journal.version < 15
+                || (e.module_hint.is_some() && !crate::payloads::kmi::corroborates_record(e))
+        })
+        || journal
+            .native_selection_conflict
+            .as_ref()
+            .is_some_and(|e| !e.conflicting_hints)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid or unsupported retained selection evidence",
+        ));
+    }
+    if journal.version < 15
+        && journal
+            .native_startup
+            .iter()
+            .chain(journal.native_attempts.iter().map(|a| &a.attempt))
+            .any(|a| {
+                a.intent.as_ref().is_some_and(|i| {
+                    i.selection_evidence.is_some()
+                        || i.bundle
+                            .as_ref()
+                            .is_some_and(|bundle| bundle.manifest_file_sha256.is_some())
+                }) || a.completed.as_ref().is_some_and(|r| {
+                    r.status.selection_evidence.is_some() || r.status.selection_conflict.is_some()
+                })
+            })
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "selection evidence is not supported by the recorded journal schema",
         ));
     }
     if let Some(work) = &journal.replacement {
@@ -1276,6 +1390,7 @@ mod tests {
         assert_eq!(migrated.native_startup, journal.native_startup);
         journal.version = 4;
         journal.native_startup.as_mut().unwrap().intent = Some(TransitionIntent {
+            selection_evidence: None,
             boot_id: "boot".into(),
             filesystem_hiding: false,
             action: TransitionAction::Load(NativeBackend::Kmod),
@@ -1333,6 +1448,7 @@ mod tests {
             TransitionAction::Load(NativeBackend::Kpm),
         ] {
             let mut intent = TransitionIntent {
+                selection_evidence: None,
                 boot_id: "boot".into(),
                 filesystem_hiding: false,
                 action,

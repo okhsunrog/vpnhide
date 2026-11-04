@@ -6,6 +6,7 @@ use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 mod bundled;
+mod selection_evidence;
 pub use bundled::{BundleIdentity, restore_environment};
 pub(crate) fn validate_bundle_binding(binding: Option<&BundleIdentity>) -> Result<(), String> {
     bundled::validate_binding(binding)
@@ -24,6 +25,8 @@ pub struct PayloadIdentity {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TransitionIntent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection_evidence: Option<vpnhide_core_rpc::NativeSelectionEvidence>,
     pub boot_id: String,
     pub filesystem_hiding: bool,
     pub action: TransitionAction,
@@ -36,6 +39,18 @@ pub struct TransitionIntent {
 }
 
 impl TransitionIntent {
+    pub(crate) fn valid_selection_evidence(&self) -> bool {
+        self.selection_evidence.as_ref().is_none_or(|e| {
+            e.valid()
+                && (e.module_hint.is_none() || crate::payloads::kmi::corroborates_record(e))
+                && e.boot_id == self.boot_id
+                && self.bundle.as_ref().is_some_and(|bundle| {
+                    bundle.manifest_sha256 == e.manifest_sha256
+                        && bundle.manifest_file_sha256.as_ref() == Some(&e.manifest_file_sha256)
+                        && bundle.source_commit == e.source_commit
+                })
+        })
+    }
     pub fn possible_zygisk_exposure(&self) -> bool {
         matches!(
             self.action,
@@ -57,6 +72,30 @@ pub struct PreparedExecution {
     pub rejection: Option<super::evidence::RejectionProof>,
 }
 
+#[derive(Debug, Clone)]
+pub struct PreparationFailure {
+    pub reason: String,
+    pub evidence: Option<Box<vpnhide_core_rpc::NativeSelectionEvidence>>,
+}
+impl std::fmt::Display for PreparationFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.reason.fmt(f)
+    }
+}
+impl From<String> for PreparationFailure {
+    fn from(reason: String) -> Self {
+        Self {
+            reason,
+            evidence: None,
+        }
+    }
+}
+impl From<&str> for PreparationFailure {
+    fn from(reason: &str) -> Self {
+        reason.to_owned().into()
+    }
+}
+
 pub struct Prepared {
     pub intent: TransitionIntent,
     env: NativeEnv,
@@ -73,7 +112,7 @@ impl Prepared {
         env: NativeEnv,
         filesystem_hiding: bool,
         config: Option<&vpnhide_core_rpc::CanonicalConfig>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, PreparationFailure> {
         let probe = probe_kpm(env.kpm_lock.as_deref());
         let mut facts = gather(&env, probe.fact);
         facts.kpm_filesystem_hiding = probe.filesystem_hiding;
@@ -87,7 +126,7 @@ impl Prepared {
                 config.ok_or("canonical configuration required before bundled activation")?,
             );
         }
-        Self::from_facts(env, filesystem_hiding, facts, probe.client)
+        Self::from_facts(env, filesystem_hiding, facts, probe.client).map_err(Into::into)
     }
 
     pub fn from_facts(
@@ -159,6 +198,7 @@ impl Prepared {
             .is_some_and(|t| t.is_bundled().unwrap_or(false));
         Ok(Self {
             intent: TransitionIntent {
+                selection_evidence: None,
                 boot_id,
                 filesystem_hiding,
                 action,
@@ -292,7 +332,7 @@ impl Prepared {
             failure: std::cell::RefCell::new(None),
         };
         crate::recovery::maybe_crash_for_test("startup-before-effects");
-        let boot = NativeBoot::apply_prepared_plan(
+        let mut boot = NativeBoot::apply_prepared_plan(
             self.env,
             epoch,
             &self.intent.boot_id,
@@ -302,6 +342,7 @@ impl Prepared {
             &effects,
             self.plan,
         );
+        boot.status.selection_evidence = self.intent.selection_evidence.clone();
         crate::recovery::maybe_crash_for_test("startup-after-effects");
         boot.persist();
         let rejection = super::evidence::rejection(&self.intent, &boot, *effects.failure.borrow());

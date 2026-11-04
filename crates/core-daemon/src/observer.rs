@@ -85,6 +85,8 @@ mod tests {
             ObservationFreshness, SelectionMode, ZygiskTargets,
         };
         let boot = NativeBootStatus {
+            selection_evidence: None,
+            selection_conflict: None,
             boot_id: "boot-before-observation".into(),
             decided_epoch: 7,
             decided_at_ms: 1,

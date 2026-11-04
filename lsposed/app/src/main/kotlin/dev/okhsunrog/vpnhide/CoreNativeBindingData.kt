@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import kotlinx.serialization.json.Json
 import uniffi.vpnhide_core_ffi.CoreFamilyApplyOutcome
 import uniffi.vpnhide_core_ffi.CoreNativeBackend
 import uniffi.vpnhide_core_ffi.CoreNativeBootOutcome
@@ -8,6 +9,7 @@ import uniffi.vpnhide_core_ffi.CoreNativeCapacityReport
 import uniffi.vpnhide_core_ffi.CorePortsSource
 import uniffi.vpnhide_core_ffi.CoreSelectionMode
 import uniffi.vpnhide_core_ffi.CoreZygiskTargets
+import uniffi.vpnhide_core_ffi.nativeSelectionEvidenceJson
 
 internal fun CoreNativeBackend.toBackend(): NativeBackendId =
     when (this) {
@@ -42,6 +44,8 @@ internal fun CoreNativeBootStatus.toBootStatus(): NativeBootStatus =
             )
         },
         obsoleteModules,
+        selectionEvidence?.let { Json.parseToJsonElement(nativeSelectionEvidenceJson(it)) },
+        selectionConflict?.let { Json.parseToJsonElement(nativeSelectionEvidenceJson(it)) },
     )
 
 @Suppress("CyclomaticComplexMethod") // The generated enum is intentionally exhaustive.

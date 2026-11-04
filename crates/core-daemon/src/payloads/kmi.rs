@@ -50,10 +50,7 @@ pub fn series(release: &str) -> Option<LinuxSeries> {
     })
 }
 
-/// No effect and no implicit trust elevation. Even one candidate only means
-/// catalog uniqueness; actual loading still needs runtime/ownership/health gates.
-pub fn resolve(manifest: &Manifest, release: &str) -> std::io::Result<KmiResolution> {
-    manifest.validate()?;
+fn release_hints(release: &str) -> (Option<LinuxSeries>, Option<String>, bool) {
     let series = series(release);
     let hints: Vec<_> = release
         .split('-')
@@ -67,6 +64,14 @@ pub fn resolve(manifest: &Manifest, release: &str) -> std::io::Result<KmiResolut
         (Some(s), [hint]) => Some(format!("{hint}-{}.{}", s.major, s.minor)),
         _ => None,
     };
+    (series, release_hint, hints.len() > 1)
+}
+
+/// No effect and no implicit trust elevation. Even one candidate only means
+/// catalog uniqueness; actual loading still needs runtime/ownership/health gates.
+pub fn resolve(manifest: &Manifest, release: &str) -> std::io::Result<KmiResolution> {
+    manifest.validate()?;
+    let (series, release_hint, conflicting_hints) = release_hints(release);
     let mut candidates: Vec<_> = manifest
         .payloads
         .iter()
@@ -88,7 +93,7 @@ pub fn resolve(manifest: &Manifest, release: &str) -> std::io::Result<KmiResolut
     Ok(KmiResolution {
         series,
         release_hint,
-        conflicting_hints: hints.len() > 1,
+        conflicting_hints,
         module_hint: None,
         candidates,
     })
@@ -99,47 +104,83 @@ pub fn resolve_with_modules(
     release: &str,
     observed: &super::standard_modules::Observation,
 ) -> std::io::Result<KmiResolution> {
-    use std::collections::BTreeSet;
     let mut result = resolve(manifest, release)?;
-    let mut hints = BTreeSet::new();
-    let mut names = BTreeSet::new();
-    let mut hashes = BTreeSet::new();
-    for module in &observed.modules {
-        let Some(release) = module.metadata.vermagic.split_whitespace().next() else {
-            continue;
-        };
-        let evidence = resolve(manifest, release)?;
-        if evidence.series != result.series || evidence.conflicting_hints {
-            result.conflicting_hints = true;
-            continue;
-        }
-        let Some(hint) = evidence.release_hint else {
-            continue;
-        };
-        hints.insert(hint);
-        names.insert(module.metadata.name.replace('-', "_"));
-        hashes.insert(&module.sha256);
-    }
-    if hints.len() > 1
-        || hints.iter().any(|hint| {
-            result
-                .release_hint
-                .as_ref()
-                .is_some_and(|uname| uname != hint)
-        })
-    {
-        result.conflicting_hints = true;
-    }
-    if !result.conflicting_hints
-        && !observed.incomplete
-        && names.len() >= 2
-        && hashes.len() >= 2
-        && let Some(hint) = hints.into_iter().next()
-    {
+    let (hint, conflicting) = module_hints(
+        release,
+        !observed.incomplete,
+        observed.modules.iter().map(|m| {
+            (
+                m.metadata.name.as_str(),
+                m.sha256.as_str(),
+                m.metadata.vermagic.as_str(),
+            )
+        }),
+    );
+    result.conflicting_hints |= conflicting;
+    if let Some(hint) = hint {
         result.candidates.retain(|candidate| candidate.kmi == hint);
         result.module_hint = Some(hint);
     }
     Ok(result)
+}
+
+fn module_hints<'a>(
+    release: &str,
+    complete: bool,
+    modules: impl Iterator<Item = (&'a str, &'a str, &'a str)>,
+) -> (Option<String>, bool) {
+    use std::collections::BTreeSet;
+    let (series, uname_hint, mut conflicting) = release_hints(release);
+    let mut hints = BTreeSet::new();
+    let mut names = BTreeSet::new();
+    let mut hashes = BTreeSet::new();
+    for (name, hash, vermagic) in modules {
+        let Some(release) = vermagic.split_whitespace().next() else {
+            continue;
+        };
+        let (module_series, hint, module_conflict) = release_hints(release);
+        if module_series != series || module_conflict {
+            conflicting = true;
+            continue;
+        }
+        let Some(hint) = hint else {
+            continue;
+        };
+        hints.insert(hint);
+        names.insert(name.replace('-', "_"));
+        hashes.insert(hash);
+    }
+    conflicting |= hints.len() > 1
+        || hints
+            .iter()
+            .any(|hint| uname_hint.as_ref().is_some_and(|uname| uname != hint));
+    let hint = if !conflicting && complete && names.len() >= 2 && hashes.len() >= 2 {
+        hints.into_iter().next()
+    } else {
+        None
+    };
+    (hint, conflicting)
+}
+
+pub(crate) fn corroborates_record(evidence: &vpnhide_core_rpc::NativeSelectionEvidence) -> bool {
+    let (hint, conflicting) = module_hints(
+        &evidence.kernel_release,
+        evidence.inventory_complete,
+        evidence
+            .modules
+            .iter()
+            .map(|m| (m.name.as_str(), m.sha256.as_str(), m.vermagic.as_str())),
+    );
+    !conflicting && hint.is_some() && hint == evidence.module_hint
+}
+
+pub(crate) fn supersedes_conflict(
+    current: &vpnhide_core_rpc::NativeSelectionEvidence,
+    previous: &vpnhide_core_rpc::NativeSelectionEvidence,
+) -> bool {
+    previous.boot_id != current.boot_id
+        || !previous.conflicting_hints
+        || (!current.conflicting_hints && corroborates_record(current))
 }
 
 #[cfg(test)]

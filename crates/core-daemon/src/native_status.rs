@@ -8,6 +8,18 @@ use vpnhide_protocol::hook_ids::{Hook, StatusError};
 use crate::journal::{Journal, NativeStartup};
 use crate::native_boot::prepared::TransitionAction;
 
+pub(crate) fn publish_selection_evidence(boot: &mut NativeBootStatus, journal: &Journal) {
+    boot.selection_evidence = journal
+        .native_selection_evidence
+        .clone()
+        .filter(|e| e.boot_id == boot.boot_id)
+        .or(boot.selection_evidence.take());
+    boot.selection_conflict = journal
+        .native_selection_conflict
+        .clone()
+        .filter(|e| e.boot_id == boot.boot_id);
+}
+
 fn implementation(attempt: &NativeStartup) -> Option<NativeImplementation> {
     let intent = attempt.intent.as_ref()?;
     let backend = match intent.action {
@@ -650,6 +662,8 @@ mod tests {
         use crate::native_boot::prepared::{BundleIdentity, PayloadIdentity, TransitionIntent};
         let mut snapshot = state(NativeBackend::Kmod);
         let status = NativeBootStatus {
+            selection_evidence: None,
+            selection_conflict: None,
             boot_id: "boot".into(),
             decided_epoch: 1,
             decided_at_ms: 1,
@@ -674,6 +688,7 @@ mod tests {
             filesystem_hiding: false,
             repair_op: Some(OperationId(3)),
             intent: Some(TransitionIntent {
+                selection_evidence: None,
                 boot_id: "boot".into(),
                 filesystem_hiding: false,
                 action: TransitionAction::Load(NativeBackend::Kmod),
@@ -684,6 +699,7 @@ mod tests {
                     init_contract: Some(1),
                 }),
                 bundle: Some(BundleIdentity {
+                    manifest_file_sha256: None,
                     root: "/bundle".into(),
                     manifest_sha256: "a".repeat(64),
                     source_commit: "b".repeat(40),

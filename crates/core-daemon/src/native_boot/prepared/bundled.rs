@@ -13,13 +13,15 @@ use vpnhide_protocol::hook_ids::*;
 pub struct BundleIdentity {
     pub root: PathBuf,
     pub manifest_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_file_sha256: Option<String>,
     pub source_commit: String,
     #[serde(default)]
     pub root_identity: Option<(u64, u64)>,
     pub wire: String,
 }
 
-fn manifest_digest(manifest: &Manifest) -> String {
+pub(super) fn manifest_digest(manifest: &Manifest) -> String {
     format!(
         "{:x}",
         Sha256::digest(serde_json::to_vec(manifest).expect("manifest serialization"))
@@ -46,7 +48,7 @@ impl Prepared {
         client: Option<CoreKpm>,
         root: PathBuf,
         config: &CanonicalConfig,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, PreparationFailure> {
         let catalog = verified_catalog(&root)?;
         catalog
             .manifest
@@ -134,7 +136,7 @@ impl Prepared {
         packages: &PackageUidMap,
         capabilities: &Capabilities,
         support: &[(NativeBackend, Support)],
-    ) -> Result<Self, String> {
+    ) -> Result<Self, PreparationFailure> {
         let mut projections = Vec::new();
         for backend in [
             NativeBackend::Builtin,
@@ -153,32 +155,45 @@ impl Prepared {
         let assessment =
             selection::assess_projected(&catalog.manifest, capabilities, &requirements, support)
                 .map_err(|e| e.to_string())?;
-        let (backend, resident) = match assessment.decision {
-            Decision::Select(b) => (b, false),
-            Decision::ReconcileResident(b)
-                if crate::payloads::device::resident_eligible(&assessment, b) =>
-            {
-                (b, true)
+        let evidence = selection_evidence::capture(&env, &catalog, capabilities, &assessment)?;
+        let result = (|| -> Result<Self, String> {
+            let (backend, resident) = match assessment.decision {
+                Decision::Select(b) => (b, false),
+                Decision::ReconcileResident(b)
+                    if crate::payloads::device::resident_eligible(&assessment, b) =>
+                {
+                    (b, true)
+                }
+                _ => {
+                    return Err(format!(
+                        "bundled selection held: {:?}; candidates={:?}",
+                        assessment.decision, assessment.candidates
+                    ));
+                }
+            };
+            Self::freeze_candidate(
+                env,
+                filesystem_hiding,
+                facts,
+                client,
+                root,
+                &catalog,
+                &assessment,
+                &projections,
+                backend,
+                resident,
+            )
+        })();
+        match result {
+            Ok(mut prepared) => {
+                prepared.intent.selection_evidence = Some(evidence);
+                Ok(prepared)
             }
-            _ => {
-                return Err(format!(
-                    "bundled selection held: {:?}; candidates={:?}",
-                    assessment.decision, assessment.candidates
-                ));
-            }
-        };
-        Self::freeze_candidate(
-            env,
-            filesystem_hiding,
-            facts,
-            client,
-            root,
-            &catalog,
-            &assessment,
-            &projections,
-            backend,
-            resident,
-        )
+            Err(reason) => Err(PreparationFailure {
+                reason,
+                evidence: Some(Box::new(evidence)),
+            }),
+        }
     }
     #[allow(clippy::too_many_arguments)]
     fn freeze_candidate(
@@ -254,6 +269,7 @@ impl Prepared {
             root,
             root_identity: Some(catalog.root_identity),
             manifest_sha256: manifest_digest(&catalog.manifest),
+            manifest_file_sha256: Some(catalog.manifest_sha256.clone()),
             source_commit: catalog.manifest.bundle_commit.clone(),
             wire: projected.wire,
         });
@@ -271,6 +287,10 @@ pub(super) fn validate_binding(binding: Option<&BundleIdentity>) -> Result<(), S
         .root_identity
         .is_some_and(|id| id != catalog.root_identity)
         || manifest_digest(&catalog.manifest) != binding.manifest_sha256
+        || binding
+            .manifest_file_sha256
+            .as_ref()
+            .is_some_and(|sha| sha != &catalog.manifest_sha256)
         || catalog.manifest.bundle_commit != binding.source_commit
     {
         return Err("prepared bundle generation changed; no effect dispatched".into());
@@ -394,6 +414,63 @@ mod tests {
     use crate::payloads::{Abi, KMIS, Payload, PayloadKind, selection::Ownership};
     use std::io::{Seek, SeekFrom};
     use vpnhide_core_rpc::{AppConfig, NativeRole};
+
+    #[test]
+    fn refusal_retains_kmi_inputs_and_exact_manifest_replacement_blocks_dispatch() {
+        let (_temp, env, root, config, packages, mut caps) = fixture();
+        caps.kernel_release = "5.15.123-custom".into();
+        let failure = Prepared::bind_bundle(
+            env.clone(),
+            false,
+            facts(),
+            None,
+            root.clone(),
+            verified_catalog(&root).unwrap(),
+            &config,
+            &packages,
+            &caps,
+            &support(),
+        )
+        .err()
+        .unwrap();
+        let evidence = failure.evidence.unwrap();
+        assert!(evidence.valid());
+        assert_eq!(evidence.candidate_kmis.len(), 2);
+        assert_eq!(
+            evidence.decision,
+            vpnhide_core_rpc::NativeSelectionDecision::NoEligibleCandidate
+        );
+        assert!(!env.state_file.exists());
+        caps.kernel_release = "6.1.157-android14".into();
+        let prepared = Prepared::bind_bundle(
+            env,
+            false,
+            facts(),
+            None,
+            root.clone(),
+            verified_catalog(&root).unwrap(),
+            &config,
+            &packages,
+            &caps,
+            &support(),
+        )
+        .unwrap();
+        assert!(prepared.validate_binding().is_ok());
+        let path = root.join("payloads/manifest.json");
+        let mut raw = fs::read(&path).unwrap();
+        assert_eq!(
+            prepared
+                .intent
+                .selection_evidence
+                .as_ref()
+                .unwrap()
+                .manifest_file_sha256,
+            format!("{:x}", Sha256::digest(&raw))
+        );
+        raw.extend_from_slice(b"\n ");
+        fs::write(path, raw).unwrap();
+        assert!(prepared.validate_binding().is_err());
+    }
 
     #[test]
     fn partial_resident_retains_observed_hooks_without_relaxing_required_coverage() {
@@ -682,6 +759,7 @@ mod tests {
             result
                 .err()
                 .unwrap()
+                .reason
                 .contains("changed after catalog verification")
         );
     }

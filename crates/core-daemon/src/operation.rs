@@ -258,7 +258,10 @@ impl RealPhaseRunner {
         journal: &crate::journal::Journal,
         candidate: &CanonicalConfig,
         op: vpnhide_core_rpc::OperationId,
-    ) -> Result<Option<crate::journal::NativeStartup>, String> {
+    ) -> Result<
+        Option<crate::journal::NativeStartup>,
+        crate::native_boot::prepared::PreparationFailure,
+    > {
         let Some(handle) = &self.native else {
             return Ok(None);
         };
@@ -275,13 +278,28 @@ impl RealPhaseRunner {
             filesystem_hiding,
             Some(candidate),
         )?;
+        let evidence = prepared.intent.selection_evidence.clone().map(Box::new);
         if let Some(previous) = &journal.native_startup
             && previous.uncertain()
         {
-            prepared.permit_recovery(previous)?;
+            prepared.permit_recovery(previous).map_err(|reason| {
+                crate::native_boot::prepared::PreparationFailure {
+                    reason,
+                    evidence: evidence.clone(),
+                }
+            })?;
         }
-        let prepared = prepared.admit(journal, self.recover_startup)?;
-        self.bind_prepared_startup(&prepared, candidate, op)?;
+        let prepared = prepared
+            .admit(journal, self.recover_startup)
+            .map_err(|reason| crate::native_boot::prepared::PreparationFailure {
+                reason,
+                evidence: evidence.clone(),
+            })?;
+        self.bind_prepared_startup(&prepared, candidate, op)
+            .map_err(|reason| crate::native_boot::prepared::PreparationFailure {
+                reason,
+                evidence,
+            })?;
         let attempt = crate::journal::NativeStartup {
             boot_id: prepared.intent.boot_id.clone(),
             config_revision: journal

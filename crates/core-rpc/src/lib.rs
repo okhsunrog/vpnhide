@@ -38,6 +38,8 @@
 use std::time::Duration;
 
 pub mod attachment_policy;
+pub mod selection_evidence;
+pub use selection_evidence::*;
 pub mod canonical;
 mod config;
 pub mod config_edit;
@@ -508,6 +510,10 @@ pub struct PortsStatus {
 /// The typed per-boot native status core publishes (v6).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NativeBootStatus {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection_evidence: Option<NativeSelectionEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection_conflict: Option<NativeSelectionEvidence>,
     /// `/proc/sys/kernel/random/boot_id` the decision belongs to.
     pub boot_id: String,
     /// The core epoch that made the decision (a restart in the same boot keeps it).
@@ -1062,6 +1068,8 @@ mod tests {
 
         fn sample_boot(outcome: NativeBootOutcome) -> NativeBootStatus {
             NativeBootStatus {
+                selection_evidence: None,
+                selection_conflict: None,
                 boot_id: "b-1".into(),
                 decided_epoch: 7,
                 decided_at_ms: 1,

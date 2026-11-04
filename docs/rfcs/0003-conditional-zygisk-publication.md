@@ -1,7 +1,7 @@
 > Decision update (3 November 2026): [RFC0005](0005-unified-backend-lifecycle-policy.md)
 > now governs the approved continuity/selection policy. Its implementation is
-> authorized locally; publication of new policy to main requires separate
-> confirmation. Keep a working existing Zygisk backend, offer voluntary compatible
+> authorized; publication of verified changes to main was separately confirmed
+> on 4 November 2026. Keep a working existing Zygisk backend, offer voluntary compatible
 > kernel migration after upgrade, require explicit warning/selection for new
 > Zygisk, and never use inter-family automatic fallback. The old pause/proposal
 > statements below are preserved history and no longer describe current authority.

@@ -5,7 +5,7 @@
 > modules bound to the current kernel, including KernelSU Next when properly bound.
 > Qualify bounded preflight of immutable final files for remaining ambiguity;
 > never patch vermagic or bypass loader/private-ABI holds. New policy code/docs
-> stay local until separate confirmation to publish to main. The original imported
+> may be published to main after verification (confirmed 4 November 2026). The original imported
 > proposal below remains historical; this is code approval, not device acceptance.
 
 # RFC: Автоматическое определение GKI/KMI и безопасный подбор kmod в VPNHide 2.x

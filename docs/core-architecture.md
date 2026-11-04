@@ -1,10 +1,9 @@
 # Core architecture
 
-Current implementation, app/core RPC31 and journal14 (reads1–13). The local
-backend-policy review branch includes unpublished changes under
-[RFC0005](rfcs/0005-unified-backend-lifecycle-policy.md); it is not a published main build. The backend
-control-v2 / telemetry-v1 wire is a separate boundary. This document describes
-the implemented ownership and execution contract.
+Current implementation, app/core RPC32 and journal15 (reads1–14). Backend policy
+implementation and publication of verified changes are approved under
+[RFC0005](rfcs/0005-unified-backend-lifecycle-policy.md); remaining flows and device
+gates are tracked separately. Kernel control-v2 / telemetry-v1 is unchanged.
 
 ## Owners and boundaries
 
@@ -243,7 +242,7 @@ A resident incompatible backend or an unknown load cannot be bypassed by loading
 another backend over it. Installed legacy discovery is an isolated compatibility
 path, not the unified selection policy.
 
-The local policy branch also collects passive standard-module evidence from fixed
+Core also collects passive standard-module evidence from fixed
 Android module directories. One shared Rust ELF parser supplies literal module
 name, vermagic, source version and build ID. Files must bind to live, non-forced
 sysfs module identities; differing IDs/source versions, links and untrusted
@@ -257,13 +256,18 @@ tie. A partial scan cannot settle it, and observed conflicts survive partial
 inventory. Full uname release/machine and userspace ABI remain separate inputs;
 the conservative ARM32 Core restriction on ARM64 kernel payloads is preserved.
 These facts do not bypass final payload hashes, import/CRC checks, kernel-loader
-checks or unknown-effect holds. Durable/public evidence presentation remains
-unfinished integration work.
+checks or unknown-effect holds. Current observation and retained current-boot
+conflict are separate durable facts, published through the typed boot read model,
+generated FFI and forensic DTO. A missing/partial later observation cannot erase
+a conflict. New preparation freezes both normalized manifest digest and exact
+file-byte hash; replacing only JSON whitespace still invalidates its dispatch.
+Journal15 preserves older holds/budgets and refuses invented new evidence under
+an older schema. These records do not establish applied policy or health.
 
 Save and Repair use the writer's prepared selection and retained attempt budgets.
 Possible same-boot Zygisk hook consumption blocks a kernel transition even after
 revocation. Diagnostic failure does not initiate fallback. The accepted lifecycle
-policy is being implemented locally; explicit backend intent, existing Zygisk
+policy is being implemented; explicit backend intent, existing Zygisk
 continuity and the post-update migration offer remain unfinished code. See
 [ROADMAP](../ROADMAP.md).
 Core never reboots the phone automatically.
@@ -453,7 +457,7 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-The current paired APK/Core contract is RPC31; journal14 reads schemas1–13. These
+The current paired APK/Core contract is RPC32; journal15 reads schemas1–14. These
 versions are independent of kernel control2/telemetry1 and do not require a
 compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
 publication and sampled current/stale/unattributed process consumption are separate
@@ -554,7 +558,7 @@ Zygisk authorization cannot claim global process coverage.
 The foreign-VPN observer, UID-in-tunnel probe and routing RPC/FFI field are removed.
 Dashboard/diagnostics consume Core evidence independently of external VPN presence
 and split-tunnel membership. Real fixture/hook API observations and manual network
-forensics remain. Current RPC31 requires a paired new APK/Core; journal14 and the frozen
+forensics remain. Current RPC32 requires a paired new APK/Core; journal15 and the frozen
 kernel control2/telemetry1 are independent, so a compatible builtin kernel does not
 need rebuilding merely because the app protocol changed.
 
@@ -598,7 +602,7 @@ refuse the newer schema without removing it. Kernel control2/telemetry1 is uncha
 <a id="explicit-existing-core-replacement-rpc29--journal13"></a>
 <a id="explicit-existing-core-replacement-rpc30--journal13"></a>
 
-## Explicit existing-Core replacement (RPC31 / journal14)
+## Explicit existing-Core replacement (RPC32 / journal15)
 
 The existing command writer now admits `StageCoreReplacement`. Authenticated
 preparation runs outside that writer; accepted work and dispatch intent are

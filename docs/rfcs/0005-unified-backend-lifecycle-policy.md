@@ -1,7 +1,7 @@
 # RFC 0005: Backend continuity and bounded KMOD qualification
 
-Status: **Accepted for implementation locally; publication of this policy to main
-requires separate maintainer confirmation.**
+Status: **Accepted for implementation and publication of verified code to main.**
+Publication approval: 4 November 2026. Remaining code and device gates stay explicit.
 Decision: 3 November 2026. This document replaces the earlier consolidated
 proposal; its [original body is archived](../archive/2026-11-03-rfc0005-initial-proposal.md).
 Acceptance authorizes code and cloud checks, not device changes, boot writes,

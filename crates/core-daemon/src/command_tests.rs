@@ -13,6 +13,32 @@ fn load(root: &std::path::Path, epoch: u64) -> Arc<CoreState> {
     .unwrap()
 }
 
+#[test]
+fn retained_selection_conflict_and_latest_partial_input_survive_real_state_restart() {
+    let root = tempfile::tempdir().unwrap();
+    let mut journal = Journal::default();
+    let contrary = crate::journal::selection_evidence_tests::fixture();
+    let mut latest = contrary.clone();
+    latest.conflicting_hints = false;
+    latest.inventory_complete = false;
+    latest.observed_at_boot_ms = Some(8);
+    journal.record_selection_evidence(contrary.clone());
+    journal.record_selection_evidence(latest.clone());
+    journal::write_atomic(&root.path().join("operations.json"), &journal).unwrap();
+    for epoch in [1, 2] {
+        let state = load(root.path(), epoch);
+        native_none(&state, root.path());
+        let snapshot = state.snapshot();
+        let boot = snapshot.backend.boot.unwrap();
+        assert_eq!(boot.selection_evidence, Some(latest.clone()));
+        assert_eq!(boot.selection_conflict, Some(contrary.clone()));
+        assert_eq!(state.native_boot_status().unwrap(), boot);
+        assert_eq!(snapshot.backend.selected, None);
+        assert_eq!(snapshot.backend.applied, None);
+        state.shutdown();
+    }
+}
+
 fn command(state: &CoreState, edit: ConfigEdit) -> OperationId {
     let op = state.issue_operation_id().unwrap();
     state
@@ -91,6 +117,8 @@ fn native_none(state: &CoreState, root: &std::path::Path) {
         env,
         selection: None,
         status: NativeBootStatus {
+            selection_evidence: None,
+            selection_conflict: None,
             boot_id: "test".into(),
             decided_epoch: 2,
             decided_at_ms: 0,
@@ -1112,6 +1140,8 @@ fn explicit_repair_releases_only_covered_resources_and_preserves_old_unknown_rec
         env,
         selection: None,
         status: NativeBootStatus {
+            selection_evidence: None,
+            selection_conflict: None,
             boot_id: "test".into(),
             decided_epoch: 2,
             decided_at_ms: 0,

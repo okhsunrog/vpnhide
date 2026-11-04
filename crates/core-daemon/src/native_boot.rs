@@ -610,6 +610,8 @@ impl NativeBoot {
         let now = now_ms();
         Self {
             status: NativeBootStatus {
+                selection_evidence: None,
+                selection_conflict: None,
                 boot_id: read_boot_id(&env.boot_id_path),
                 decided_epoch: epoch,
                 decided_at_ms: now,
@@ -814,6 +816,8 @@ impl NativeBoot {
         let now = now_ms();
         let mut boot = NativeBoot {
             status: NativeBootStatus {
+                selection_evidence: None,
+                selection_conflict: None,
                 boot_id: boot_id.to_owned(),
                 decided_epoch: epoch,
                 decided_at_ms: now,

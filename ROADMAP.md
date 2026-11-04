@@ -17,15 +17,14 @@ Historical evidence: [archive](docs/archive/README.md).
 - One user-facing full Core ZIP contains the native alternatives. Separate
   backend producer archives are internal build inputs. Core is the sole runtime
   policy/effect owner; the APK runs no root process.
-- **Backend continuity policy is accepted for local implementation.** Keep the
+- **Backend continuity policy is accepted for implementation.** Keep the
   actually working backend; fresh selection prefers compatible Builtin then KMOD.
   No inter-family automatic fallback. Existing Zygisk continues, with a voluntary
   compatible-kernel offer after upgrade; new Zygisk needs explicit selection and
   warning. [RFC0005](docs/rfcs/0005-unified-backend-lifecycle-policy.md) supersedes
   the earlier recovery proposal;0003 packaging and safety constraints remain.
-- **Do not publish these new policy changes to main without separate maintainer
-  confirmation.** This review branch is local. Code, compile checks and device
-  acceptance remain separate. Never reboot the phone automatically.
+- **Verified policy changes may be published to main** (maintainer confirmation
+  received 4 November 2026). Code, compile checks and device acceptance remain separate. Never reboot the phone automatically.
 - Independent diagnostics, maintenance, Kotlin ownership, provisioning and
   verification retain their prior authorization. The route prototype is not yet
   wired into the production run/worker/FFI path; the genuine secondary32-bit
@@ -35,14 +34,14 @@ Historical evidence: [archive](docs/archive/README.md).
 
 ## Current implementation cycle
 
-Current paired APK/Core RPC31; private journal14 reads schemas1–13. Kernel
+Current paired APK/Core RPC32; private journal15 reads schemas1–14. Kernel
 control2/telemetry1 is unchanged; these numbers alone require no builtin rebuild.
 
 | Feature | Actual status | Next concrete work / acceptance |
 | --- | --- | --- |
 | Core writer, journal, typed commands and persistent client | Implemented foundation | Preserve holds, attempt budgets, operation identity and migration readers. Scoped instance/floor/staging locks now end with their owning process scope despite inherited pre-exec FDs; live contenders remain excluded. [Architecture](docs/core-architecture.md), [IPC](docs/core-ipc-auth.md), [fork regressions](docs/archive/2026-11-03-maintenance-lock-lifetime.md). |
 | Picker capacity and draft UX | Implemented | Preserve Save/Cancel and local shared-policy admission; no Kotlin numeric duplicate or save-only rejection. [Limits](docs/limits.md), [config coordinator](docs/config-coordinator.md). |
-| Backend continuity, selection and authorization | Partial; policy rework local | Verified catalog, frozen preparation, loader FD/image proof, revocation and exposure fences exist. Mixed-ABI genuine 32-bit bootstrap and complete production lifecycle remain. Implement the accepted continuity decision locally under RFC0005; main publication awaits confirmation. |
+| Backend continuity, selection and authorization | Partial; policy rework in progress | Verified catalog, frozen preparation, loader FD/image proof, revocation and exposure fences exist. Mixed-ABI genuine 32-bit bootstrap and complete production lifecycle remain. Implement the remaining continuity decision under RFC0005; verification precedes main publication. |
 | Single Core distribution and ZIP dedup | Package slice implemented; runtime incomplete | Descriptor/assembly and replacement checks enforce one passive ABI pair and no main-Core autoload directory. Preserve old-source image fencing during migration. Resolve lifecycle/placement before completing Zygisk runtime; no new projection executor exists. |
 | Automatic GKI/KMI selection | Partial, approved for implementation | Manifest-derived candidates, ELF capabilities and separate experiment budgets exist. Implement real Core preflight dispatch/reconciliation and typed resolution; All seven pinned DDK engineering builds now retain complete real loader CRCs; shared assembly/runtime admission rejects incomplete GKI. [Qualification evidence](docs/archive/2026-11-03-gki-modpost-qualification.md). A clean same-commit full bundle also passed at `12c78631`; actual kernel/device evidence remains and production experimental admission stays off. [RFC0001](docs/rfcs/0001-automatic-gki-kmi-selection.md). |
 | Genuine secondary32-bit Android worker | Unimplemented launcher; explicit coverage limitation | Ordinary `:diagnostics` uses the selected package ABI. Implement a safe real Zygote32 path on mixed-ABI devices, then qualify actual ABI loading/runtime behavior. ARMv7 compile/ELF and ARM64 worker evidence do not satisfy it; no borrowed image proof or forced APK restart. [Current scope](docs/diagnostics.md#worker-abi-coverage), [rejected instrumentation candidate](docs/archive/2026-11-03-diagnostic-worker-abi-launch.md). |
@@ -63,14 +62,14 @@ control2/telemetry1 is unchanged; these numbers alone require no builtin rebuild
 
 ## Backend policy implementation boundary
 
-[RFC0005](docs/rfcs/0005-unified-backend-lifecycle-policy.md) is accepted for local
-implementation. Its code and document changes must remain on the local review
-branch until separate confirmation permits publication to main. The original
+[RFC0005](docs/rfcs/0005-unified-backend-lifecycle-policy.md) is accepted for
+implementation; verified changes may be published to main under the separate
+4 November confirmation. The original
 large proposal and RFC0003's previous defaults are historical, not competing
 policy authority.
 
 Fresh Auto chooses compatible Builtin then KMOD, with no automatic inter-family
-fallback. The local implementation removes the prepared successor queue and
+fallback. The implementation removes the prepared successor queue and
 ends execution after one durable attempt, including proven no-effect rejection.
 Unknown effects, attempt budgets, possible Zygisk exposure and all ownership
 fences remain. Retaining actual working backends, explicit backend choice with
@@ -81,8 +80,12 @@ Passive module inventory and selection now share the common ELF metadata owner:
 only live sysfs build-ID matches can corroborate vermagic, distinct names/hashes
 are required to settle a tie, and conflicts survive incomplete scans. Bounds on
 entries/bytes/records and a bounded same-image child exist. Valid prefixes survive
-timeout/failure with incomplete status. Durable/public evidence remains code work; this is not kernel/device ABI
-acceptance or permission to modify candidate bytes.
+timeout/failure with incomplete status. RPC32/journal15 retain current observations
+and current-boot conflict evidence separately, including refused preparation.
+Incomplete later reads and receipt pruning cannot erase the conflict; the same
+bounded typed evidence reaches generated FFI and forensic exports. Final-file
+manifest bytes are frozen as well as the normalized digest. This is not
+kernel/device ABI acceptance or permission to modify candidate bytes.
 
 Partial resident readiness now shares the protocol owner used by KPM delivery;
 preparation retains its actual installed mask and continues to reject missing

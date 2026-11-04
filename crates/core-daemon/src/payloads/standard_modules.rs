@@ -24,7 +24,7 @@ const ROOTS: [&str; 5] = [
 const MAX_FILES: usize = 512;
 const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_MODULES: usize = 32;
+const MAX_MODULES: usize = vpnhide_core_rpc::MAX_NATIVE_MODULE_EVIDENCE;
 pub(crate) mod probe;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

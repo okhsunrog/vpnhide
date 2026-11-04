@@ -486,6 +486,7 @@ mod tests {
         let first = &plan.candidates[0].sha256;
         let second = &plan.candidates[1].sha256;
         let intent = TransitionIntent {
+            selection_evidence: None,
             boot_id: plan.boot_id.clone(),
             filesystem_hiding: false,
             action: TransitionAction::Load(vpnhide_core_rpc::NativeBackend::Kmod),
@@ -562,6 +563,7 @@ mod tests {
         new_boot.boot_id = "new-boot".into();
         assert!(journal.begin_preflight(&new_boot, sha).is_err());
         let intent = crate::native_boot::prepared::TransitionIntent {
+            selection_evidence: None,
             boot_id: "new-boot".into(),
             filesystem_hiding: false,
             action: crate::native_boot::prepared::TransitionAction::Adopt(

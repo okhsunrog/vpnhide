@@ -903,6 +903,8 @@ impl From<CorePortsStatus> for rpc::PortsStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreNativeBootStatus {
+    pub selection_evidence: Option<crate::CoreNativeSelectionEvidence>,
+    pub selection_conflict: Option<crate::CoreNativeSelectionEvidence>,
     pub boot_id: String,
     pub decided_epoch: u64,
     pub decided_at_ms: u64,
@@ -919,6 +921,8 @@ pub struct CoreNativeBootStatus {
 impl From<rpc::NativeBootStatus> for CoreNativeBootStatus {
     fn from(value: rpc::NativeBootStatus) -> Self {
         Self {
+            selection_evidence: value.selection_evidence.map(Into::into),
+            selection_conflict: value.selection_conflict.map(Into::into),
             boot_id: value.boot_id,
             decided_epoch: value.decided_epoch,
             decided_at_ms: value.decided_at_ms,
@@ -941,6 +945,8 @@ impl From<rpc::NativeBootStatus> for CoreNativeBootStatus {
 impl From<CoreNativeBootStatus> for rpc::NativeBootStatus {
     fn from(value: CoreNativeBootStatus) -> Self {
         Self {
+            selection_evidence: value.selection_evidence.map(Into::into),
+            selection_conflict: value.selection_conflict.map(Into::into),
             boot_id: value.boot_id,
             decided_epoch: value.decided_epoch,
             decided_at_ms: value.decided_at_ms,
