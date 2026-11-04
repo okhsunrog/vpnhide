@@ -1,6 +1,8 @@
 # Core architecture
 
-Current implementation on `main`, app/core RPC31 and journal14 (reads1–13). The backend
+Current implementation, app/core RPC31 and journal14 (reads1–13). The local
+backend-policy review branch includes unpublished changes under
+[RFC0005](rfcs/0005-unified-backend-lifecycle-policy.md); it is not a published main build. The backend
 control-v2 / telemetry-v1 wire is a separate boundary. This document describes
 the implemented ownership and execution contract.
 
@@ -233,17 +235,20 @@ selection is restored from the journal and rechecks runtime identity without loa
 Persist/Native/Secret uncertainty gates initial activation as well as boot delivery.
 Verified catalog preparation freezes payload identities, UID inventory and full
 policy projections before effects. Bundled alternatives do not conflict merely
-because their artifacts coexist. Eligible candidates use the current fixed
-priority; safe progression requires durable no-effect proof and clear ownership.
+because their artifacts coexist. Fresh Auto selects one eligible Builtin, then
+KMOD candidate. KPM/Zygisk eligibility stays visible, but does not admit them as
+automatic alternatives. A known rejection terminates this attempt; no-effect
+proof retains the refusal and budget rather than authorizing another family.
 A resident incompatible backend or an unknown load cannot be bypassed by loading
 another backend over it. Installed legacy discovery is an isolated compatibility
 path, not the unified selection policy.
 
 Save and Repair use the writer's prepared selection and retained attempt budgets.
 Possible same-boot Zygisk hook consumption blocks a kernel transition even after
-revocation. Diagnostic failure does not initiate fallback. The reopened lifecycle
-and feature-granular health review does not authorize new Auto/Manual, previous-
-backend hints, projection staging or reboot policy. See [ROADMAP](../ROADMAP.md).
+revocation. Diagnostic failure does not initiate fallback. The accepted lifecycle
+policy is being implemented locally; explicit backend intent, existing Zygisk
+continuity and the post-update migration offer remain unfinished code. See
+[ROADMAP](../ROADMAP.md).
 Core never reboots the phone automatically.
 
 Ports resolves the complete package/UID map before touching firewall rules,
@@ -466,14 +471,14 @@ eligibility through the revocation verifier. Journal11 migrates1–10 while pres
 other resource holds and load/preflight budgets.
 
 
-Native startup and Repair use one bounded attempt executor. One catalog, one UID
-inventory and full policy projections freeze every eligible successor before any
-load. Each exact payload/recipient and policy generation is synced before its
-effect, and its completed result is synced before a successor is admitted. Every
+Native startup and Repair use one single-attempt executor. One catalog, one UID
+inventory and full policy projections freeze one selected candidate before any
+load. Its exact payload/recipient and policy generation is synced before the
+effect, and its completed result is synced before returning its outcome. Every
 dispatch rechecks the active catalog directory and live ownership. A possible
 Zygisk exposure still prohibits a kernel transition in the same boot.
 
-Fallback requires a private, boot/hash/manifest-bound no-effect proof, independent
+Recovery retains a private, boot/hash/manifest-bound no-effect proof, independent
 of diagnostic strings and public signature_rejected flags. Only genuine Android
 finit_module signature errno with a verified closed-init-contract payload, or a
 typed before-dispatch refusal, can supply that proof after fresh clear ownership.
@@ -484,9 +489,8 @@ ENOKEY/EKEYREJECTED cannot be returned by module init. It relies on audited buil
 provenance; it is not a proof about arbitrary ELF machine code. Preflight remains
 a distinct experimental budget and never picks the first of ambiguous KMIs.
 
-Budgets are never refunded. Restart may skip a spent candidate only with matching
-retained proof for the same generation/policy and fresh ownership; incomplete
-receipts retain holds. Journal11 also retains the exact previously published
+Budgets are never refunded. Restart refuses a rejected candidate without selecting
+another family; incomplete receipts retain holds. Journal11 also retains the exact previously published
 authority when newer Zygisk admission fails before publication, so reset can
 revoke that known grant without accepting an arbitrary stale or newer file.
 

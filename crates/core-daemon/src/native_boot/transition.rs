@@ -187,7 +187,7 @@ pub(crate) fn retire_prepared(
     }
 }
 
-/// The sole attempt loop for boot and explicit repair. The writer owns every
+/// The single attempt for boot and explicit repair. The writer owns every
 /// durable boundary, including a replacement command's exact policy recipient.
 pub(crate) trait AttemptWriter {
     fn journal(&self) -> &Journal;
@@ -218,65 +218,37 @@ pub(super) fn activate_with(
     let prepared = prepared
         .admit(writer.journal(), explicit)
         .map_err(|_| PhaseOutcome::FailedKnown)?;
-    let mut candidates = prepared.into_candidates();
-    let mut tried = Vec::new();
-    while let Some(prepared) = candidates.pop_front() {
-        if tried.len() >= 4 || prepared.selected().is_some_and(|b| tried.contains(&b)) {
-            return Err(PhaseOutcome::FailedKnown);
-        }
-        prepared.validate_binding().map_err(|error| {
-            crate::alog::info(&format!("prepared generation refused: {error}"));
-            PhaseOutcome::FailedKnown
-        })?;
-        writer
-            .journal()
-            .check_native_attempt(&prepared.intent, explicit)
-            .map_err(|_| PhaseOutcome::FailedKnown)?;
-        if !tried.is_empty()
-            && !super::evidence::ownership_clear(prepared.environment(), &prepared.intent.boot_id)
-        {
-            return Err(PhaseOutcome::Unknown);
-        }
-        if let Some(backend) = prepared.selected() {
-            tried.push(backend);
-        }
-        writer.begin(&prepared)?;
-        crate::recovery::maybe_crash_for_test("startup-intent");
-        writer.retire(&prepared)?;
-        if !writer.can_dispatch() {
-            return Err(PhaseOutcome::Unknown);
-        }
-        prepared
-            .validate_binding()
-            .map_err(|_| PhaseOutcome::Unknown)?;
-        if !prepared.dispatch_ownership_clear() {
-            return Err(PhaseOutcome::Unknown);
-        }
-        let execution = execute(prepared, epoch);
-        let result = crate::journal::NativeStartupResult {
-            status: execution.boot.status.clone(),
-            selection: execution.boot.selection,
-            rejection: execution.rejection,
-        };
-        // The completed proof must be durable BEFORE admitting any successor.
-        writer.complete(result)?;
-        crate::recovery::maybe_crash_for_test("startup-completion");
-        let rejected = writer
-            .journal()
-            .native_startup
-            .as_ref()
-            .is_some_and(|attempt| {
-                attempt
-                    .completed
-                    .as_ref()
-                    .and_then(|r| r.rejection.as_ref())
-                    .is_some_and(|proof| proof.valid_for(attempt))
-            });
-        if !rejected || candidates.is_empty() {
-            return Ok(execution.boot);
-        }
+    prepared.validate_binding().map_err(|error| {
+        crate::alog::info(&format!("prepared generation refused: {error}"));
+        PhaseOutcome::FailedKnown
+    })?;
+    writer
+        .journal()
+        .check_native_attempt(&prepared.intent, explicit)
+        .map_err(|_| PhaseOutcome::FailedKnown)?;
+    writer.begin(&prepared)?;
+    crate::recovery::maybe_crash_for_test("startup-intent");
+    writer.retire(&prepared)?;
+    if !writer.can_dispatch() {
+        return Err(PhaseOutcome::Unknown);
     }
-    Err(PhaseOutcome::FailedKnown)
+    prepared
+        .validate_binding()
+        .map_err(|_| PhaseOutcome::Unknown)?;
+    if !prepared.dispatch_ownership_clear() {
+        return Err(PhaseOutcome::Unknown);
+    }
+    let execution = execute(prepared, epoch);
+    let result = crate::journal::NativeStartupResult {
+        status: execution.boot.status.clone(),
+        selection: execution.boot.selection,
+        rejection: execution.rejection,
+    };
+    // Keep no-effect proof for recovery and the attempt budget. It does not
+    // authorize an automatic load of another backend family.
+    writer.complete(result)?;
+    crate::recovery::maybe_crash_for_test("startup-completion");
+    Ok(execution.boot)
 }
 
 #[cfg(test)]

@@ -61,44 +61,28 @@ control2/telemetry1 is unchanged; these numbers alone require no builtin rebuild
 | Documentation ownership | Current/archive cutover implemented | Current localized help/contracts, decision metadata and dated evidence have separate homes. Maintain source-linked statuses, localized shipped instructions and link/anchor checks with each change. |
 | Rust 1.99.1 migration | Implemented | Keep strict lint checks and both Android ABIs; no global Clippy relaxation. Core/FFI/Zygisk now share explicit Android 16 KiB linking; six actual ABI images passed LOAD alignment/congruence checks. Real device acceptance remains separate. |
 
-## Zygisk lifecycle review boundary
+## Backend policy implementation boundary
 
-[Consolidated RFC0005](docs/rfcs/0005-unified-backend-lifecycle-policy.md) is now
-published in English for review: Auto/Manual, feature-granular partial health,
-finite recovery, provider/discovery boundaries and the migration/update matrix.
-Publication is not implementation approval. It proposes superseding RFC0003's
-strict default; current code and safety guards remain unchanged.
+[RFC0005](docs/rfcs/0005-unified-backend-lifecycle-policy.md) is accepted for local
+implementation. Its code and document changes must remain on the local review
+branch until separate confirmation permits publication to main. The original
+large proposal and RFC0003's previous defaults are historical, not competing
+policy authority.
 
-[The preserved proposal](docs/rfcs/0003-conditional-zygisk-publication.md) is reopened,
-not authority to continue a new activation policy. Review fresh install,1.x→2.x,
-compatible APK client/UI updates, Core patch/minor updates, kernel changes, builtin
-appearance, fallback and boot failure with ordinary multi-week uptime.
+Fresh Auto chooses compatible Builtin then KMOD, with no automatic inter-family
+fallback. The local implementation removes the prepared successor queue and
+ends execution after one durable attempt, including proven no-effect rejection.
+Unknown effects, attempt budgets, possible Zygisk exposure and all ownership
+fences remain. Retaining actual working backends, explicit backend choice with
+Zygisk warning, first-post-update voluntary migration offers, passive module
+vermagic inventory and bounded final-file qualification remain implementation
+work; no setting or offer is claimed available yet.
 
-Remembering a successful backend, keeping an earlier preload, combining staging
-with one already-needed boot, and accepting inert cached mappings are proposals.
-Mapping is not hook exposure. Existing same-boot possible-hook-consumption fences
-remain mandatory; removing authorization does not unload hooks. Compatible APK
-client/UI changes must not automatically imply reinstalling Core. Java-hook or
-runtime-image changes have their own lifecycle requirements. No blanket reboot
-count or safe coexistence is asserted before review.
-
-Auto by default plus an exact Manual backend with no hidden fallback is a new
-product proposal, not an implemented setting or final permission to resume policy
-work. Partial useful coverage, total failure and uncertain load require separate
-decisions. Preserve current no-effect-only bounded fallback and exposure guards
-until that review concludes.
-
-Zygisk is now explicitly **excluded from Auto, automatic fallback and standby**,
-recorded in RFC0005's 3 November amendment. Only a current informed “Use Zygisk”
-backend choice permits discovery preparation and grants; prior consent/use,
-provider presence and imports are not an Auto license. Returning to Auto never
-permits silent reentry. Sufficient working kernel protection produces no offer;
-a justified last-resort offer is deduplicated and declined offers do not nag.
-Advanced settings allow reconsideration/revocation with the injection/detection
-warning. Existing cached images/hooks need separate retirement. This is a
-confirmed product requirement, **not implemented code** or permission to lift the
-broader policy pause. No automatic reboot, unsafe live Kmod↔KPM handoff, or silent
-KPM provisioning follows from kernel-only Auto.
+Existing Zygisk continues where actual working ownership can be established. It
+never licenses new Auto selection, standby publication or silent reentry. Core
+never automatically reboots, silently provisions KPM, bypasses ABI checks or
+performs an unsafe live KMOD/KPM handoff. Provider cache and already-hooked
+process retirement remain separate lifecycle boundaries.
 
 ## Final build and acceptance gates
 

@@ -3,9 +3,9 @@
 //! across a reboot (new installs sit in `modules_update`).
 //!
 //! Production bundle preparation verifies one catalog and UID inventory, projects
-//! the full policy and freezes eligible candidates before effects. Coexisting
-//! bundled payloads are alternatives, not resident-backend conflicts. The bounded
-//! executor progresses only after durable no-effect proof and clear ownership.
+//! the full policy and freezes one eligible candidate before effects. Coexisting
+//! bundled payloads are alternatives, not resident-backend conflicts. Auto chooses
+//! Builtin then KMOD; the executor never falls back to another backend family.
 //! The installed-module resolver below remains a legacy/recovery compatibility
 //! adapter: more than one independently installed/live candidate is a conflict.
 //! Possible Zygisk hook exposure and unknown load effects prohibit unsafe overlap.

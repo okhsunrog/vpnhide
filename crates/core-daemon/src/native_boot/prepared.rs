@@ -66,7 +66,6 @@ pub struct Prepared {
     staged: Option<File>,
     retire_target: Option<crate::zygisk::ZygiskTarget>,
     retire_bundled: bool,
-    alternatives: std::collections::VecDeque<Prepared>,
 }
 
 impl Prepared {
@@ -175,56 +174,24 @@ impl Prepared {
             staged,
             retire_target,
             retire_bundled,
-            alternatives: std::collections::VecDeque::new(),
         })
     }
 
-    pub(crate) fn into_candidates(mut self) -> std::collections::VecDeque<Self> {
-        let mut candidates = std::mem::take(&mut self.alternatives);
-        candidates.push_front(self);
-        candidates
-    }
     pub(crate) fn admit(
         self,
         journal: &crate::journal::Journal,
         explicit: bool,
     ) -> Result<Self, String> {
-        let mut candidates = self.into_candidates();
-        let mut skipped = false;
-        while let Some(mut candidate) = candidates.pop_front() {
-            journal.check_native_safety(&candidate.intent)?;
-            if let TransitionAction::Load(backend) = candidate.intent.action
-                && journal.backend_rejected(&candidate.intent.boot_id, backend)
-            {
-                let retained = journal
-                    .native_startup
-                    .iter()
-                    .chain(journal.native_attempts.iter().map(|h| &h.attempt))
-                    .filter(|a| a.boot_id == candidate.intent.boot_id)
-                    .filter_map(|a| a.intent.as_ref())
-                    .find(|i| i.action == candidate.intent.action);
-                if retained.is_none_or(|i| i.bundle != candidate.intent.bundle) {
-                    return Err("rejected candidate generation or policy changed; reboot before selecting another backend".into());
-                }
-                skipped = true;
-                continue;
-            }
-            journal.check_native_attempt(&candidate.intent, explicit)?;
-            if skipped
-                && !super::evidence::ownership_clear(
-                    candidate.environment(),
-                    &candidate.intent.boot_id,
-                )
-            {
-                return Err(
-                    "ownership changed after the retained rejection; no successor dispatched"
-                        .into(),
-                );
-            }
-            candidate.alternatives = candidates;
-            return Ok(candidate);
+        journal.check_native_safety(&self.intent)?;
+        if let TransitionAction::Load(backend) = self.intent.action
+            && journal.backend_rejected(&self.intent.boot_id, backend)
+        {
+            return Err(
+                "selected backend already rejected in this boot; no automatic successor".into(),
+            );
         }
-        Err("all prepared candidates already rejected in this boot".into())
+        journal.check_native_attempt(&self.intent, explicit)?;
+        Ok(self)
     }
     pub(crate) fn dispatch_ownership_clear(&self) -> bool {
         use crate::payloads::selection::Ownership;

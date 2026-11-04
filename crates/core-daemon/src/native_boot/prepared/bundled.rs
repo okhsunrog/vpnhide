@@ -173,44 +173,18 @@ impl Prepared {
                 ));
             }
         };
-        let mut prepared = Self::freeze_candidate(
-            env.clone(),
+        Self::freeze_candidate(
+            env,
             filesystem_hiding,
-            facts.clone(),
-            client.clone(),
-            root.clone(),
+            facts,
+            client,
+            root,
             &catalog,
             &assessment,
             &projections,
             backend,
             resident,
-        )?;
-        if !resident {
-            let mut after_selected = false;
-            for candidate in &assessment.candidates {
-                if candidate.backend == backend {
-                    after_selected = true;
-                    continue;
-                }
-                if !after_selected || candidate.eligibility.is_err() {
-                    continue;
-                }
-                prepared.alternatives.push_back(Self::freeze_candidate(
-                    env.clone(),
-                    filesystem_hiding,
-                    facts.clone(),
-                    client.clone(),
-                    root.clone(),
-                    &catalog,
-                    &assessment,
-                    &projections,
-                    candidate.backend,
-                    false,
-                )?);
-            }
-        }
-
-        Ok(prepared)
+        )
     }
     #[allow(clippy::too_many_arguments)]
     fn freeze_candidate(
@@ -764,7 +738,7 @@ mod tests {
             self.persist()
         }
     }
-    fn frozen_chain() -> (tempfile::TempDir, Prepared) {
+    fn frozen_single() -> (tempfile::TempDir, Prepared) {
         let (temp, env, root, config, packages, mut caps) = fixture();
         caps.kpm = Runtime::Ready;
         let support = [
@@ -784,7 +758,7 @@ mod tests {
             &support,
         )
         .unwrap();
-        assert_eq!(p.alternatives.len(), 1);
+        assert_eq!(p.selected(), Some(NativeBackend::Kmod));
         (temp, p)
     }
     fn rejected(p: Prepared, epoch: u64, proven: bool) -> PreparedExecution {
@@ -815,9 +789,9 @@ mod tests {
         PreparedExecution { boot, rejection }
     }
     #[test]
-    fn bounded_successor_requires_durable_proof_and_preserves_every_uid_and_policy() {
-        for fail_at in 0..=4 {
-            let (temp, prepared) = frozen_chain();
+    fn known_rejection_never_dispatches_an_alternative_and_preserves_policy() {
+        for fail_at in 0..=2 {
+            let (temp, prepared) = frozen_single();
             let mut writer = Writer {
                 journal: Default::default(),
                 path: temp.path().join("journal"),
@@ -837,13 +811,12 @@ mod tests {
                     rejected(p, e, true)
                 },
             );
-            assert_eq!(effects, [2, 0, 1, 1, 2][fail_at]);
+            assert_eq!(effects, [1, 0, 1][fail_at]);
             assert_eq!(result.is_ok(), fail_at == 0);
             if fail_at == 0 {
-                assert_eq!(writer.policies.len(), 2);
-                assert_eq!(writer.policies[0].1, writer.policies[1].1);
+                assert_eq!(writer.policies.len(), 1);
                 let config =
-                    vpnhide_protocol::parse_config(writer.policies[1].1.as_bytes()).unwrap();
+                    vpnhide_protocol::parse_config(writer.policies[0].1.as_bytes()).unwrap();
                 assert_eq!(
                     config.targets.iter().map(|t| t.uid).collect::<Vec<_>>(),
                     [10123, 110123]
@@ -854,7 +827,7 @@ mod tests {
                         .backend_rejected("boot-a", NativeBackend::Kmod)
                 );
                 assert!(
-                    writer
+                    !writer
                         .journal
                         .backend_rejected("boot-a", NativeBackend::Kpm)
                 );
@@ -864,8 +837,8 @@ mod tests {
         }
     }
     #[test]
-    fn ambiguous_failure_stops_chain_and_replaced_root_never_dispatches() {
-        let (temp, prepared) = frozen_chain();
+    fn ambiguous_failure_retains_hold_and_replaced_root_never_dispatches() {
+        let (temp, prepared) = frozen_single();
         let mut writer = Writer {
             journal: Default::default(),
             path: temp.path().join("journal"),
@@ -892,7 +865,7 @@ mod tests {
         ));
         assert_eq!(effects, 1);
         assert!(writer.journal.native_startup_uncertain());
-        let (_, mut prepared) = frozen_chain();
+        let (_, mut prepared) = frozen_single();
         prepared.intent.bundle.as_mut().unwrap().root_identity = Some((0, 1));
         assert!(
             crate::native_boot::transition::activate_with(
@@ -907,7 +880,7 @@ mod tests {
     }
     #[test]
     fn first_load_rechecks_ownership_after_intent_write_before_any_dispatch() {
-        let (temp, prepared) = frozen_chain();
+        let (temp, prepared) = frozen_single();
         let mut writer = Writer {
             journal: Default::default(),
             path: temp.path().join("journal"),
@@ -998,7 +971,7 @@ mod tests {
         assert!(prepared.validate_binding().is_err());
     }
     #[test]
-    fn restart_between_rejection_completion_and_successor_resumes_only_same_frozen_policy() {
+    fn restart_after_durable_rejection_never_loads_same_or_another_family() {
         fn copy_prepared(p: &Prepared) -> Prepared {
             let mut copy = Prepared::from_plan(
                 p.env.clone(),
@@ -1009,10 +982,9 @@ mod tests {
             )
             .unwrap();
             copy.intent = p.intent.clone();
-            copy.alternatives = p.alternatives.iter().map(copy_prepared).collect();
             copy
         }
-        let (temp, prepared) = frozen_chain();
+        let (temp, prepared) = frozen_single();
         let restart = copy_prepared(&prepared);
         let mut changed = copy_prepared(&prepared);
         changed.intent.bundle.as_mut().unwrap().wire = changed
@@ -1023,44 +995,41 @@ mod tests {
             journal: Default::default(),
             path: temp.path().join("journal"),
             writes: 0,
-            fail_at: 3,
+            fail_at: 0,
             policies: vec![],
             appear_during_begin: None,
         };
         let mut calls = 0;
-        assert!(
-            crate::native_boot::transition::activate_with(
-                prepared,
-                &mut writer,
-                1,
-                true,
-                |p, e| {
-                    calls += 1;
-                    rejected(p, e, true)
-                }
-            )
-            .is_err()
-        );
-        assert_eq!(calls, 1);
-        writer.journal = crate::journal::read(&writer.path).unwrap();
-        assert!(!writer.journal.native_startup_uncertain());
-        assert!(changed.admit(&writer.journal, true).is_err());
-        writer.fail_at = 0;
-        let boot =
-            crate::native_boot::transition::activate_with(restart, &mut writer, 2, true, |p, e| {
-                assert_eq!(p.selected(), Some(NativeBackend::Kpm));
+        let boot = crate::native_boot::transition::activate_with(
+            prepared,
+            &mut writer,
+            1,
+            true,
+            |p, e| {
                 calls += 1;
                 rejected(p, e, true)
-            })
-            .unwrap();
-        assert_eq!(calls, 2);
+            },
+        )
+        .unwrap();
         assert!(matches!(
             boot.status.outcome,
             vpnhide_core_rpc::NativeBootOutcome::LoadFailed {
-                backend: NativeBackend::Kpm,
+                backend: NativeBackend::Kmod,
                 ..
             }
         ));
+        writer.journal = crate::journal::read(&writer.path).unwrap();
+        assert!(!writer.journal.native_startup_uncertain());
+        assert!(changed.admit(&writer.journal, true).is_err());
+        assert!(
+            crate::native_boot::transition::activate_with(restart, &mut writer, 2, true, |_, _| {
+                calls += 1;
+                panic!("a retained rejection cannot dispatch another attempt")
+            },)
+            .is_err()
+        );
+        assert_eq!(calls, 1);
+        assert_eq!(writer.policies.len(), 1);
         assert_eq!(
             writer
                 .journal
@@ -1068,7 +1037,7 @@ mod tests {
                 .as_ref()
                 .unwrap()
                 .attempted,
-            [NativeBackend::Kmod, NativeBackend::Kpm]
+            [NativeBackend::Kmod]
         );
     }
 }

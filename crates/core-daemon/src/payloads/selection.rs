@@ -193,7 +193,12 @@ pub fn assess_projected(
         Ownership::Unknown | Ownership::Foreign => Decision::BlockedOwnership,
         Ownership::Clear => candidates
             .iter()
-            .find(|c| c.eligibility.is_ok())
+            // Auto admits one kernel candidate. Eligibility of KPM/Zygisk is
+            // still reported for explicit choices, never an implicit fallback.
+            .find(|c| {
+                matches!(c.backend, NativeBackend::Builtin | NativeBackend::Kmod)
+                    && c.eligibility.is_ok()
+            })
             .map(|c| Decision::Select(c.backend))
             .unwrap_or(Decision::NoEligibleCandidate),
     };

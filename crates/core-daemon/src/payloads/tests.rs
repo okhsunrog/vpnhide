@@ -163,13 +163,13 @@ fn support() -> Vec<(B, Support)> {
         .to_vec()
 }
 #[test]
-fn bundle_multiplicity_is_not_a_conflict_and_priority_is_stable() {
+fn auto_selects_only_builtin_then_kmod_and_never_alternative_families() {
     let mut d = device();
     for (expected, disable) in [
-        (B::Builtin, None),
-        (B::Kmod, Some(B::Builtin)),
-        (B::Kpm, Some(B::Kmod)),
-        (B::Zygisk, Some(B::Kpm)),
+        (Decision::Select(B::Builtin), None),
+        (Decision::Select(B::Kmod), Some(B::Builtin)),
+        (Decision::NoEligibleCandidate, Some(B::Kmod)),
+        (Decision::NoEligibleCandidate, Some(B::Kpm)),
     ] {
         if disable.is_none() {
             d.builtin = Runtime::Ready;
@@ -184,7 +184,7 @@ fn bundle_multiplicity_is_not_a_conflict_and_priority_is_stable() {
         m.payloads.reverse();
         assert_eq!(
             assess(&m, &d, policy(), &support()).unwrap().decision,
-            Decision::Select(expected)
+            expected
         );
     }
 }
@@ -239,15 +239,16 @@ fn zygisk_requires_all_needed_abis_and_rejects_default_mask() {
     d.kpm = Runtime::Absent;
     let mut m = manifest();
     m.payloads.pop();
+    let missing_abi = assess(&m, &d, policy(), &support()).unwrap();
+    assert_eq!(missing_abi.decision, Decision::NoEligibleCandidate);
     assert_eq!(
-        assess(&m, &d, policy(), &support()).unwrap().decision,
-        Decision::NoEligibleCandidate
+        missing_abi.candidates[3].eligibility,
+        Err(Rejection::MissingPayload)
     );
     d.needs_arm32_zygisk = false;
-    assert_eq!(
-        assess(&m, &d, policy(), &support()).unwrap().decision,
-        Decision::Select(B::Zygisk)
-    );
+    let complete = assess(&m, &d, policy(), &support()).unwrap();
+    assert_eq!(complete.decision, Decision::NoEligibleCandidate);
+    assert!(complete.candidates[3].eligibility.is_ok());
     let mut p = policy();
     p.default_mask = 1;
     assert_eq!(
@@ -256,7 +257,7 @@ fn zygisk_requires_all_needed_abis_and_rejects_default_mask() {
     );
 }
 #[test]
-fn arm32_core_with_arm64_kernel_kmi_keeps_userspace_backend_and_refuses_kernel_payloads() {
+fn arm32_core_reports_zygisk_eligibility_without_automatic_selection_or_kernel_payloads() {
     let mut d = device();
     d.abi = Abi::Arm32;
     d.kernel_release = "6.1.157-android14".into();
@@ -270,7 +271,8 @@ fn arm32_core_with_arm64_kernel_kmi_keeps_userspace_backend_and_refuses_kernel_p
         report.candidates[2].eligibility,
         Err(Rejection::WrongArchitecture)
     );
-    assert_eq!(report.decision, Decision::Select(B::Zygisk));
+    assert_eq!(report.decision, Decision::NoEligibleCandidate);
+    assert!(report.candidates[3].eligibility.is_ok());
     assert_eq!(report.candidates[3].payload_indices.len(), 1);
     let index = report.candidates[3].payload_indices[0];
     assert_eq!(
@@ -324,7 +326,7 @@ fn ambiguous_kmi_is_never_selected_by_uname_hint_or_catalog_order() {
             report.candidates[1].eligibility,
             Err(Rejection::AmbiguousKmi)
         );
-        assert_eq!(report.decision, Decision::Select(B::Kpm));
+        assert_eq!(report.decision, Decision::NoEligibleCandidate);
         device.ownership = Ownership::Resident(B::Kmod);
         let report = assess(&manifest, &device, policy(), &support()).unwrap();
         assert!(!super::device::resident_eligible(&report, B::Kmod));
@@ -361,7 +363,7 @@ fn arm32_and_missing_evidence_fail_closed() {
         r.candidates[2].eligibility,
         Err(Rejection::WrongArchitecture)
     );
-    assert_eq!(r.decision, Decision::Select(B::Zygisk));
+    assert_eq!(r.decision, Decision::NoEligibleCandidate);
     assert_eq!(
         assess(&manifest(), &d, policy(), &[]).unwrap().decision,
         Decision::NoEligibleCandidate
@@ -400,13 +402,20 @@ fn candidate_specific_projections_preserve_distinct_hook_spaces_and_refuse_gaps(
         assess_projected(&manifest(), &device, &projections, &support)
             .unwrap()
             .decision,
-        Decision::Select(B::Zygisk)
+        Decision::NoEligibleCandidate
     );
     assert_eq!(
         assess(&manifest(), &device, policy(), &support)
             .unwrap()
             .decision,
         Decision::NoEligibleCandidate
+    );
+    assert!(
+        assess_projected(&manifest(), &device, &projections, &support)
+            .unwrap()
+            .candidates[3]
+            .eligibility
+            .is_ok()
     );
     projections.push((B::Zygisk, zygisk));
     let duplicate = assess_projected(&manifest(), &device, &projections, &support).unwrap();
