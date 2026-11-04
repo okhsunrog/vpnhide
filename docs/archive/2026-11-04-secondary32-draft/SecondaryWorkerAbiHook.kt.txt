@@ -1,0 +1,69 @@
+package dev.okhsunrog.vpnhide.hook
+
+import android.content.pm.ApplicationInfo
+import android.os.Build
+import de.robv.android.xposed.XC_MethodHook
+import de.robv.android.xposed.XposedBridge
+import de.robv.android.xposed.XposedHelpers
+import java.lang.reflect.Method
+
+/** Request the normal AMS/Zygote launch in ARM32 for one dedicated Service.
+ * Unsupported OEM signatures remain untouched; Core verifies actual ABI and
+ * specialization independently and never treats hook installation as coverage.
+ */
+internal object SecondaryWorkerAbiHook {
+    fun install(loader: ClassLoader) {
+        if ("armeabi-v7a" !in Build.SUPPORTED_32_BIT_ABIS || Build.SUPPORTED_64_BIT_ABIS.isEmpty()) return
+        val processList = XposedHelpers.findClass("com.android.server.am.ProcessList", loader)
+        val methods = processList.declaredMethods.filter(::supported)
+        check(methods.size == 1) { "secondary worker ABI entry unavailable or ambiguous" }
+        XposedBridge.hookMethod(
+            methods.single(),
+            object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    // Never throw into system_server or change another process.
+                    runCatching {
+                        val app = param.args[0] ?: return
+                        val info = XposedHelpers.getObjectField(app, "info") as? ApplicationInfo ?: return
+                        if (secondaryWorkerAbiEligible(
+                                XposedHelpers.getObjectField(app, "processName") as? String,
+                                info.packageName,
+                                XposedHelpers.getIntField(app, "uid"),
+                                info.uid,
+                                XposedHelpers.getBooleanField(app, "isolated"),
+                                param.args.last() as? String,
+                            )
+                        ) {
+                            param.args[param.args.lastIndex] = "armeabi-v7a"
+                        }
+                    }
+                }
+            },
+        )
+    }
+
+    private fun supported(method: Method): Boolean =
+        method.name == "startProcessLocked" &&
+            method.returnType == Boolean::class.javaPrimitiveType &&
+            method.parameterTypes.map { it.name } ==
+            listOf(
+                "com.android.server.am.ProcessRecord",
+                "com.android.server.am.HostingRecord",
+                "int",
+                "boolean",
+                "boolean",
+                "java.lang.String",
+            )
+}
+
+internal fun secondaryWorkerAbiEligible(
+    process: String?,
+    packageName: String?,
+    uid: Int,
+    packageUid: Int,
+    isolated: Boolean,
+    existingOverride: String?,
+): Boolean =
+    process == "dev.okhsunrog.vpnhide:diagnostics32" &&
+        packageName == "dev.okhsunrog.vpnhide" &&
+        uid in 10_000 until 100_000 && uid == packageUid && !isolated && existingOverride == null

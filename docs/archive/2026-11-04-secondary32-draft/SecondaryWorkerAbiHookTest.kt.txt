@@ -1,0 +1,30 @@
+package dev.okhsunrog.vpnhide.hook
+
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class SecondaryWorkerAbiHookTest {
+    @Test
+    fun `only the fixed ordinary owner process without another ABI override qualifies`() {
+        fun eligible(
+            process: String? = "dev.okhsunrog.vpnhide:diagnostics32",
+            packageName: String? = "dev.okhsunrog.vpnhide",
+            uid: Int = 10123,
+            packageUid: Int = 10123,
+            isolated: Boolean = false,
+            override: String? = null,
+        ) = secondaryWorkerAbiEligible(process, packageName, uid, packageUid, isolated, override)
+
+        assertTrue(eligible())
+        assertFalse(eligible(process = "dev.okhsunrog.vpnhide"))
+        assertFalse(eligible(process = "dev.okhsunrog.vpnhide:diagnostics"))
+        assertFalse(eligible(process = null))
+        assertFalse(eligible(packageName = "foreign"))
+        assertFalse(eligible(uid = 1000, packageUid = 1000))
+        assertFalse(eligible(uid = 110123, packageUid = 110123))
+        assertFalse(eligible(packageUid = 10124))
+        assertFalse(eligible(isolated = true))
+        assertFalse(eligible(override = "arm64-v8a"))
+    }
+}
