@@ -3,9 +3,9 @@
 //! library image a process loaded. Unknown evidence never promotes availability.
 
 use sha2::{Digest, Sha256};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -28,6 +28,8 @@ pub struct LoaderObservation {
     child_anchor: u64,
     child_mapping: image::Mapping,
     image: Arc<File>,
+    // Retain the verified inode through process churn; prevent directory ABA.
+    _recipient_directory: Arc<File>,
     mapping: image::Mapping,
     pub target_uid: u32,
     pub process_name: String,
@@ -38,6 +40,7 @@ pub struct LoaderObservation {
     pub boot_id: String,
     pub epoch: u64,
     pub directory_identity: (u64, u64),
+    pub catalog_directory_identity: (u64, u64),
     pub generation: Option<u64>,
     pub policy_sha256: Option<[u8; 32]>,
     pub specialized: bool,
@@ -52,7 +55,10 @@ pub struct LoaderRegistry {
 
 #[derive(Debug, Clone)]
 struct LoaderContext {
+    /// Trusted source of the manifest and payload identities.
     root: PathBuf,
+    /// Provider module directory, independently pinned from the source catalog.
+    recipient_root: PathBuf,
     boot_id: String,
     epoch: u64,
     catalog: Arc<Mutex<Option<CatalogGeneration>>>,
@@ -61,8 +67,11 @@ struct LoaderContext {
 #[derive(Debug, Clone)]
 struct CatalogGeneration {
     directory: (u64, u64),
+    // This lease pins the inode for the entire cached generation.
+    _directory: Arc<File>,
     manifest: Manifest,
     sha256: String,
+    file_sha256: String,
 }
 
 fn pinned_generation(
@@ -70,8 +79,19 @@ fn pinned_generation(
     directory: &File,
     deadline: Instant,
 ) -> io::Result<CatalogGeneration> {
+    if Instant::now() >= deadline {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "loader catalog deadline",
+        ));
+    }
     let metadata = directory.metadata()?;
     let identity = (metadata.dev(), metadata.ino());
+    if !metadata.is_dir() || directory_identity(&open_directory(&context.root)?)? != identity {
+        return Err(invalid(
+            "catalog descriptor differs from authoritative source",
+        ));
+    }
     let mut cache = context
         .catalog
         .try_lock()
@@ -86,7 +106,9 @@ fn pinned_generation(
         catalog.manifest.require_complete()?;
         CatalogGeneration {
             directory: identity,
+            _directory: Arc::new(directory.try_clone()?),
             sha256: manifest_sha256(&catalog),
+            file_sha256: catalog.manifest_sha256,
             manifest: catalog.manifest,
         }
     };
@@ -94,7 +116,9 @@ fn pinned_generation(
     crate::payloads::open_beneath(directory, "payloads/manifest.json")?
         .take(MAX_MANIFEST_BYTES + 1)
         .read_to_end(&mut bytes)?;
-    if Manifest::parse(&bytes)? != generation.manifest {
+    if format!("{:x}", Sha256::digest(&bytes)) != generation.file_sha256
+        || Manifest::parse(&bytes)? != generation.manifest
+    {
         return Err(invalid("loader manifest changed after verification"));
     }
     if Instant::now() >= deadline {
@@ -105,6 +129,90 @@ fn pinned_generation(
     }
     *cache = Some(generation.clone());
     Ok(generation)
+}
+
+fn open_directory(path: &Path) -> io::Result<File> {
+    OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(path)
+}
+fn directory_identity(directory: &File) -> io::Result<(u64, u64)> {
+    let metadata = directory.metadata()?;
+    if !metadata.is_dir() {
+        return Err(invalid("expected directory"));
+    }
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+enum RecipientAccess {
+    Live,
+    // Disabling/removing future discovery does not unload existing hooks.
+    Retained,
+}
+
+struct LoaderSources {
+    catalog_directory: File,
+    recipient: crate::zygisk::ZygiskTarget,
+    recipient_identity: (u64, u64),
+    generation: CatalogGeneration,
+}
+impl LoaderSources {
+    fn open(
+        context: &LoaderContext,
+        received: &File,
+        deadline: Instant,
+        access: RecipientAccess,
+    ) -> io::Result<Self> {
+        let recipient_identity = directory_identity(received)?;
+        let recipient = match access {
+            RecipientAccess::Live => crate::zygisk::ZygiskTarget::open(&context.recipient_root),
+            RecipientAccess::Retained => {
+                crate::zygisk::ZygiskTarget::for_revocation(&context.recipient_root)
+            }
+        }
+        .map_err(io::Error::other)?;
+        if recipient.identity().map_err(io::Error::other)? != recipient_identity {
+            return Err(invalid(
+                "callback recipient differs from expected recipient",
+            ));
+        }
+        // The companion supplies only its recipient. Open the authoritative
+        // source ourselves, never a peer-selected embedded catalog.
+        let catalog_directory = open_directory(&context.root)?;
+        let generation = pinned_generation(context, &catalog_directory, deadline)?;
+        let sources = Self {
+            catalog_directory,
+            recipient,
+            recipient_identity,
+            generation,
+        };
+        sources.revalidate(context, deadline)?;
+        Ok(sources)
+    }
+    fn revalidate(&self, context: &LoaderContext, deadline: Instant) -> io::Result<()> {
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "loader source deadline",
+            ));
+        }
+        if self
+            .recipient
+            .revalidate_identity()
+            .map_err(io::Error::other)?
+            != self.recipient_identity
+        {
+            return Err(invalid("recipient changed during source inspection"));
+        }
+        let generation = pinned_generation(context, &self.catalog_directory, deadline)?;
+        if generation.directory != self.generation.directory
+            || generation.file_sha256 != self.generation.file_sha256
+        {
+            return Err(invalid("authoritative source changed during inspection"));
+        }
+        Ok(())
+    }
 }
 
 struct Verification<'a> {
@@ -167,7 +275,6 @@ fn verify_report(
     image_file: &File,
     directory: &File,
 ) -> io::Result<LoaderObservation> {
-    let root = &verification.context.root;
     let proc_root = verification.proc_root;
     let challenge = verification.challenge;
     if peer.uid != 0
@@ -189,23 +296,13 @@ fn verify_report(
             "callback/companion do not map the retained library image",
         ));
     }
-    let received_directory = directory.metadata()?;
-    let active_directory = fs::metadata(root)?;
-    if !received_directory.is_dir()
-        || (received_directory.dev(), received_directory.ino())
-            != (active_directory.dev(), active_directory.ino())
-    {
-        return Err(invalid(
-            "Zygisk recipient directory differs from active Core",
-        ));
-    }
-    let recipient = crate::zygisk::ZygiskTarget::open(root).map_err(io::Error::other)?;
-    if recipient.identity().map_err(io::Error::other)?
-        != (received_directory.dev(), received_directory.ino())
-    {
-        return Err(invalid("recipient changed before catalog inspection"));
-    }
-    let generation = pinned_generation(verification.context, directory, verification.deadline)?;
+    let sources = LoaderSources::open(
+        verification.context,
+        directory,
+        verification.deadline,
+        RecipientAccess::Live,
+    )?;
+    let generation = &sources.generation;
     let identity = image::inspect_before(image_file, Some(verification.deadline))?;
     let digest = identity
         .sha256
@@ -252,11 +349,7 @@ fn verify_report(
     {
         return Err(invalid("loader process identity changed during inspection"));
     }
-    if recipient.revalidate_identity().map_err(io::Error::other)?
-        != (received_directory.dev(), received_directory.ino())
-    {
-        return Err(invalid("recipient changed during catalog inspection"));
-    }
+    sources.revalidate(verification.context, verification.deadline)?;
     Ok(LoaderObservation {
         process: child,
         zygote,
@@ -266,16 +359,18 @@ fn verify_report(
         child_anchor: callback.anchor,
         child_mapping: child_map,
         image: Arc::new(image_file.try_clone()?),
+        _recipient_directory: Arc::new(directory.try_clone()?),
         mapping: companion_map,
         target_uid: callback.target_uid,
         process_name: callback.process.clone(),
         abi: identity.abi,
         payload_sha256: digest,
         payload_bytes: identity.bytes,
-        manifest_sha256: generation.sha256,
+        manifest_sha256: generation.sha256.clone(),
         boot_id: challenge.boot_id.clone(),
         epoch: challenge.epoch,
-        directory_identity: (received_directory.dev(), received_directory.ino()),
+        directory_identity: sources.recipient_identity,
+        catalog_directory_identity: generation.directory,
         generation: callback.generation,
         policy_sha256: callback.policy_sha256,
         specialized: false,
@@ -423,20 +518,19 @@ impl LoaderRegistry {
         if context.boot_id != expected.boot_id || context.epoch != epoch {
             return vec![];
         }
-        let Ok(directory) = File::open(&context.root) else {
+        let Ok(directory) = open_directory(&context.recipient_root) else {
             return vec![];
         };
-        let Ok(metadata) = directory.metadata() else {
+        let deadline = Instant::now() + Duration::from_millis(200);
+        let Ok(sources) =
+            LoaderSources::open(&context, &directory, deadline, RecipientAccess::Retained)
+        else {
             return vec![];
         };
-        if (metadata.dev(), metadata.ino()) != (expected.directory_device, expected.directory_inode)
-        {
+        if sources.recipient_identity != (expected.directory_device, expected.directory_inode) {
             return vec![];
         }
-        let deadline = Instant::now() + Duration::from_millis(200);
-        let Ok(catalog) = pinned_generation(&context, &directory, deadline) else {
-            return vec![];
-        };
+        let catalog = &sources.generation;
         let records = self.observations.lock().expect("loader observations");
         let mut verified = std::collections::BTreeMap::new();
         let mut result = vec![];
@@ -444,7 +538,8 @@ impl LoaderRegistry {
             if !o.specialized
                 || o.boot_id != context.boot_id
                 || o.epoch != epoch
-                || o.directory_identity != (metadata.dev(), metadata.ino())
+                || o.directory_identity != sources.recipient_identity
+                || o.catalog_directory_identity != catalog.directory
                 || o.manifest_sha256 != catalog.sha256
                 || !live_identity(o, proc_root, true)
             {
@@ -501,6 +596,9 @@ impl LoaderRegistry {
                 consumption,
             });
         }
+        if sources.revalidate(&context, deadline).is_err() {
+            return vec![];
+        }
         result.sort_by_key(|p| (p.pid, p.start_ticks));
         result
     }
@@ -521,12 +619,22 @@ impl LoaderRegistry {
         let Some(context) = context.as_ref() else {
             return false;
         };
-        let Ok(directory) = fs::metadata(&context.root) else {
+        let Ok(directory) = open_directory(&context.recipient_root) else {
+            return false;
+        };
+        let deadline = Instant::now() + Duration::from_millis(200);
+        let Ok(sources) = LoaderSources::open(context, &directory, deadline, RecipientAccess::Live)
+        else {
             return false;
         };
         let manifest = manifest_sha256(catalog);
+        if sources.generation.directory != catalog.root_identity
+            || sources.generation.sha256 != manifest
+            || sources.generation.file_sha256 != catalog.manifest_sha256
+        {
+            return false;
+        }
         let observations = self.observations.lock().expect("loader observations");
-        let deadline = Instant::now() + Duration::from_millis(200);
         let mut inspected = std::collections::BTreeSet::new();
         let mut proven = |abi| {
             observations.iter().any(|o| {
@@ -534,7 +642,8 @@ impl LoaderRegistry {
                     && o.specialized
                     && o.boot_id == context.boot_id
                     && o.epoch == context.epoch
-                    && o.directory_identity == (directory.dev(), directory.ino())
+                    && o.directory_identity == sources.recipient_identity
+                    && o.catalog_directory_identity == sources.generation.directory
                     && o.manifest_sha256 == manifest
                     && image::process_identity(proc_root, o.zygote.pid).ok() == Some(o.zygote)
                     && image::process_identity(proc_root, o.companion.pid).ok() == Some(o.companion)
@@ -557,10 +666,11 @@ impl LoaderRegistry {
                     })
             })
         };
-        match abi {
+        let proven = match abi {
             Abi::Arm64 => proven(ImageAbi::Arm64) && (!needs_arm32 || proven(ImageAbi::Arm32)),
             Abi::Arm32 => proven(ImageAbi::Arm32),
-        }
+        };
+        proven && sources.revalidate(context, deadline).is_ok()
     }
 
     fn accept(&self, mut observation: LoaderObservation) {
@@ -578,6 +688,12 @@ impl LoaderRegistry {
                 && o.payload_sha256 == observation.payload_sha256
         }) {
             observation.image = previous.image.clone();
+        }
+        if let Some(previous) = records
+            .iter()
+            .find(|o| o.directory_identity == observation.directory_identity)
+        {
+            observation._recipient_directory = previous._recipient_directory.clone();
         }
         // Distinct retained backing images share the bundle's byte budget;
         // repeated processes referencing one image do not allocate more images.
@@ -636,7 +752,7 @@ impl LoaderRegistry {
             .clone()
             .ok_or("loader listener unavailable")?;
         let _worker_lease = crate::autonomous::android_worker::lease()?;
-        let target = crate::zygisk::ZygiskTarget::open(&context.root)?;
+        let target = crate::zygisk::ZygiskTarget::open(&context.recipient_root)?;
         let expected = target.read_authorized(&context.boot_id)?;
         self.reconcile(Path::new("/proc"));
         if self.live_worker_for_at(&context, Path::new("/proc"), expected.as_ref()) {
@@ -691,21 +807,16 @@ impl LoaderRegistry {
         expected: Option<&vpnhide_protocol::zygisk_activation::Authorization>,
         excluded: &[ProcessIdentity],
     ) -> bool {
-        let Ok(directory) = fs::metadata(&context.root) else {
+        let Ok(directory) = open_directory(&context.recipient_root) else {
             return false;
         };
-        let Ok(pinned) = File::open(&context.root) else {
-            return false;
-        };
-        let Ok(catalog) = pinned_generation(
-            context,
-            &pinned,
-            Instant::now() + Duration::from_millis(200),
-        ) else {
-            return false;
-        };
-        let records = self.observations.lock().expect("loader observations");
         let deadline = Instant::now() + Duration::from_millis(200);
+        let Ok(sources) = LoaderSources::open(context, &directory, deadline, RecipientAccess::Live)
+        else {
+            return false;
+        };
+        let catalog = &sources.generation;
+        let records = self.observations.lock().expect("loader observations");
         records.iter().any(|o| {
             !excluded.contains(&o.process)
                 && o.specialized
@@ -721,7 +832,8 @@ impl LoaderRegistry {
                 && o.process_name == WORKER_PROCESS
                 && o.boot_id == context.boot_id
                 && o.epoch == context.epoch
-                && o.directory_identity == (directory.dev(), directory.ino())
+                && o.directory_identity == sources.recipient_identity
+                && o.catalog_directory_identity == catalog.directory
                 && o.manifest_sha256 == catalog.sha256
                 && live_identity(o, proc_root, expected.is_some())
                 && image::inspect_before(&o.image, Some(deadline)).is_ok_and(|identity| {
@@ -733,6 +845,7 @@ impl LoaderRegistry {
                         == o.payload_sha256
                 })
                 && live_identity(o, proc_root, expected.is_some())
+                && sources.revalidate(context, deadline).is_ok()
         })
     }
 }
@@ -740,11 +853,13 @@ impl LoaderRegistry {
 pub fn start(
     registry: Arc<LoaderRegistry>,
     root: PathBuf,
+    recipient_root: PathBuf,
     boot_id: String,
     epoch: u64,
 ) -> io::Result<crate::ServerHandle> {
     let context = LoaderContext {
         root,
+        recipient_root,
         boot_id,
         epoch,
         catalog: Arc::new(Mutex::new(None)),
@@ -948,6 +1063,7 @@ mod tests {
         .unwrap();
         let directory = fs::metadata(&root).unwrap();
         let context = LoaderContext {
+            recipient_root: root.clone(),
             root,
             boot_id: "boot".into(),
             epoch: 7,
@@ -971,6 +1087,7 @@ mod tests {
             child_anchor: address as usize as u64,
             child_mapping: mapping,
             image: Arc::new(image_file),
+            _recipient_directory: Arc::new(File::open(&context.recipient_root).unwrap()),
             mapping,
             target_uid: unsafe { libc::geteuid() },
             process_name: WORKER_PROCESS.into(),
@@ -981,6 +1098,7 @@ mod tests {
             boot_id: "boot".into(),
             epoch: 7,
             directory_identity: (directory.dev(), directory.ino()),
+            catalog_directory_identity: (directory.dev(), directory.ino()),
             generation: None,
             policy_sha256: None,
             specialized: false,
@@ -1262,5 +1380,154 @@ mod tests {
         assert!(registry.live_worker_at(&f.context, &f.proc_root));
         process(&f.proc_root, 4, 41, WORKER_PROCESS);
         assert!(!registry.live_worker_at(&f.context, &f.proc_root));
+    }
+    fn split_recipient(f: &mut Fixture) {
+        let recipient = f._arena.path().join("recipient");
+        bundle(&recipient);
+        fs::remove_dir_all(f.context.root.join("zygisk")).unwrap();
+        let metadata = fs::metadata(&recipient).unwrap();
+        f.context.recipient_root = recipient;
+        f.observation._recipient_directory =
+            Arc::new(File::open(&f.context.recipient_root).unwrap());
+        f.observation.directory_identity = (metadata.dev(), metadata.ino());
+        assert_ne!(
+            f.observation.directory_identity,
+            f.observation.catalog_directory_identity
+        );
+    }
+
+    #[test]
+    fn separate_recipient_never_supplies_or_replaces_the_authoritative_catalog() {
+        let mut f = fixture();
+        split_recipient(&mut f);
+        let recipient = File::open(&f.context.recipient_root).unwrap();
+        let path = f.context.recipient_root.join("payloads/manifest.json");
+        let mut fake = f.catalog.manifest.clone();
+        fake.bundle_commit = "f".repeat(40);
+        fs::write(path, serde_json::to_vec(&fake).unwrap()).unwrap();
+        let sources = LoaderSources::open(
+            &f.context,
+            &recipient,
+            Instant::now() + Duration::from_secs(2),
+            RecipientAccess::Live,
+        )
+        .unwrap();
+        assert_eq!(sources.generation.sha256, manifest_sha256(&f.catalog));
+        assert_eq!(
+            sources.generation.directory,
+            f.observation.catalog_directory_identity
+        );
+        assert_eq!(sources.recipient_identity, f.observation.directory_identity);
+        assert!(
+            pinned_generation(
+                &f.context,
+                &recipient,
+                Instant::now() + Duration::from_secs(2)
+            )
+            .is_err()
+        );
+        assert!(
+            LoaderSources::open(
+                &f.context,
+                &File::open(&f.context.root).unwrap(),
+                Instant::now() + Duration::from_secs(2),
+                RecipientAccess::Live
+            )
+            .is_err()
+        );
+        fs::write(f.context.root.join("payloads/manifest.json"), b"{}").unwrap();
+        assert!(
+            LoaderSources::open(
+                &f.context,
+                &recipient,
+                Instant::now() + Duration::from_secs(2),
+                RecipientAccess::Live
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn both_independent_directory_generations_are_required_for_availability() {
+        for replace_source in [false, true] {
+            let mut f = fixture();
+            split_recipient(&mut f);
+            let registry = LoaderRegistry::default();
+            *registry.context.lock().unwrap() = Some(f.context.clone());
+            registry
+                .observations
+                .lock()
+                .unwrap()
+                .push(f.observation.clone());
+            process(&f.proc_root, 4, 40, WORKER_PROCESS);
+            assert!(registry.available_at(&f.catalog, Abi::Arm64, false, &f.proc_root));
+            assert!(!registry.available_at(&f.catalog, Abi::Arm64, true, &f.proc_root));
+            assert!(registry.live_worker_at(&f.context, &f.proc_root));
+            let path = if replace_source {
+                &f.context.root
+            } else {
+                &f.context.recipient_root
+            };
+            fs::rename(path, path.with_extension("old")).unwrap();
+            bundle(path);
+            assert!(!registry.available_at(&f.catalog, Abi::Arm64, false, &f.proc_root));
+            assert!(!registry.live_worker_at(&f.context, &f.proc_root));
+        }
+    }
+
+    #[test]
+    fn exact_manifest_bytes_are_required_even_if_normalized_metadata_is_unchanged() {
+        let mut f = fixture();
+        split_recipient(&mut f);
+        let registry = LoaderRegistry::default();
+        *registry.context.lock().unwrap() = Some(f.context.clone());
+        registry
+            .observations
+            .lock()
+            .unwrap()
+            .push(f.observation.clone());
+        process(&f.proc_root, 4, 40, WORKER_PROCESS);
+        assert!(registry.available_at(&f.catalog, Abi::Arm64, false, &f.proc_root));
+        fs::write(
+            f.context.root.join("payloads/manifest.json"),
+            serde_json::to_vec_pretty(&f.catalog.manifest).unwrap(),
+        )
+        .unwrap();
+        assert!(!registry.available_at(&f.catalog, Abi::Arm64, false, &f.proc_root));
+        assert!(!registry.live_worker_at(&f.context, &f.proc_root));
+    }
+
+    #[test]
+    fn disabled_discovery_keeps_qualified_consumption_of_existing_processes() {
+        let mut f = fixture();
+        split_recipient(&mut f);
+        let registry = LoaderRegistry::default();
+        *registry.context.lock().unwrap() = Some(f.context.clone());
+        process(&f.proc_root, 4, 40, WORKER_PROCESS);
+        fs::write(
+            f.proc_root.join("4/maps"),
+            fs::read(f.proc_root.join("3/maps")).unwrap(),
+        )
+        .unwrap();
+        let mut observed = f.observation.clone();
+        observed.generation = Some(8);
+        observed.policy_sha256 = Some([3; 32]);
+        registry.observations.lock().unwrap().push(observed);
+        let expected = vpnhide_core_rpc::ZygiskAuthorizationRef {
+            operation: 8,
+            boot_id: "boot".into(),
+            generation: 8,
+            policy_sha256: "03".repeat(32),
+            directory_device: f.observation.directory_identity.0,
+            directory_inode: f.observation.directory_identity.1,
+        };
+        fs::write(f.context.recipient_root.join("disable"), b"").unwrap();
+        assert!(!registry.available_at(&f.catalog, Abi::Arm64, false, &f.proc_root));
+        assert_eq!(
+            registry.consumption_at(&expected, 7, &f.proc_root)[0].consumption,
+            vpnhide_core_rpc::ZygiskConsumption::Current
+        );
+        fs::remove_dir_all(f.context.recipient_root.join("zygisk")).unwrap();
+        assert_eq!(registry.consumption_at(&expected, 7, &f.proc_root).len(), 1);
     }
 }

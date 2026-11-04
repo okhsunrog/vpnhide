@@ -669,3 +669,26 @@ or retirement of a currently selected Zygisk are explicitly refused until the
 managed projection executor exists. Cross-upgrade continuity/last-successful
 hints, the informed Zygisk chooser and voluntary migration offer remain code
 work. No warning acknowledgement alone grants Auto fallback or standby loading.
+
+## Loader source and recipient qualification
+
+`LoaderContext` names the authoritative Core catalog separately from the provider
+recipient. The companion supplies its recipient FD; Core opens the configured
+source itself, pins both device/inode generations and verifies the mapped image
+against that source. A recipient-local catalog cannot replace the Core catalog.
+Availability, worker join and consumption qualify both directory identities and
+raw manifest bytes as well as the normalized digest. Replaced directories and
+byte-changed manifests cannot reuse old proof. One deadline covers source and
+image inspection, including final revalidation.
+
+Future admission requires a live enabled recipient. Retained process consumption
+uses the separate revocation reader: disabling discovery or withdrawing library
+files does not erase a qualified already-consumed generation. It still requires
+the established recipient/source identities and live process/image evidence; it
+does not prove unhooking, full coverage or successful new authorization.
+
+Production still supplies the colocated compatibility recipient until the
+journaled managed projection executor is implemented. This identity split creates
+no discovery copy, manager operation, new module ID, consent grant or Zygisk choice.
+Both actual ABI proofs remain mandatory on mixed-ABI devices; ARMv7 compilation
+and a 64-bit worker do not replace the missing genuine secondary32 launcher.

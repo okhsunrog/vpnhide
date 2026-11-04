@@ -228,6 +228,9 @@ async fn run(path: &str) {
                     .to_owned();
                     match vpnhide_core_daemon::zygisk_loader::start(
                         state.loader().clone(),
+                        root.clone(),
+                        // Colocated compatibility recipient until managed
+                        // projection staging supplies a journal-bound target.
                         root,
                         boot_id,
                         epoch,
