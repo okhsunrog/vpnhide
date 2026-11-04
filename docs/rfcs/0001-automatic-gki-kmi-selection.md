@@ -1,3 +1,13 @@
+> Decision update (3 November 2026): the accepted [RFC0005](0005-unified-backend-lifecycle-policy.md)
+> replaces the earlier transition/fallback proposals. Retain the actually working
+> backend; fresh selection prefers compatible Builtin then KMOD, without automatic
+> inter-family fallback. Collect full uname and vermagic from several standard
+> modules bound to the current kernel, including KernelSU Next when properly bound.
+> Qualify bounded preflight of immutable final files for remaining ambiguity;
+> never patch vermagic or bypass loader/private-ABI holds. New policy code/docs
+> stay local until separate confirmation to publish to main. The original imported
+> proposal below remains historical; this is code approval, not device acceptance.
+
 # RFC: Автоматическое определение GKI/KMI и безопасный подбор kmod в VPNHide 2.x
 
 > Decision update: **Accepted for implementation** in the current v2 cycle by the

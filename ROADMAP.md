@@ -17,17 +17,19 @@ Historical evidence: [archive](docs/archive/README.md).
 - One user-facing full Core ZIP contains the native alternatives. Separate
   backend producer archives are internal build inputs. Core is the sole runtime
   policy/effect owner; the APK runs no root process.
-- **Zygisk lifecycle policy is reopened.** ZIP deduplication remains required.
-  The package-only passive-pair cutover has landed; no managed projection or new
-  boot-bound activation policy has been implemented. Do not ship this as a
-  completed Zygisk runtime. The consolidated [RFC0005](docs/rfcs/0005-unified-backend-lifecycle-policy.md)
-  is Proposed and awaits review; [RFC0003](docs/rfcs/0003-conditional-zygisk-publication.md)
-  remains reopened.
-- Continue independent diagnostics, maintenance, Kotlin ownership, provisioning
-  and verification work while that lifecycle review proceeds. Do not implement
-  the unapproved backend-hint/sticky/prestage/Auto/Manual policy proposals.
-  **Never reboot the phone automatically**: preparation and a user-chosen reboot
-  are separate operations; no reboot timer.
+- **Backend continuity policy is accepted for local implementation.** Keep the
+  actually working backend; fresh selection prefers compatible Builtin then KMOD.
+  No inter-family automatic fallback. Existing Zygisk continues, with a voluntary
+  compatible-kernel offer after upgrade; new Zygisk needs explicit selection and
+  warning. [RFC0005](docs/rfcs/0005-unified-backend-lifecycle-policy.md) supersedes
+  the earlier recovery proposal;0003 packaging and safety constraints remain.
+- **Do not publish these new policy changes to main without separate maintainer
+  confirmation.** This review branch is local. Code, compile checks and device
+  acceptance remain separate. Never reboot the phone automatically.
+- Independent diagnostics, maintenance, Kotlin ownership, provisioning and
+  verification retain their prior authorization. The route prototype is not yet
+  wired into the production run/worker/FFI path; the genuine secondary32-bit
+  Android launcher remains unimplemented.
 - No release, device install/reboot, provider settings change, new fork repository
   or production secret retrieval is authorized by this work index.
 
@@ -40,7 +42,7 @@ control2/telemetry1 is unchanged; these numbers alone require no builtin rebuild
 | --- | --- | --- |
 | Core writer, journal, typed commands and persistent client | Implemented foundation | Preserve holds, attempt budgets, operation identity and migration readers. Scoped instance/floor/staging locks now end with their owning process scope despite inherited pre-exec FDs; live contenders remain excluded. [Architecture](docs/core-architecture.md), [IPC](docs/core-ipc-auth.md), [fork regressions](docs/archive/2026-11-03-maintenance-lock-lifetime.md). |
 | Picker capacity and draft UX | Implemented | Preserve Save/Cancel and local shared-policy admission; no Kotlin numeric duplicate or save-only rejection. [Limits](docs/limits.md), [config coordinator](docs/config-coordinator.md). |
-| Backend selection, authorization and bounded fallback | Partial | Verified catalog, frozen preparation, loader FD/image proof, revocation and exposure fences exist. Mixed-ABI genuine 32-bit bootstrap and complete production lifecycle remain. Publication changes are paused under RFC0003. |
+| Backend continuity, selection and authorization | Partial; policy rework local | Verified catalog, frozen preparation, loader FD/image proof, revocation and exposure fences exist. Mixed-ABI genuine 32-bit bootstrap and complete production lifecycle remain. Implement the accepted continuity decision locally under RFC0005; main publication awaits confirmation. |
 | Single Core distribution and ZIP dedup | Package slice implemented; runtime incomplete | Descriptor/assembly and replacement checks enforce one passive ABI pair and no main-Core autoload directory. Preserve old-source image fencing during migration. Resolve lifecycle/placement before completing Zygisk runtime; no new projection executor exists. |
 | Automatic GKI/KMI selection | Partial, approved for implementation | Manifest-derived candidates, ELF capabilities and separate experiment budgets exist. Implement real Core preflight dispatch/reconciliation and typed resolution; All seven pinned DDK engineering builds now retain complete real loader CRCs; shared assembly/runtime admission rejects incomplete GKI. [Qualification evidence](docs/archive/2026-11-03-gki-modpost-qualification.md). A clean same-commit full bundle also passed at `12c78631`; actual kernel/device evidence remains and production experimental admission stays off. [RFC0001](docs/rfcs/0001-automatic-gki-kmi-selection.md). |
 | Genuine secondary32-bit Android worker | Unimplemented launcher; explicit coverage limitation | Ordinary `:diagnostics` uses the selected package ABI. Implement a safe real Zygote32 path on mixed-ABI devices, then qualify actual ABI loading/runtime behavior. ARMv7 compile/ELF and ARM64 worker evidence do not satisfy it; no borrowed image proof or forced APK restart. [Current scope](docs/diagnostics.md#worker-abi-coverage), [rejected instrumentation candidate](docs/archive/2026-11-03-diagnostic-worker-abi-launch.md). |
