@@ -34,14 +34,14 @@ Historical evidence: [archive](docs/archive/README.md).
 
 ## Current implementation cycle
 
-Current paired APK/Core RPC32; private journal15 reads schemas1–14. Kernel
+Current paired APK/Core RPC33; private journal16 reads schemas1–15. Kernel
 control2/telemetry1 is unchanged; these numbers alone require no builtin rebuild.
 
 | Feature | Actual status | Next concrete work / acceptance |
 | --- | --- | --- |
 | Core writer, journal, typed commands and persistent client | Implemented foundation | Preserve holds, attempt budgets, operation identity and migration readers. Scoped instance/floor/staging locks now end with their owning process scope despite inherited pre-exec FDs; live contenders remain excluded. [Architecture](docs/core-architecture.md), [IPC](docs/core-ipc-auth.md), [fork regressions](docs/archive/2026-11-03-maintenance-lock-lifetime.md). |
 | Picker capacity and draft UX | Implemented | Preserve Save/Cancel and local shared-policy admission; no Kotlin numeric duplicate or save-only rejection. [Limits](docs/limits.md), [config coordinator](docs/config-coordinator.md). |
-| Backend continuity, selection and authorization | Partial; policy rework in progress | Verified catalog, frozen preparation, loader FD/image proof, revocation and exposure fences exist. Core/Zygisk share one bounded recipient grammar, including exact control/authorization versions. Resident kernel reconfiguration requires fresh same-backend status and complete policy support, independently of new-load KMI/loader admission. Mixed-ABI genuine 32-bit bootstrap, existing-Zygisk continuity, explicit backend intent and voluntary migration offer remain code work under RFC0005; verification precedes main publication. |
+| Backend continuity, selection and authorization | Partial; policy rework in progress | Verified catalog, frozen preparation, loader FD/image proof, revocation and exposure fences exist. Core/Zygisk share one bounded recipient grammar, including exact control/authorization versions. Resident kernel reconfiguration requires fresh same-backend status and complete policy support, independently of new-load KMI/loader admission. Durable device-local next-boot kernel choice now uses the existing writer, with atomic receipt/recovery and typed desired/effective state. Picker and Save check current plus staged budgets through shared Rust. Mixed-ABI genuine 32-bit bootstrap, existing-Zygisk continuity, informed Zygisk choice, managed projection and voluntary migration offer remain code work under RFC0005. |
 | Single Core distribution and ZIP dedup | Package slice implemented; runtime incomplete | Descriptor/assembly and replacement checks enforce one passive ABI pair and no main-Core autoload directory. Preserve old-source image fencing during migration. Resolve lifecycle/placement before completing Zygisk runtime; no new projection executor exists. |
 | Automatic GKI/KMI selection | Partial, approved for implementation | Manifest-derived candidates, ELF capabilities and separate experiment budgets exist. Final-byte preparation and real journaled preflight dispatch are implemented for the isolated Core QEMU oracle; production selection dispatch/reconciliation and typed resolution remain code work. All seven pinned DDK engineering builds retain complete real loader CRCs; shared assembly/runtime admission rejects incomplete GKI. [Qualification evidence](docs/archive/2026-11-03-gki-modpost-qualification.md). A clean same-commit full bundle also passed at `12c78631`; actual kernel/device evidence remains and production experimental admission stays off. [RFC0001](docs/rfcs/0001-automatic-gki-kmi-selection.md). |
 | Genuine secondary32-bit Android worker | Unimplemented launcher; explicit coverage limitation | Ordinary `:diagnostics` uses the selected package ABI. Implement a safe real Zygote32 path on mixed-ABI devices, then qualify actual ABI loading/runtime behavior. ARMv7 compile/ELF and ARM64 worker evidence do not satisfy it; no borrowed image proof or forced APK restart. [Current scope](docs/diagnostics.md#worker-abi-coverage), [rejected instrumentation candidate](docs/archive/2026-11-03-diagnostic-worker-abi-launch.md). |
@@ -72,9 +72,7 @@ Fresh Auto chooses compatible Builtin then KMOD, with no automatic inter-family
 fallback. The implementation removes the prepared successor queue and
 ends execution after one durable attempt, including proven no-effect rejection.
 Unknown effects, attempt budgets, possible Zygisk exposure and all ownership
-fences remain. Retaining actual working backends, explicit backend choice with
-Zygisk warning, first-post-update voluntary migration offers and bounded final-file qualification remain implementation
-work; no setting or offer is claimed available yet.
+fences remain. Advanced kernel-only next-boot choice is implemented with durable intent, same-boot continuity and no immediate effect. Cross-upgrade working-backend continuity, informed Zygisk choice, voluntary migration offers and production final-file qualification remain code work.
 
 Passive module inventory and selection now share the common ELF metadata owner:
 only live sysfs build-ID matches can corroborate vermagic, distinct names/hashes
@@ -90,7 +88,7 @@ kernel/device ABI acceptance or permission to modify candidate bytes.
 Partial resident readiness now shares the protocol owner used by KPM delivery;
 preparation retains its actual installed mask and continues to reject missing
 required coverage and fatal/unknown states. This does not complete the remaining
-cross-upgrade continuity, explicit choice or voluntary Zygisk transition flow.
+cross-upgrade continuity, informed Zygisk choice or voluntary Zygisk transition flow.
 
 Existing Zygisk continues where actual working ownership can be established. It
 never licenses new Auto selection, standby publication or silent reentry. Core

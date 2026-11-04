@@ -38,4 +38,21 @@ class CoreCommandDataTest {
         val prepared = prepareConfigIntent(RootCanonicalRead.Available(CanonicalConfig()), mutation) as ConfigIntentPreparation.Prepared
         coreCommand(7, mutation, prepared.intent)
     }
+
+    @Test
+    fun `backend choice uses one durable command without canonical edits`() {
+        val choice =
+            uniffi.vpnhide_core_ffi.CoreBackendChoiceRequest(
+                3u,
+                uniffi.vpnhide_core_ffi.CoreBackendChoice.Fixed(uniffi.vpnhide_core_ffi.CoreNativeBackend.KMOD),
+                null,
+            )
+        val mutation =
+            CanonicalMutation(emptyList(), coupledEffects = listOf(CoreRootEffect.StageBackendChoice(choice)), protectAllDrafts = true)
+        val config = CanonicalConfig(apps = mapOf("app" to CanonicalApp(java = true)))
+        val prepared = prepareConfigIntent(RootCanonicalRead.Available(config), mutation) as ConfigIntentPreparation.Prepared
+        assertEquals(config, prepared.intent.candidate)
+        assertEquals(emptyList<CanonicalEdit>(), prepared.intent.edits)
+        assertEquals(CoreCommand.StageBackendChoice(7u, choice), coreCommand(7, mutation, prepared.intent))
+    }
 }

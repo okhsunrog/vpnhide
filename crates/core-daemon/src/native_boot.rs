@@ -70,6 +70,9 @@ pub struct NativeEnv {
     pub(crate) payload_override: Option<PathBuf>,
     /// Frozen catalog recipient retained through boot selection and later policy apply.
     pub(crate) bundle_identity: Option<prepared::BundleIdentity>,
+    /// Device-local desired family, supplied by the writer for a new boot.
+    /// Existing same-boot durable decisions are restored independently.
+    pub(crate) backend_choice: vpnhide_core_rpc::BackendChoice,
     pub(crate) loader: Option<std::sync::Arc<crate::zygisk_loader::LoaderRegistry>>,
 }
 
@@ -91,6 +94,7 @@ impl NativeEnv {
             apatch_kpms: APATCH_KPMS_DIR.into(),
             payload_override: None,
             bundle_identity: None,
+            backend_choice: vpnhide_core_rpc::BackendChoice::Auto,
             loader: None,
         })
     }

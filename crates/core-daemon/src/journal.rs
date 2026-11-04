@@ -39,6 +39,7 @@ pub const DEFAULT_JOURNAL_PATH: &str = "/data/adb/vpnhide/core/operations.json";
 /// Env override so the dev sandbox never touches the production journal.
 pub const JOURNAL_PATH_ENV: &str = "VPNHIDE_JOURNAL_PATH";
 
+pub mod backend_choice;
 pub mod preflight;
 pub mod revocation;
 #[cfg(test)]
@@ -162,6 +163,9 @@ pub struct PendingPersist {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandIntent {
+    StageBackendChoice {
+        request: vpnhide_core_rpc::BackendChoiceRequest,
+    },
     StageCoreReplacement {
         request_sha256: String,
     },
@@ -401,6 +405,8 @@ pub struct NativeQuarantine {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Journal {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_choice: Option<backend_choice::BackendChoiceRecord>,
     #[serde(default)]
     pub native_selection_evidence: Option<vpnhide_core_rpc::NativeSelectionEvidence>,
     #[serde(default)]
@@ -466,6 +472,7 @@ pub struct Journal {
 impl Default for Journal {
     fn default() -> Self {
         Journal {
+            backend_choice: None,
             native_selection_evidence: None,
             native_selection_conflict: None,
             replacement: None,
@@ -921,6 +928,22 @@ pub fn read(path: &Path) -> io::Result<Journal> {
                 "journal version {} unsupported (maximum {})",
                 journal.version, JOURNAL_VERSION
             ),
+        ));
+    }
+    if !backend_choice::validate_entries(&journal)
+        || journal
+            .backend_choice
+            .as_ref()
+            .is_some_and(|r| journal.version < 16 || !r.valid(journal.issued_through))
+        || (journal.version < 16
+            && journal
+                .operations
+                .iter()
+                .any(|e| matches!(e.command, Some(CommandIntent::StageBackendChoice { .. }))))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid or unsupported backend choice record",
         ));
     }
     if journal

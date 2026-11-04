@@ -608,4 +608,10 @@
     <string name="core_maintenance_failed">Обновление отклонено. Повторная установка не запускалась.</string>
     <string name="core_maintenance_unknown">Не удалось подтвердить обновление. Перед повторной попыткой проверьте состояние Core.</string>
     <string name="core_maintenance_refresh">Проверить состояние обновления</string>
+    <string name="backend_choice_title">Нативный бэкенд (расширенные настройки)</string>
+    <string name="backend_choice_auto">Авто (ядро)</string>
+    <string name="backend_choice_current">Текущий</string>
+    <string name="backend_choice_pending">Ожидает перезагрузки устройства</string>
+    <string name="backend_choice_unverified">Не подтверждён</string>
+    <string name="backend_choice_explanation">Выберите бэкенд для следующей загрузки устройства. Core проверит совместимость и все настроенные правила. Работающий бэкенд не изменится, устройство не перезагрузится. При отказе выбранного бэкенда другой не запускается автоматически.</string>
 </resources>

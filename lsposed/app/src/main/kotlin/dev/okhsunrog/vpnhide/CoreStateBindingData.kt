@@ -11,6 +11,7 @@ internal fun CorePublication.toState(): CoreStateView =
     CoreStateView(
         attachmentEvidence = attachmentEvidence.copy(),
         maintenance = maintenance?.copy(),
+        backendChoice = backendChoice?.copy(),
         epoch = epoch.toLong(),
         configRevision = configRevision.toLong(),
         canonical =

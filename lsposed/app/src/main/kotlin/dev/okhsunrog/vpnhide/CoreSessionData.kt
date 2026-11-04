@@ -41,6 +41,7 @@ internal data class CoreStateView(
     val nativeStatus: NativeStatusInfo? = null,
     val attachmentEvidence: uniffi.vpnhide_core_ffi.CoreAttachmentEvidence? = null,
     val maintenance: uniffi.vpnhide_core_ffi.CoreMaintenanceStatus? = null,
+    val backendChoice: uniffi.vpnhide_core_ffi.CoreBackendChoiceStatus? = null,
 )
 
 /** A core operation receipt: phase outcomes as core executed them, and the settled result. */

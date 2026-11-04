@@ -138,9 +138,9 @@ app UIDs of every native-selected package across all profiles and clones,
 platform UIDs below 10000 skipped, uninstalled packages contributing nothing,
 and VPN Hide itself one slot for its main-profile UID.
 
-- **Picker.** The generated synchronous `previewNativePolicy` uses the shared
+- **Picker.** The generated synchronous `previewNativePickerChange` uses the shared
   `native-policy` Rust projector locally with the accepted complete Core UID
-  inventory and selected backend. Kotlin contains no second 160/1 authority and
+  inventory and every current/staged backend supplied by Core. Kotlin contains no second 160/1 authority and
   makes no per-checkbox RPC. UID and exact grouped-wire byte usage both count.
   Selection increases beyond capacity are refused immediately; genuine protection
   reductions remain possible even when regrouping increases wire bytes. A partial

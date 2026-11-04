@@ -301,6 +301,7 @@ fn env(root: &Path) -> NativeEnv {
         apatch_kpms: root.join("ap/kpms"),
         payload_override: None,
         bundle_identity: None,
+        backend_choice: vpnhide_core_rpc::BackendChoice::Auto,
         loader: None,
     }
 }
@@ -720,6 +721,7 @@ fn restored_kpm_auth_loss_preserves_credential_recovery_without_selection() {
         apatch_kpms: root.path().join("kpms"),
         payload_override: None,
         bundle_identity: None,
+        backend_choice: vpnhide_core_rpc::BackendChoice::Auto,
         loader: None,
     };
     let boot = NativeBoot::blocked(env, 1, "fixture".into()).reconcile_restored_facts(

@@ -38,6 +38,8 @@
 use std::time::Duration;
 
 pub mod attachment_policy;
+mod backend_choice;
+pub use backend_choice::*;
 pub mod selection_evidence;
 pub use selection_evidence::*;
 pub mod canonical;
@@ -129,6 +131,10 @@ pub struct OperationId(pub u64);
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CoreCommand {
+    StageBackendChoice {
+        base: BaseRef,
+        request: BackendChoiceRequest,
+    },
     StageCoreReplacement {
         base: BaseRef,
         request: CoreReplacementRequest,
@@ -235,6 +241,8 @@ pub struct Published {
 /// and are joined with these facts at its observation boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct StateSnapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_choice: Option<BackendChoiceStatus>,
     #[serde(default)]
     pub maintenance: Option<CoreMaintenanceStatus>,
     #[serde(default)]
@@ -957,6 +965,7 @@ mod tests {
                     epoch: u64::MAX,
                     revision: 7,
                     snapshot: StateSnapshot {
+                        backend_choice: None,
                         maintenance: None,
                         zygisk_lifecycle: None,
                         zygisk_revocation: None,

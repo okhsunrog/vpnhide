@@ -32,6 +32,11 @@ internal fun coreCommand(
             CoreCommand.MigrateLegacy(revision, effect.mode)
         }
 
+        is CoreRootEffect.StageBackendChoice -> {
+            require(intent.edits.isEmpty() && !mutation.removesCanonical && !mutation.forceActivation)
+            CoreCommand.StageBackendChoice(revision, effect.request)
+        }
+
         CoreRootEffect.PrepareSelfTargets -> {
             require(mutation.edits.isEmpty())
             CoreCommand.PrepareSelfTargets(revision)

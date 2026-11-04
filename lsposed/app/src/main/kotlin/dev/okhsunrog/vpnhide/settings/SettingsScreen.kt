@@ -336,6 +336,7 @@ fun SettingsScreen(
             }
 
             UpdatesSettingsSection()
+            BackendChoiceSettingsSection()
             AutoHideSettingsSection(onOpenHiddenApps = { hiddenAppsOpen = true })
             FilesystemHidingSettingsSection()
             DiagnosticsSettingsSection(onOpen = { diagnosticsOpen = true })

@@ -142,11 +142,16 @@ impl CoreState {
         admitted: Option<crate::command_engine::AdmissionReply>,
         legacy: Option<crate::maintenance::PreparedMaintenance>,
         replacement: Option<PreparedReplacement>,
+        backend_choice: Option<super::backend_choice::PreparedBackendChoice>,
     ) -> Result<Accepted, SubmitError> {
-        if let CoreCommand::StageCoreReplacement { base, request } = command {
-            self.execute_core_replacement(op, base, request, admitted, replacement)
-        } else {
-            self.execute_command_admitted(op, command, admitted, legacy)
+        match command {
+            CoreCommand::StageCoreReplacement { base, request } => {
+                self.execute_core_replacement(op, base, request, admitted, replacement)
+            }
+            CoreCommand::StageBackendChoice { base, request } => {
+                self.execute_backend_choice(op, base, request, admitted, backend_choice)
+            }
+            command => self.execute_command_admitted(op, command, admitted, legacy),
         }
     }
     fn persist_replacement_store(
@@ -432,7 +437,7 @@ mod tests {
         let copy = command.clone();
         state
             .call_writer(move |state| {
-                state.execute_command_prepared(op, command, None, None, Some(p))
+                state.execute_command_prepared(op, command, None, None, Some(p), None)
             })
             .unwrap()
             .unwrap();
@@ -486,7 +491,9 @@ mod tests {
         };
         let copy = command.clone();
         state
-            .call_writer(move |s| s.execute_command_prepared(op, command, None, None, Some(p)))
+            .call_writer(move |s| {
+                s.execute_command_prepared(op, command, None, None, Some(p), None)
+            })
             .unwrap()
             .unwrap();
         assert_eq!(state.snapshot().maintenance.unwrap().stage, Stage::Unknown);
@@ -542,6 +549,7 @@ mod tests {
                 ),
                 None,
                 Some(p),
+                None,
             )
             .unwrap();
         assert_eq!(accepted.op, op);
@@ -571,7 +579,9 @@ mod tests {
             request: p.work.request.clone(),
         };
         state
-            .call_writer(move |s| s.execute_command_prepared(op, command, None, None, Some(p)))
+            .call_writer(move |s| {
+                s.execute_command_prepared(op, command, None, None, Some(p), None)
+            })
             .unwrap()
             .unwrap();
         panic!("expected crash point was not reached");
@@ -633,7 +643,9 @@ mod tests {
             request: p.work.request.clone(),
         };
         state
-            .call_writer(move |s| s.execute_command_prepared(op, command, None, None, Some(p)))
+            .call_writer(move |s| {
+                s.execute_command_prepared(op, command, None, None, Some(p), None)
+            })
             .unwrap()
             .unwrap();
         let path = root.path().join("persistent/operations.json");

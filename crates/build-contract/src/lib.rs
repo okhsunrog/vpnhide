@@ -1,8 +1,8 @@
 //! Portable build compatibility values. These are distinct from the frozen
 //! backend control/telemetry wire in vpnhide_protocol. No runtime dependencies.
-pub const RPC_VERSION: u32 = 32;
-// Also fences older daemon writers from the new persisted logcat stop reason.
-pub const JOURNAL_VERSION: u32 = 15;
+pub const RPC_VERSION: u32 = 33;
+// Fences older writers from device-local backend preference and its atomic receipt.
+pub const JOURNAL_VERSION: u32 = 16;
 pub const JOURNAL_MIN_READ: u32 = 1;
 
 /// Shared Android ELF LOAD alignment for both app ABIs and the Core executable.

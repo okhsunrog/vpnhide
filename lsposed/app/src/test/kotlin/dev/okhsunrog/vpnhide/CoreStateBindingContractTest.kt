@@ -67,6 +67,17 @@ class CoreStateBindingContractTest {
         )
     private val publication =
         CorePublication(
+            backendChoice =
+                uniffi.vpnhide_core_ffi.CoreBackendChoiceStatus(
+                    revision = 1uL,
+                    operation = 8uL,
+                    desired = uniffi.vpnhide_core_ffi.CoreBackendChoice.Fixed(CoreNativeBackend.KPM),
+                    requestedInBoot = "boot-a",
+                    effective = CoreNativeBackend.BUILTIN,
+                    capacityBackends = listOf(CoreNativeBackend.BUILTIN, CoreNativeBackend.KPM),
+                    stage = uniffi.vpnhide_core_ffi.CoreBackendChoiceStage.PENDING_RESTART,
+                    options = listOf(uniffi.vpnhide_core_ffi.CoreBackendChoice.Auto),
+                ),
             maintenance =
                 uniffi.vpnhide_core_ffi.CoreMaintenanceStatus(
                     operation = 8uL,
@@ -115,6 +126,10 @@ class CoreStateBindingContractTest {
         assertTrue(bound.mutationHeld)
         assertEquals(setOf(ConfigPhase.Native), bound.heldResources)
         assertEquals(listOf(CoreApplyIdentity(ConfigPhase.Native, 4, 8, PhaseOutcome.Unknown)), bound.applyEvidence)
+        assertEquals(publication.backendChoice, bound.backendChoice)
+        requireNotNull(publication.backendChoice).desired = uniffi.vpnhide_core_ffi.CoreBackendChoice.Auto
+        assertEquals(uniffi.vpnhide_core_ffi.CoreBackendChoice.Fixed(CoreNativeBackend.KPM), bound.backendChoice?.desired)
+        assertEquals(listOf(CoreNativeBackend.BUILTIN, CoreNativeBackend.KPM), bound.backendChoice?.capacityBackends)
         assertEquals(publication.maintenance, bound.maintenance)
         requireNotNull(publication.maintenance).stage = uniffi.vpnhide_core_ffi.CoreMaintenanceStage.VERIFIED
         assertEquals(uniffi.vpnhide_core_ffi.CoreMaintenanceStage.PENDING_RESTART, bound.maintenance?.stage)

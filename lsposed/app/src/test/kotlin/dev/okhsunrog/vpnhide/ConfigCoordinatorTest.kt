@@ -259,6 +259,60 @@ class ConfigCoordinatorTest {
         }
 
     @Test
+    fun `uncertain backend choice is recovered by its durable id without replay`() =
+        runTest {
+            val core = FakeSession()
+            val owner = ConfigCoordinator({ core }, backgroundScope)
+            val init = async { owner.initialize() }
+            runCurrent()
+            init.await()
+            val choice =
+                uniffi.vpnhide_core_ffi.CoreBackendChoiceRequest(
+                    0u,
+                    uniffi.vpnhide_core_ffi.CoreBackendChoice.Fixed(uniffi.vpnhide_core_ffi.CoreNativeBackend.KMOD),
+                    null,
+                )
+            val saving =
+                async {
+                    owner.submit(
+                        CanonicalMutation(
+                            emptyList(),
+                            coupledEffects = listOf(CoreRootEffect.StageBackendChoice(choice)),
+                            protectAllDrafts = true,
+                        ),
+                    )
+                }
+            runCurrent()
+            val request = core.submissions.receive()
+            assertEquals(CoreCommand.StageBackendChoice(0u, choice), request.command)
+            request.reply.complete(CoreReply.Uncertain)
+            runCurrent()
+            val query = core.queries.receive()
+            assertEquals(request.op, query.op)
+            query.reply.complete(CoreReply.Observed(core.state))
+            runCurrent()
+            assertEquals(TransitionFailure.ApplicationUnknown, saving.await().operation?.failure)
+            owner.retry()
+            runCurrent()
+            core.queries
+                .receive()
+                .reply
+                .complete(
+                    CoreReply.Observed(
+                        core.state,
+                        CoreOperationRecord(
+                            request.op,
+                            mapOf(ConfigPhase.Maintenance to PhaseOutcome.Confirmed),
+                            PhaseOutcome.Confirmed,
+                        ),
+                    ),
+                )
+            runCurrent()
+            assertEquals(1, core.submitCount)
+            assertEquals(ConfigCoordinatorMode.Open, owner.view.value.mode)
+        }
+
+    @Test
     fun `disconnect retains last good values but prevents new writes`() =
         runTest {
             val core = FakeSession()

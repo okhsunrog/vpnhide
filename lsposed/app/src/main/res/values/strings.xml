@@ -624,4 +624,10 @@
     <string name="core_maintenance_failed">The update was refused. No installer retry was started.</string>
     <string name="core_maintenance_unknown">The update could not be confirmed. Check Core status before trying again.</string>
     <string name="core_maintenance_refresh">Check update status</string>
+    <string name="backend_choice_title">Native backend (advanced)</string>
+    <string name="backend_choice_auto">Auto (kernel)</string>
+    <string name="backend_choice_current">Current</string>
+    <string name="backend_choice_pending">Pending device restart</string>
+    <string name="backend_choice_unverified">Not confirmed</string>
+    <string name="backend_choice_explanation">Choose the backend for the next device boot. Core checks compatibility and the complete configured policy. This does not change the running backend or restart the device. No other backend is tried automatically if the selected one fails.</string>
 </resources>

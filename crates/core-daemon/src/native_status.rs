@@ -371,6 +371,51 @@ pub(crate) fn refresh(snapshot: &mut StateSnapshot) {
     view.setup = setup(snapshot, &view);
     view.filesystem = filesystem(snapshot, &view);
     snapshot.native_view = view;
+    if let Some(choice) = &mut snapshot.backend_choice {
+        use vpnhide_core_rpc::{BackendChoice, BackendChoiceStage};
+        choice.effective = snapshot.native_view.applied;
+        if snapshot
+            .native_view
+            .selected
+            .as_ref()
+            .is_some_and(|s| s.backend == NativeBackend::Zygisk)
+        {
+            // Existing injection cannot be retired by a preference-only write.
+            // Enable a transition only with the managed projection executor.
+            choice.options.clear();
+        } else {
+            choice.options = crate::server::backend_choice::implemented_options();
+        }
+        choice.capacity_backends = snapshot
+            .native_view
+            .applied
+            .or_else(|| snapshot.native_view.selected.as_ref().map(|s| s.backend))
+            .into_iter()
+            .collect();
+        if let BackendChoice::Fixed { backend } = choice.desired
+            && !choice.capacity_backends.contains(&backend)
+        {
+            choice.capacity_backends.push(backend);
+        }
+        let matches = match (choice.desired, choice.effective) {
+            (BackendChoice::Fixed { backend }, Some(effective)) => backend == effective,
+            (BackendChoice::Auto, Some(backend)) => backend != NativeBackend::Zygisk,
+            _ => false,
+        };
+        choice.stage = if matches {
+            BackendChoiceStage::Current
+        } else if choice.requested_in_boot.as_ref().is_some_and(|requested| {
+            snapshot
+                .backend
+                .boot
+                .as_ref()
+                .is_some_and(|boot| &boot.boot_id == requested)
+        }) {
+            BackendChoiceStage::PendingRestart
+        } else {
+            BackendChoiceStage::Unverified
+        };
+    }
 }
 
 #[cfg(test)]

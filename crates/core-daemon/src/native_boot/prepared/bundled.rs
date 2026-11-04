@@ -40,6 +40,143 @@ pub(super) fn active_root(env: &NativeEnv) -> Result<Option<PathBuf>, String> {
     }
 }
 
+fn observe_support(
+    env: &NativeEnv,
+    facts: &ScanFacts,
+    client: Option<&CoreKpm>,
+    catalog: &Catalog,
+) -> (Capabilities, Vec<(NativeBackend, Support)>) {
+    let mut capabilities = crate::payloads::device::observe(env, facts);
+    // Availability comes from the public-API companion and actual mapped
+    // bytes, followed by real app specialization. Provider names cannot
+    // promote this evidence; hook health remains a separate measurement.
+    capabilities.zygisk = if env.loader.as_ref().is_some_and(|loader| {
+        loader.available(catalog, capabilities.abi, capabilities.needs_arm32_zygisk)
+    }) {
+        Runtime::Ready
+    } else {
+        Runtime::Unknown
+    };
+    let mut support = vec![
+        (
+            NativeBackend::Kmod,
+            compiled(KERNEL_HOOK_MASK | KMOD_HOOK_MASK, 65536, true),
+        ),
+        (
+            NativeBackend::Kpm,
+            compiled(
+                KERNEL_HOOK_MASK | KPM_HOOK_MASK,
+                (vpnhide_protocol::KPM_ARGS_LEN - 1) as u32,
+                true,
+            ),
+        ),
+        (
+            NativeBackend::Zygisk,
+            compiled(ZYGISK_HOOK_MASK, 65536, false),
+        ),
+    ];
+    let kernel_backend = match facts.kernel {
+        KernelFact::Builtin => Some(NativeBackend::Builtin),
+        KernelFact::Kmod => Some(NativeBackend::Kmod),
+        _ => None,
+    };
+    if let Some(backend) = kernel_backend {
+        // Never substitute compiled payload capabilities for a resident
+        // endpoint whose fresh status disappeared or became incompatible.
+        support.retain(|(b, _)| *b != backend);
+        if let Ok(status) = crate::activation::read_status(&env.ctl)
+            && let Some(evidence) = resident_support(status, backend, 65536)
+        {
+            support.push((backend, evidence));
+        }
+    }
+    if facts.kpm == KpmFact::Live {
+        support.retain(|(b, _)| *b != NativeBackend::Kpm);
+        if let Some(evidence) = client
+            .and_then(|c| c.status().ok().flatten())
+            .and_then(|status| {
+                resident_support(
+                    status,
+                    NativeBackend::Kpm,
+                    (vpnhide_protocol::KPM_ARGS_LEN - 1) as u32,
+                )
+            })
+        {
+            support.push((NativeBackend::Kpm, evidence));
+        }
+    }
+    (capabilities, support)
+}
+
+fn project_policies(
+    config: &CanonicalConfig,
+    packages: &PackageUidMap,
+) -> Vec<(NativeBackend, crate::payloads::projection::Projection)> {
+    [
+        NativeBackend::Builtin,
+        NativeBackend::Kmod,
+        NativeBackend::Kpm,
+        NativeBackend::Zygisk,
+    ]
+    .into_iter()
+    .filter_map(|backend| {
+        crate::payloads::projection::project(config, backend, packages)
+            .ok()
+            .map(|p| (backend, p))
+    })
+    .collect()
+}
+
+/// Read-only future-family applicability, using the same observations and full
+/// projections as boot preparation. This is not a load or a publication permit.
+pub(crate) fn preview_choice(
+    env: &NativeEnv,
+    config: &CanonicalConfig,
+    packages: &PackageUidMap,
+) -> Result<ChoicePreview, PreparationFailure> {
+    let boot_id = read_boot_id(&env.boot_id_path);
+    if boot_id.is_empty() || boot_id.len() > 128 {
+        return Err("backend_choice_boot_identity_unavailable".into());
+    }
+    let root = active_root(env)?.ok_or("backend_choice_requires_managed_core_bundle")?;
+    let catalog = verified_catalog(&root)?;
+    catalog
+        .manifest
+        .require_complete()
+        .map_err(|e| e.to_string())?;
+    let probe = probe_kpm(env.kpm_lock.as_deref());
+    let facts = gather(env, probe.fact);
+    let (mut capabilities, support) = observe_support(env, &facts, probe.client.as_ref(), &catalog);
+    let ownership = capabilities.ownership;
+    // Only a read-only next-boot applicability preview. The caller retains and
+    // checks actual ownership separately; this never enters a load executor.
+    capabilities.ownership = selection::Ownership::Clear;
+    let projections = project_policies(config, packages);
+    let requirements: Vec<_> = projections
+        .iter()
+        .map(|(b, p)| (*b, p.requirements))
+        .collect();
+    let assessment =
+        selection::assess_projected(&catalog.manifest, &capabilities, &requirements, &support)
+            .map_err(|e| e.to_string())?;
+    if read_boot_id(&env.boot_id_path) != boot_id {
+        return Err("backend_choice_boot_changed_during_preparation".into());
+    }
+    Ok(ChoicePreview {
+        assessment,
+        ownership,
+        boot_id,
+        binding: BundleIdentity {
+            root,
+            manifest_sha256: manifest_digest(&catalog.manifest),
+            manifest_file_sha256: Some(catalog.manifest_sha256),
+            source_commit: catalog.manifest.bundle_commit,
+            root_identity: Some(catalog.root_identity),
+            wire: String::new(),
+        },
+    })
+}
+
 impl Prepared {
     pub(super) fn from_bundle(
         env: NativeEnv,
@@ -56,66 +193,7 @@ impl Prepared {
             .map_err(|e| e.to_string())?;
         let packages =
             PackageUidMap::from_pm().map_err(|e| format!("package inventory unavailable: {e}"))?;
-        let mut capabilities = crate::payloads::device::observe(&env, &facts);
-        // Availability comes from the public-API companion and actual mapped
-        // bytes, followed by real app specialization. Provider names cannot
-        // promote this evidence; hook health remains a separate measurement.
-        capabilities.zygisk = if env.loader.as_ref().is_some_and(|loader| {
-            loader.available(&catalog, capabilities.abi, capabilities.needs_arm32_zygisk)
-        }) {
-            Runtime::Ready
-        } else {
-            Runtime::Unknown
-        };
-        let mut support = vec![
-            (
-                NativeBackend::Kmod,
-                compiled(KERNEL_HOOK_MASK | KMOD_HOOK_MASK, 65536, true),
-            ),
-            (
-                NativeBackend::Kpm,
-                compiled(
-                    KERNEL_HOOK_MASK | KPM_HOOK_MASK,
-                    (vpnhide_protocol::KPM_ARGS_LEN - 1) as u32,
-                    true,
-                ),
-            ),
-            (
-                NativeBackend::Zygisk,
-                compiled(ZYGISK_HOOK_MASK, 65536, false),
-            ),
-        ];
-        let kernel_backend = match facts.kernel {
-            KernelFact::Builtin => Some(NativeBackend::Builtin),
-            KernelFact::Kmod => Some(NativeBackend::Kmod),
-            _ => None,
-        };
-        if let Some(backend) = kernel_backend {
-            // Never substitute compiled payload capabilities for a resident
-            // endpoint whose fresh status disappeared or became incompatible.
-            support.retain(|(b, _)| *b != backend);
-            if let Ok(status) = crate::activation::read_status(&env.ctl)
-                && let Some(evidence) = resident_support(status, backend, 65536)
-            {
-                support.push((backend, evidence));
-            }
-        }
-        if facts.kpm == KpmFact::Live {
-            support.retain(|(b, _)| *b != NativeBackend::Kpm);
-            if let Some(evidence) = client
-                .as_ref()
-                .and_then(|c| c.status().ok().flatten())
-                .and_then(|status| {
-                    resident_support(
-                        status,
-                        NativeBackend::Kpm,
-                        (vpnhide_protocol::KPM_ARGS_LEN - 1) as u32,
-                    )
-                })
-            {
-                support.push((NativeBackend::Kpm, evidence));
-            }
-        }
+        let (capabilities, support) = observe_support(&env, &facts, client.as_ref(), &catalog);
         Self::bind_bundle(
             env,
             filesystem_hiding,
@@ -143,24 +221,19 @@ impl Prepared {
         capabilities: &Capabilities,
         support: &[(NativeBackend, Support)],
     ) -> Result<Self, PreparationFailure> {
-        let mut projections = Vec::new();
-        for backend in [
-            NativeBackend::Builtin,
-            NativeBackend::Kmod,
-            NativeBackend::Kpm,
-            NativeBackend::Zygisk,
-        ] {
-            if let Ok(projected) = crate::payloads::projection::project(config, backend, packages) {
-                projections.push((backend, projected));
-            }
-        }
+        let projections = project_policies(config, packages);
         let requirements: Vec<(NativeBackend, Policy)> = projections
             .iter()
             .map(|(b, p)| (*b, p.requirements))
             .collect();
-        let assessment =
-            selection::assess_projected(&catalog.manifest, capabilities, &requirements, support)
-                .map_err(|e| e.to_string())?;
+        let assessment = selection::assess_choice(
+            &catalog.manifest,
+            capabilities,
+            &requirements,
+            support,
+            env.backend_choice,
+        )
+        .map_err(|e| e.to_string())?;
         let evidence = selection_evidence::capture(&env, &catalog, capabilities, &assessment)?;
         let result = (|| -> Result<Self, String> {
             let (backend, resident) = match assessment.decision {
@@ -704,6 +777,7 @@ mod tests {
             apatch_kpms: temp.path().join("kpms"),
             payload_override: None,
             bundle_identity: None,
+            backend_choice: vpnhide_core_rpc::BackendChoice::Auto,
             loader: None,
         };
         let mut config = CanonicalConfig::default();

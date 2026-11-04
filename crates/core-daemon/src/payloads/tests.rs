@@ -566,3 +566,49 @@ fn passive_core_catalog_keeps_both_abis_without_becoming_an_autoload_recipient()
     assert!(std::fs::symlink_metadata(root.path().join("zygisk")).is_err());
     assert!(crate::zygisk::ZygiskTarget::open(root.path()).is_err());
 }
+
+#[test]
+fn fixed_choice_has_no_cross_family_substitution_and_residency_still_wins() {
+    use vpnhide_core_rpc::BackendChoice;
+    let mut d = device();
+    let requirements: Vec<_> = [B::Builtin, B::Kmod, B::Kpm, B::Zygisk]
+        .map(|b| (b, policy()))
+        .to_vec();
+    for backend in [B::Kpm, B::Zygisk, B::Kmod] {
+        let choice = BackendChoice::Fixed { backend };
+        assert_eq!(
+            assess_choice(&manifest(), &d, &requirements, &support(), choice)
+                .unwrap()
+                .decision,
+            Decision::Select(backend)
+        );
+        d.ownership = Ownership::Resident(B::Kmod);
+        assert_eq!(
+            assess_choice(&manifest(), &d, &requirements, &support(), choice)
+                .unwrap()
+                .decision,
+            Decision::ReconcileResident(B::Kmod)
+        );
+        d.ownership = Ownership::Unknown;
+        assert_eq!(
+            assess_choice(&manifest(), &d, &requirements, &support(), choice)
+                .unwrap()
+                .decision,
+            Decision::BlockedOwnership
+        );
+        d.ownership = Ownership::Clear;
+    }
+    d.kpm = Runtime::AuthenticationRequired;
+    assert_eq!(
+        assess_choice(
+            &manifest(),
+            &d,
+            &requirements,
+            &support(),
+            BackendChoice::Fixed { backend: B::Kpm }
+        )
+        .unwrap()
+        .decision,
+        Decision::NoEligibleCandidate
+    );
+}

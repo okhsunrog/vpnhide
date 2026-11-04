@@ -77,6 +77,14 @@ struct Harness {
 }
 
 async fn start(initial: &CanonicalConfig, installed: usize) -> Harness {
+    start_with_preference(initial, installed, None).await
+}
+
+async fn start_with_preference(
+    initial: &CanonicalConfig,
+    installed: usize,
+    preference: Option<NativeBackend>,
+) -> Harness {
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("core.sock");
     let ctl = dir.path().join("ctl");
@@ -86,6 +94,30 @@ async fn start(initial: &CanonicalConfig, installed: usize) -> Harness {
     fs::write(&ctl, BUILTIN_STATUS).unwrap();
     config_file::write_atomic(&config_path, initial).unwrap();
     fake_cmd(&dir.path().join("cmd"), installed);
+    if let Some(backend) = preference {
+        let journal = vpnhide_core_daemon::journal::Journal {
+            issued_through: 1,
+            backend_choice: Some(
+                vpnhide_core_daemon::journal::backend_choice::BackendChoiceRecord {
+                    revision: 1,
+                    operation: OperationId(1),
+                    requested_in_boot: "previous-kernel-boot".into(),
+                    request: vpnhide_core_rpc::BackendChoiceRequest {
+                        expected_revision: 0,
+                        choice: vpnhide_core_rpc::BackendChoice::Fixed { backend },
+                        acknowledged_warning: None,
+                    },
+                },
+            ),
+            ..Default::default()
+        };
+        vpnhide_core_daemon::journal::write_atomic(
+            &config_path.with_file_name("core_operations.json"),
+            &journal,
+        )
+        .unwrap();
+    }
+
     let mut child = CoreProcess(
         common::core_command()
             .arg(&socket)
@@ -234,4 +266,84 @@ async fn repair_of_an_over_capacity_config_reports_it_and_writes_nothing() {
     assert_eq!(backend, NativeBackend::Builtin);
     assert_eq!(report.capacity as usize, CAPACITY);
     assert!(report.total as usize > CAPACITY);
+}
+
+#[tokio::test]
+async fn save_cannot_overflow_retained_desired_family_even_when_current_wire_fits() {
+    // A kernel upgrade may reveal Builtin while retaining an earlier KPM choice.
+    // Admission still preserves the desired family's independent byte ceiling.
+    let h = start_with_preference(
+        &CanonicalConfig::default(),
+        CAPACITY,
+        Some(NativeBackend::Kpm),
+    )
+    .await;
+    let mut candidate = config_with(CAPACITY - 1);
+    for (i, app) in candidate.apps.values_mut().enumerate() {
+        // Different masks deliberately defeat compact same-mask grouping.
+        let names = [
+            "dev_ioctl",
+            "sock_ioctl",
+            "rtnl_fill_ifinfo",
+            "inet_fill_ifaddr",
+            "inet6_fill_ifaddr",
+            "fib_dump_info",
+            "rt6_fill_node",
+        ];
+        let bits = (i % ((1 << names.len()) - 1)) + 1;
+        app.native.kernel = Some(
+            names
+                .iter()
+                .enumerate()
+                .filter(|(bit, _)| bits & (1 << bit) != 0)
+                .map(|(_, name)| (*name).into())
+                .collect(),
+        );
+    }
+    let before = h.client.current().await.unwrap().snapshot;
+    let canonical_before = fs::read(&h.config_path).unwrap();
+    let ctl_before = fs::read(&h.ctl).unwrap();
+    let resolver = vpnhide_activator::parse_pm_packages(
+        &(0..CAPACITY)
+            .map(|i| format!("package:{} uid:{}\n", package(i), 10_200 + i))
+            .collect::<String>(),
+    );
+    let wire = vpnhide_core_daemon::activation::project_native_wire_with_resolver(
+        &candidate,
+        NativeBackend::Builtin,
+        &resolver,
+    )
+    .unwrap();
+    assert!(
+        wire.len()
+            <= vpnhide_activator::NativeHookFamily::Builtin
+                .limits()
+                .wire_bytes
+    );
+    assert!(wire.len() > vpnhide_activator::NativeHookFamily::Kpm.limits().wire_bytes);
+    let refusal = h
+        .client
+        .submit_edit(
+            OperationId(2),
+            BaseRef {
+                revision: before.config_revision,
+            },
+            ConfigEdit::Replace { config: candidate },
+        )
+        .await
+        .unwrap();
+    assert!(matches!(refusal, Err(SubmitError::Rejected { .. })));
+    assert_eq!(fs::read(&h.config_path).unwrap(), canonical_before);
+    assert_eq!(fs::read(&h.ctl).unwrap(), ctl_before);
+    assert!(
+        h.client
+            .get_operation(OperationId(2))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        h.client.current().await.unwrap().snapshot.config_revision,
+        before.config_revision
+    );
 }

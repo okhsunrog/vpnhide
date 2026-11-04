@@ -7,7 +7,14 @@ use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 mod bundled;
 mod selection_evidence;
+pub(crate) use bundled::preview_choice;
 pub use bundled::{BundleIdentity, restore_environment};
+pub(crate) struct ChoicePreview {
+    pub assessment: crate::payloads::selection::Assessment,
+    pub ownership: crate::payloads::selection::Ownership,
+    pub binding: BundleIdentity,
+    pub boot_id: String,
+}
 pub(crate) fn validate_bundle_binding(binding: Option<&BundleIdentity>) -> Result<(), String> {
     bundled::validate_binding(binding)
 }
@@ -125,6 +132,9 @@ impl Prepared {
                 root,
                 config.ok_or("canonical configuration required before bundled activation")?,
             );
+        }
+        if env.backend_choice != vpnhide_core_rpc::BackendChoice::Auto {
+            return Err("explicit_backend_choice_requires_managed_core_bundle".into());
         }
         Self::from_facts(env, filesystem_hiding, facts, probe.client).map_err(Into::into)
     }
@@ -475,6 +485,7 @@ mod tests {
             apatch_kpms: root.join("kpms"),
             payload_override: None,
             bundle_identity: None,
+            backend_choice: vpnhide_core_rpc::BackendChoice::Auto,
             loader: None,
         };
         fs::write(&env.boot_id_path, boot).unwrap();

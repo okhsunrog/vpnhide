@@ -21,23 +21,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 
-/**
- * Per-screen protection state from root-owned files and package
- * manager lookups, cached once for the lifetime of the app session.
- *
- * Without this cache, every tab switch into Protection triggered 3-4
- * sequential root roundtrips per screen. Root roundtrips
- * are ~50-100ms each on most devices, so a single tab switch added
- * hundreds of milliseconds of "loading" time even after AppListCache
- * made the package list itself instant. Bundling every read into a
- * single batched shell invocation + caching the result means subsequent
- * tab switches render immediately from memory.
- *
- * Invalidated when:
- * - The user taps Save on Protection (canonical config has just been
- *   overwritten — need a fresh read next time).
- * - The user taps the top-bar Refresh button on Protection.
- */
+/** Accepted Core/root publication and complete UID accounting for picker drafts.
+ * UI package/icon scans do not replace Core's capacity inventory. */
 internal data class TargetsSnapshot(
     val uidToPkg: Map<Int, String>,
     val canonicalConfig: CanonicalConfig?,
@@ -47,6 +32,7 @@ internal data class TargetsSnapshot(
      * including profiles and shared UIDs. */
     val packageUids: Map<String, List<Int>> = emptyMap(),
     val nativeInventoryComplete: Boolean = false,
+    val capacityBackends: List<uniffi.vpnhide_core_ffi.CoreNativeBackend> = emptyList(),
     val nativeStatus: dev.okhsunrog.vpnhide.NativeStatusSnapshot? = null,
 ) {
     /** Draft capabilities come from the retained Core selection, never module directories. */
@@ -91,8 +77,16 @@ internal object TargetsCache : StateCache<RootProjection<TargetsSnapshot>>(
     source = RootSnapshotCache.dependency,
 ) {
     val snapshot: StateFlow<TargetsSnapshot?> =
-        combine(value, CoreSessions.updates) { cached, core -> cached?.value?.copy(nativeStatus = core.nativeStatusSnapshot()) }
-            .stateIn(ObservationRuntime.scope, SharingStarted.Eagerly, null)
+        combine(value, CoreSessions.updates) { cached, core ->
+            cached?.value?.copy(
+                nativeStatus = core.nativeStatusSnapshot(),
+                capacityBackends =
+                    core.state
+                        ?.backendChoice
+                        ?.capacityBackends
+                        .orEmpty(),
+            )
+        }.stateIn(ObservationRuntime.scope, SharingStarted.Eagerly, null)
 
     // The snapshot is parsed entirely from the shared RootSnapshotCache, so
     // neither entry point needs a context.
@@ -130,6 +124,11 @@ internal fun parseTargetsSnapshot(rootSnapshot: RootSnapshot): TargetsSnapshot {
         canonicalConfig = canonical,
         apatchSuperkeySaved = sections["superkey_saved"]?.trim() == "1",
         nativeStatus = rootSnapshot.core.nativeStatusSnapshot(),
+        capacityBackends =
+            rootSnapshot.core.state
+                ?.backendChoice
+                ?.capacityBackends
+                .orEmpty(),
         packageUids = pkgToUids,
         nativeInventoryComplete = parsePackageInventory(sections["pm_packages"].orEmpty(), sections["pm_users"].orEmpty()).complete,
     )

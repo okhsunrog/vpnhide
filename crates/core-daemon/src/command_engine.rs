@@ -86,6 +86,7 @@ enum Message {
         command: Box<CoreCommand>,
         maintenance: Option<Box<crate::maintenance::PreparedMaintenance>>,
         replacement: Option<Box<crate::maintenance::replacement::PreparedReplacement>>,
+        backend_choice: Option<Box<crate::server::backend_choice::PreparedBackendChoice>>,
         reply: AdmissionReply,
         ticket: AdmissionTicket,
     },
@@ -124,6 +125,7 @@ impl CommandEngine {
                             command,
                             maintenance,
                             replacement,
+                            backend_choice,
                             reply,
                             ticket,
                         }) => {
@@ -134,6 +136,7 @@ impl CommandEngine {
                                     Some(reply.clone()),
                                     maintenance.map(|p| *p),
                                     replacement.map(|p| *p),
+                                    backend_choice.map(|p| *p),
                                 )
                             } else {
                                 Err(SubmitError::Busy)
@@ -228,6 +231,7 @@ impl CommandEngine {
         ticket: AdmissionTicket,
         maintenance: Option<crate::maintenance::PreparedMaintenance>,
         replacement: Option<crate::maintenance::replacement::PreparedReplacement>,
+        backend_choice: Option<crate::server::backend_choice::PreparedBackendChoice>,
     ) -> Result<Accepted, SubmitError> {
         let (reply, receiver) = mpsc::channel();
         {
@@ -238,6 +242,7 @@ impl CommandEngine {
                     command: Box::new(command),
                     maintenance: maintenance.map(Box::new),
                     replacement: replacement.map(Box::new),
+                    backend_choice: backend_choice.map(Box::new),
                     reply,
                     ticket: ticket.clone(),
                 },

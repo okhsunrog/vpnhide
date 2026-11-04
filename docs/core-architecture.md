@@ -1,6 +1,6 @@
 # Core architecture
 
-Current implementation, app/core RPC32 and journal15 (reads1–14). Backend policy
+Current implementation, app/core RPC33 and journal16 (reads1–15). Backend policy
 implementation and publication of verified changes are approved under
 [RFC0005](rfcs/0005-unified-backend-lifecycle-policy.md); remaining flows and device
 gates are tracked separately. Kernel control-v2 / telemetry-v1 is unchanged.
@@ -475,7 +475,7 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-The current paired APK/Core contract is RPC32; journal15 reads schemas1–14. These
+The current paired APK/Core contract is RPC33; journal16 reads schemas1–15. These
 versions are independent of kernel control2/telemetry1 and do not require a
 compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
 publication and sampled current/stale/unattributed process consumption are separate
@@ -576,7 +576,7 @@ Zygisk authorization cannot claim global process coverage.
 The foreign-VPN observer, UID-in-tunnel probe and routing RPC/FFI field are removed.
 Dashboard/diagnostics consume Core evidence independently of external VPN presence
 and split-tunnel membership. Real fixture/hook API observations and manual network
-forensics remain. Current RPC32 requires a paired new APK/Core; journal15 and the frozen
+forensics remain. Current RPC33 requires a paired new APK/Core; journal16 and the frozen
 kernel control2/telemetry1 are independent, so a compatible builtin kernel does not
 need rebuilding merely because the app protocol changed.
 
@@ -620,7 +620,7 @@ refuse the newer schema without removing it. Kernel control2/telemetry1 is uncha
 <a id="explicit-existing-core-replacement-rpc29--journal13"></a>
 <a id="explicit-existing-core-replacement-rpc30--journal13"></a>
 
-## Explicit existing-Core replacement (RPC32 / journal15)
+## Explicit existing-Core replacement (introduced RPC32 / journal15)
 
 The existing command writer now admits `StageCoreReplacement`. Authenticated
 preparation runs outside that writer; accepted work and dispatch intent are
@@ -636,3 +636,36 @@ bounded explicit SAF adapter and typed progress, with no shell/su or automatic
 reboot. Missing-Core/incompatible-RPC bootstrap remains implementation work.
 See [maintenance](core-maintenance.md) for contracts and acceptance boundaries.
 This introduces no paused backend transition or Zygisk publication policy.
+
+## Device-local next-boot backend intent (RPC33 / journal16)
+
+`StageBackendChoice` is a command on the existing writer, separate from portable
+canonical configuration. A read-only preparation uses the verified complete
+catalog, current capabilities and one complete UID inventory. Commit rechecks
+both the config and device-local choice revisions, boot and exact manifest/root
+identity. Recording an intent performs no load, policy delivery or reboot. The
+preference and terminal receipt share one atomic journal document. A lost final
+sync stays uncertain until the same operation is queried/recovered; no replay.
+A Running-only preference intent can be settled as known no effect on restart.
+Older readers are fenced by journal16; earlier holds, counters and attempts remain.
+
+The implemented UI slice offers Auto and explicit kernel families in advanced
+settings. Applicability is checked by Core, not inferred from that option list.
+Same-boot daemon restarts restore their actual prior selection; a different
+requested family is considered only after the kernel boot identity changes.
+Explicit selection has no cross-family substitution. A permanently resident
+Builtin cannot be replaced by staging another family against the same kernel.
+The read model distinguishes desired intent, confirmed delivery family and
+Current/PendingRestart/Unverified; none proves runtime or behavioral health.
+
+Picker preview checks every distinct current/staged family through one local
+Rust call using accepted Core accounting; Save rechecks both against one fresh
+inventory. Proven reductions remain available without complete inventory.
+Save/Cancel is unchanged. FullReset clears the device-local preference; imports
+cannot grant backend selection or Zygisk consent.
+
+This is not the complete RFC0005 lifecycle: requests for new Zygisk publication
+or retirement of a currently selected Zygisk are explicitly refused until the
+managed projection executor exists. Cross-upgrade continuity/last-successful
+hints, the informed Zygisk chooser and voluntary migration offer remain code
+work. No warning acknowledgement alone grants Auto fallback or standby loading.

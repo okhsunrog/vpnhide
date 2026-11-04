@@ -692,6 +692,7 @@ mod tests {
                 apatch_kpms: root.path().join("no-apatch"),
                 payload_override: None,
                 bundle_identity: None,
+                backend_choice: vpnhide_core_rpc::BackendChoice::Auto,
                 loader: None,
             },
             1,

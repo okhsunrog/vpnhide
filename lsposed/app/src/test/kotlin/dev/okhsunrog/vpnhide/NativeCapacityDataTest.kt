@@ -1,14 +1,12 @@
 package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.picker.TargetsSnapshot
-import dev.okhsunrog.vpnhide.picker.nativeCapacityIncreaseViolation
-import dev.okhsunrog.vpnhide.picker.nativeCapacityUsage
+import dev.okhsunrog.vpnhide.picker.nativePickerSaveDecision
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Test
 import uniffi.vpnhide_core_ffi.CoreNativeBackend
-import uniffi.vpnhide_core_ffi.CoreNativePolicyUsage
-import uniffi.vpnhide_core_ffi.nativePolicyIsReduction
+import uniffi.vpnhide_core_ffi.CoreNativePickerDecision
+import uniffi.vpnhide_core_ffi.previewNativePickerChange
 import uniffi.vpnhide_core_ffi.previewNativePolicy
 
 /** UID/mask domain cases moved to native-policy; these pin the generated FFI and tap rule. */
@@ -24,15 +22,15 @@ class NativeCapacityDataTest {
                 nativeStatus = sampleNativeStatus(selected = NativeBackendId.Kpm, observed = NativeBackendId.Builtin),
                 packageUids = mapOf("many" to (2_010_000 until 2_010_000 + capacity).toList()),
                 nativeInventoryComplete = true,
+                capacityBackends = listOf(CoreNativeBackend.KPM, CoreNativeBackend.KMOD),
             )
-        val usage = requireNotNull(nativeCapacityUsage(emptyList(), snapshot, APP_PACKAGE_NAME))
-        assertEquals(capacity.toULong(), usage.targetUids)
-        org.junit.Assert.assertTrue(usage.wireBytes > usage.wireCapacity)
-        val builtin =
-            requireNotNull(
-                nativeCapacityUsage(emptyList(), snapshot.copy(nativeStatus = sampleNativeStatus()), APP_PACKAGE_NAME),
-            )
-        org.junit.Assert.assertTrue(builtin.wireCapacity > usage.wireCapacity)
+        val decision = nativePickerSaveDecision(emptyList(), snapshot, APP_PACKAGE_NAME) as CoreNativePickerDecision.Capacity
+        assertEquals(capacity.toULong(), decision.usage.targetUids)
+        org.junit.Assert.assertTrue(decision.usage.wireBytes > decision.usage.wireCapacity)
+        assertEquals(
+            CoreNativePickerDecision.Allowed,
+            nativePickerSaveDecision(emptyList(), snapshot.copy(capacityBackends = listOf(CoreNativeBackend.BUILTIN)), APP_PACKAGE_NAME),
+        )
     }
 
     @Test
@@ -43,25 +41,14 @@ class NativeCapacityDataTest {
                 apps =
                     mapOf("target" to CanonicalApp(native = NativeRole(true, NativeHookOverrides(kernel = listOf("dev_ioctl"))))),
             )
-        org.junit.Assert.assertTrue(nativePolicyIsReduction(before.toCore(), after.toCore(), null))
-        org.junit.Assert.assertFalse(nativePolicyIsReduction(after.toCore(), before.toCore(), null))
-    }
-
-    @Test
-    fun `next selection is refused and removals from an overflowing draft remain possible`() {
-        val full = CoreNativePolicyUsage(4u, 4u, 80u, 100u)
-        val overflow = full.copy(targetUids = 5u, wireBytes = 90u)
-        assertEquals(overflow, nativeCapacityIncreaseViolation(full, overflow))
-        assertNull(nativeCapacityIncreaseViolation(overflow, full))
-        assertNull(nativeCapacityIncreaseViolation(overflow.copy(targetUids = 6u), overflow))
-    }
-
-    @Test
-    fun `independent wire capacity also prevents an increase`() {
-        val current = CoreNativePolicyUsage(3u, 4u, 99u, 100u)
-        val candidate = current.copy(wireBytes = 101u)
-        assertEquals(candidate, nativeCapacityIncreaseViolation(current, candidate))
-        assertNull(nativeCapacityIncreaseViolation(candidate, current))
+        assertEquals(
+            CoreNativePickerDecision.Allowed,
+            previewNativePickerChange(before.toCore(), after.toCore(), emptyList(), emptyMap(), false),
+        )
+        assertEquals(
+            CoreNativePickerDecision.InventoryUnavailable,
+            previewNativePickerChange(after.toCore(), before.toCore(), emptyList(), emptyMap(), false),
+        )
     }
 
     @Test

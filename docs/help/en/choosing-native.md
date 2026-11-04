@@ -7,7 +7,7 @@ implementation automatically.
 
 **Prefer a compatible kernel backend.** Zygisk hooks run inside app processes;
 banking, anti-fraud and other protected apps may detect the provider or injected
-code and refuse to work. Zygisk is a fallback with reduced coverage, not the
+code and refuse to work. Zygisk is a last-resort alternative with reduced coverage, not the
 recommended starting point. A kernel backend does not guarantee invisibility or
 hide an installed Zygisk provider or root. Direct syscalls can bypass libc hooks.
 
@@ -19,7 +19,7 @@ hide an installed Zygisk provider or root. Direct syscalls can bypass libc hooks
   evidence. See [the kernel-module guide](kmod-install.md).
 - **KPM:** a bundled kernel backend requiring a working authenticated KernelPatch
   runtime. See [KPM requirements](kpm-install.md).
-- **Zygisk:** a bundled userspace fallback requiring a compatible Zygisk provider.
+- **Zygisk:** a bundled userspace alternative requiring a compatible Zygisk provider.
   Direct syscalls can bypass libc hooks. See [Zygisk requirements](zygisk-install.md).
 
 Java/LSPosed and Native cover different paths. The Apps role needs Java/LSPosed;
@@ -39,3 +39,13 @@ Core makes the selection; the Dashboard shows selection, application and retaine
 diagnostic evidence. Missing compatibility or incomplete coverage remains visible.
 A backend being present is not proof that protection works. See
 [Installed but not active](module-not-active.md).
+
+## Advanced kernel choice
+
+Settings → Native backend (advanced) can record Auto or an explicit kernel family
+for the next device boot. Core checks compatibility and the complete configured
+policy before accepting it. This does not restart the device or switch the
+running backend. Pending restart and unconfirmed application remain separate
+from protection health. Auto chooses compatible Built-in then Kmod, and does not
+automatically try KPM or Zygisk after a failure. New Zygisk selection and managed
+publication are still being implemented; this chooser does not enable them.

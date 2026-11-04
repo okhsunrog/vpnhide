@@ -28,6 +28,7 @@ use crate::config_file;
 use crate::journal::{self, Journal, JournalEntry};
 use crate::operation::{self, PhaseHook, PlanKind, RealPhaseRunner};
 use crate::publisher::Publisher;
+pub(crate) mod backend_choice;
 mod core_maintenance;
 mod revocation;
 mod root_probe_admission;
@@ -286,8 +287,21 @@ impl CoreState {
     ) -> Result<Accepted, SubmitError> {
         let maintenance = self.prepare_maintenance(op, &command)?;
         let replacement = self.prepare_replacement(op, &command, None)?;
+        let backend_choice = self.prepare_backend_choice(
+            op,
+            &command,
+            std::time::Instant::now() + vpnhide_core_rpc::CALL_DEADLINE,
+            &CancellationToken::new(),
+        )?;
         self.call_writer(move |state| {
-            state.execute_command_prepared(op, command, None, maintenance, replacement)
+            state.execute_command_prepared(
+                op,
+                command,
+                None,
+                maintenance,
+                replacement,
+                backend_choice,
+            )
         })?
     }
 
@@ -451,6 +465,11 @@ impl CoreState {
             CoreCommand::StageCoreReplacement { .. } => {
                 return Err(SubmitError::Rejected {
                     reason: "replacement_preparation_required".into(),
+                });
+            }
+            CoreCommand::StageBackendChoice { .. } => {
+                return Err(SubmitError::Rejected {
+                    reason: "backend_choice_preparation_required".into(),
                 });
             }
             CoreCommand::PrepareSelfTargets { base } => {
@@ -673,6 +692,7 @@ impl CoreState {
     }
     fn publish_store(&self, store: &ConfigStore) {
         self.publisher.update(|snapshot| {
+            snapshot.backend_choice = Some(backend_choice::status(&store.journal));
             snapshot.maintenance = store
                 .journal
                 .replacement
@@ -1230,6 +1250,7 @@ impl CoreState {
             Some(jp) => journal::read(jp)?,
             None => Journal::default(),
         };
+        let choice_reconciled = journal::backend_choice::reconcile_unfinished(&mut journal);
         // Fence before exposing operations: Running → Unknown; unfinished ops Held.
         // Effects are never replayed.
         journal.fence_unresolved();
@@ -1242,7 +1263,7 @@ impl CoreState {
         let sources = crate::recovery::EvidenceSources {
             config_path: Some(path.as_path()),
         };
-        let mut journal_dirty = false;
+        let mut journal_dirty = choice_reconciled;
         for entry in &mut journal.operations {
             if crate::recovery::reconcile_entry(entry, &sources) {
                 journal_dirty = true;
@@ -1462,31 +1483,43 @@ impl CoreState {
         }
     }
 
-    fn start_native_boot_direct(&self, env: crate::native_boot::NativeEnv, epoch: u64) {
+    fn start_native_boot_direct(&self, mut env: crate::native_boot::NativeEnv, epoch: u64) {
         use crate::native_boot::NativeBoot;
         self.epoch.store(epoch, Ordering::SeqCst);
         let mut store = self.engine.store.lock().expect("config mutex").clone();
-        let blocked = |reason: String| {
+        let blocked = |env: &crate::native_boot::NativeEnv, reason: String| {
             self.install_native_boot(NativeBoot::blocked(env.clone(), epoch, reason))
         };
         if self.snapshot().startup_error.is_some() || self.snapshot().storage_fault.is_some() {
-            blocked("native startup refused while durable storage is unavailable".into());
+            blocked(
+                &env,
+                "native startup refused while durable storage is unavailable".into(),
+            );
             return;
         }
         if let Err(reason) = self.reconcile_core_replacement(&mut store) {
-            blocked(reason);
+            blocked(&env, reason);
             return;
         }
         let boot_id = crate::native_boot::read_boot_id(&env.boot_id_path);
         if boot_id.is_empty() || boot_id.len() > 128 {
-            blocked("native startup requires a valid kernel boot identity".into());
+            blocked(
+                &env,
+                "native startup requires a valid kernel boot identity".into(),
+            );
             return;
+        }
+        if let Some(record) = &store.journal.backend_choice
+            && record.requested_in_boot != boot_id
+        {
+            env.backend_choice = record.request.choice;
         }
         if !vpnhide_core_rpc::recovery::permits_boot_phase(
             ConfigPhase::Native,
             &store.journal.held_resources(),
         ) {
             blocked(
+                &env,
                 "native startup held by unresolved durable effects; no load was replayed".into(),
             );
             return;
@@ -1501,6 +1534,18 @@ impl CoreState {
         {
             // Restore the durable decision, not a best-effort secondary file.
             // Pending authentication is retried by the journaled Native phase.
+            // Legacy recipients have no managed catalog. Keep their isolated
+            // recovery adapter; a restore pin is not a new explicit choice.
+            if let Some(selection) = result.selection
+                && attempt
+                    .intent
+                    .as_ref()
+                    .is_some_and(|intent| intent.bundle.is_some())
+            {
+                env.backend_choice = vpnhide_core_rpc::BackendChoice::Fixed {
+                    backend: selection.backend,
+                };
+            }
             self.install_native_boot(
                 NativeBoot {
                     env: match crate::native_boot::prepared::restore_environment(
@@ -1509,7 +1554,7 @@ impl CoreState {
                     ) {
                         Ok(env) => env,
                         Err(error) => {
-                            blocked(error);
+                            blocked(&env, error);
                             return;
                         }
                     },
@@ -1521,9 +1566,14 @@ impl CoreState {
             return;
         }
         let Some(path) = &self.journal_path else {
-            blocked("native startup requires a durable operation journal".into());
+            blocked(
+                &env,
+                "native startup requires a durable operation journal".into(),
+            );
             return;
         };
+        // Same-boot requests remain pending even if no initial selection could
+        // be prepared. A daemon restart is not the requested device reboot.
         let filesystem_hiding = self.filesystem_hiding_wanted();
         let prepared = match crate::native_boot::prepared::Prepared::scan(
             env.clone(),
@@ -1538,11 +1588,14 @@ impl CoreState {
                         .persist_transition_journal(path, &store.journal, OperationId(0))
                         .is_err()
                     {
-                        blocked("selection evidence durability could not be established".into());
+                        blocked(
+                            &env,
+                            "selection evidence durability could not be established".into(),
+                        );
                         return;
                     }
                 }
-                blocked(format!("native preparation refused: {error}"));
+                blocked(&env, format!("native preparation refused: {error}"));
                 return;
             }
         };
@@ -1553,7 +1606,10 @@ impl CoreState {
                 .persist_transition_journal(path, &store.journal, OperationId(0))
                 .is_err()
             {
-                blocked("selection evidence durability could not be established".into());
+                blocked(
+                    &env,
+                    "selection evidence durability could not be established".into(),
+                );
                 return;
             }
         }
@@ -1565,7 +1621,10 @@ impl CoreState {
         };
         match crate::native_boot::transition::activate(prepared, &mut writer, epoch, false) {
             Ok(boot) => self.install_native_boot(boot),
-            Err(outcome) => blocked(format!("journaled startup did not complete: {outcome:?}")),
+            Err(outcome) => blocked(
+                &env,
+                format!("journaled startup did not complete: {outcome:?}"),
+            ),
         }
     }
 
@@ -1600,22 +1659,65 @@ impl CoreState {
         &self,
         next: &CanonicalConfig,
     ) -> Result<Option<(vpnhide_core_rpc::NativeBackend, String)>, SubmitError> {
-        if self.kmod_ctl_path.is_none() {
-            return Ok(None);
+        let desired = self
+            .engine
+            .store
+            .lock()
+            .expect("config mutex")
+            .journal
+            .backend_choice
+            .as_ref()
+            .map(|r| r.request.choice);
+        let fixed = match desired {
+            Some(vpnhide_core_rpc::BackendChoice::Fixed { backend }) => Some(backend),
+            _ => None,
+        };
+        let backend = self
+            .kmod_ctl_path
+            .as_ref()
+            .and_then(|_| self.native_handle())
+            .and_then(|handle| {
+                let boot = handle.lock().expect("native boot");
+                boot.selected().or_else(|| {
+                    boot.pending_authentication()
+                        .then_some(vpnhide_core_rpc::NativeBackend::Kpm)
+                })
+            });
+        let staged = fixed.filter(|staged| Some(*staged) != backend);
+        // Current and staged projections must see one exact UID inventory.
+        let packages = staged
+            .map(|_| vpnhide_activator::PackageUidMap::from_pm())
+            .transpose()
+            .map_err(|_| SubmitError::Rejected {
+                reason: "staged_backend_projection_unavailable".into(),
+            })?;
+        if let Some(staged) = staged {
+            Self::project_capacity_wire(next, staged, true, packages.as_ref())?;
         }
-        let Some(handle) = self.native_handle() else {
-            return Ok(None);
+        match backend {
+            Some(backend) => Self::project_capacity_wire(
+                next,
+                backend,
+                fixed == Some(backend),
+                packages.as_ref(),
+            ),
+            None => Ok(None),
+        }
+    }
+
+    fn project_capacity_wire(
+        next: &CanonicalConfig,
+        backend: vpnhide_core_rpc::NativeBackend,
+        strict: bool,
+        packages: Option<&vpnhide_activator::PackageUidMap>,
+    ) -> Result<Option<(vpnhide_core_rpc::NativeBackend, String)>, SubmitError> {
+        let projection = match packages {
+            Some(packages) => {
+                crate::activation::project_native_wire_with_resolver(next, backend, packages)
+            }
+            None => crate::activation::project_native_wire(next, backend),
         };
-        let boot = handle.lock().expect("native boot");
-        let backend = boot.selected().or_else(|| {
-            boot.pending_authentication()
-                .then_some(vpnhide_core_rpc::NativeBackend::Kpm)
-        });
-        drop(boot);
-        let Some(backend) = backend else {
-            return Ok(None);
-        };
-        match crate::activation::project_native_wire(next, backend) {
+        match projection {
             Ok(wire) => {
                 let capacity = match backend {
                     vpnhide_core_rpc::NativeBackend::Kpm => {
@@ -1649,6 +1751,11 @@ impl CoreState {
                     report.total, report.capacity
                 ));
                 Err(SubmitError::NativeCapacityExceeded(report))
+            }
+            Err(crate::activation::ProjectionError::Failed(_)) if strict => {
+                Err(SubmitError::Rejected {
+                    reason: "staged_backend_projection_unavailable".into(),
+                })
             }
             Err(crate::activation::ProjectionError::Failed(_)) => Ok(None),
         }
@@ -2281,6 +2388,9 @@ impl CoreState {
 
         if outcome.persisted {
             store.config = if spec.reset { None } else { Some(next.clone()) };
+            if spec.reset {
+                store.journal.backend_choice = None;
+            }
             store.config_revision = admission.commit_revision;
             let rev = store.config_revision;
             let writes = config_edit::write_set(edit);
@@ -3100,14 +3210,21 @@ impl VpnhideCore for CoreServer {
             let maintenance =
                 state.prepare_maintenance_before(op, &command, ctx.deadline, &cancelled)?;
             let replacement = state.prepare_replacement(op, &command, caller)?;
+            let backend_choice =
+                state.prepare_backend_choice(op, &command, ctx.deadline, &cancelled)?;
             if cancelled.is_cancelled() || std::time::Instant::now() >= ctx.deadline {
                 return Err(SubmitError::Busy);
             }
             let ticket =
                 crate::command_engine::AdmissionTicket::after_preparation(ctx.deadline, cancelled);
-            state
-                .engine
-                .submit(op, command, ticket, maintenance, replacement)
+            state.engine.submit(
+                op,
+                command,
+                ticket,
+                maintenance,
+                replacement,
+                backend_choice,
+            )
         })
         .await
         .unwrap_or(Err(SubmitError::Unavailable))

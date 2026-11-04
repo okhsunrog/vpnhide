@@ -35,6 +35,7 @@ pub struct StateReply {
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CorePublication {
+    pub backend_choice: Option<crate::CoreBackendChoiceStatus>,
     pub maintenance: Option<crate::CoreMaintenanceStatus>,
     pub attachment_evidence: crate::CoreAttachmentEvidence,
     pub zygisk_lifecycle: Option<crate::CoreZygiskLifecycle>,
@@ -69,6 +70,7 @@ impl From<ClientReply<rpc::Published>> for StateReply {
         let attachment_evidence =
             rpc::attachment_policy::AttachmentEvidence::from(&snapshot).into();
         let rpc::StateSnapshot {
+            backend_choice,
             maintenance,
             native_view,
             zygisk_lifecycle,
@@ -91,6 +93,7 @@ impl From<ClientReply<rpc::Published>> for StateReply {
         Self {
             connection_generation: reply.generation,
             state: CorePublication {
+                backend_choice: backend_choice.map(Into::into),
                 maintenance: maintenance.map(Into::into),
                 attachment_evidence,
                 zygisk_lifecycle: zygisk_lifecycle.map(Into::into),
@@ -179,6 +182,10 @@ impl From<CoreEdit> for rpc::ConfigEdit {
 }
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum CoreCommand {
+    StageBackendChoice {
+        base_revision: u64,
+        request: crate::CoreBackendChoiceRequest,
+    },
     StageCoreReplacement {
         base_revision: u64,
         request: crate::CoreReplacementRequest,
@@ -229,6 +236,15 @@ impl From<CoreLegacyImportMode> for rpc::LegacyImportMode {
 impl From<CoreCommand> for rpc::CoreCommand {
     fn from(value: CoreCommand) -> Self {
         match value {
+            CoreCommand::StageBackendChoice {
+                base_revision,
+                request,
+            } => Self::StageBackendChoice {
+                base: rpc::BaseRef {
+                    revision: base_revision,
+                },
+                request: request.into(),
+            },
             CoreCommand::StageCoreReplacement {
                 base_revision,
                 request,

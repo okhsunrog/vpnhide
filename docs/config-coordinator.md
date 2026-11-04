@@ -101,3 +101,10 @@ There are no app-local logging-token writes alongside core's writer.
 Configuration feedback has one owner across navigation: pending switches, quiet
 success, failure Snackbar, activation repair and a read/recheck gate. Desired
 state, delivery evidence and actual diagnostic measurements stay separate.
+
+Device-local next-boot kernel selection uses `StageBackendChoice` through this
+same coordinator and operation-ID recovery path. It has no canonical edits,
+protects drafts during preparation, and reports the actual Core Maintenance
+receipt. Saving a choice is distinct from applying a backend; the publication
+shows PendingRestart or Unverified separately from current confirmed delivery.
+No automatic restart or optimistic per-toggle Save change is introduced.

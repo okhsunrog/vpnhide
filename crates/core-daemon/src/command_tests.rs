@@ -111,6 +111,7 @@ fn native_none(state: &CoreState, root: &std::path::Path) {
         apatch_kpms: root.join("apatch"),
         payload_override: None,
         bundle_identity: None,
+        backend_choice: vpnhide_core_rpc::BackendChoice::Auto,
         loader: None,
     };
     state.install_native_boot(crate::native_boot::NativeBoot {
@@ -728,6 +729,7 @@ fn reader_and_receipts_remain_available_while_the_bounded_writer_is_busy() {
             ),
             None,
             None,
+            None,
         ),
         Err(SubmitError::Busy)
     );
@@ -1134,6 +1136,7 @@ fn explicit_repair_releases_only_covered_resources_and_preserves_old_unknown_rec
         apatch_kpms: root.path().join("apatch"),
         payload_override: None,
         bundle_identity: None,
+        backend_choice: vpnhide_core_rpc::BackendChoice::Auto,
         loader: None,
     };
     state.install_native_boot(crate::native_boot::NativeBoot {
@@ -1487,6 +1490,7 @@ fn startup_env(root: &std::path::Path) -> crate::native_boot::NativeEnv {
         apatch_kpms: root.join("no-apatch"),
         payload_override: None,
         bundle_identity: None,
+        backend_choice: vpnhide_core_rpc::BackendChoice::Auto,
         loader: None,
     }
 }
@@ -2324,4 +2328,65 @@ fn old_revoked_zygisk_grant_does_not_withdraw_current_builtin_delivery() {
                 && e.phase == ConfigPhase::Native
                 && e.outcome == PhaseOutcome::Confirmed)
     );
+}
+
+#[test]
+fn staged_family_waits_for_device_boot_and_survives_daemon_restart() {
+    use vpnhide_core_rpc::{BackendChoice, BackendChoiceRequest, NativeBackend};
+    let root = tempfile::tempdir().unwrap();
+    let env = startup_env(root.path());
+    let journal = Journal {
+        issued_through: 1,
+        backend_choice: Some(journal::backend_choice::BackendChoiceRecord {
+            revision: 1,
+            operation: OperationId(1),
+            requested_in_boot: "test-boot".into(),
+            request: BackendChoiceRequest {
+                expected_revision: 0,
+                choice: BackendChoice::Fixed {
+                    backend: NativeBackend::Kpm,
+                },
+                acknowledged_warning: None,
+            },
+        }),
+        ..Default::default()
+    };
+    journal::write_atomic(&root.path().join("operations.json"), &journal).unwrap();
+    for epoch in [1, 2] {
+        let state = load(root.path(), epoch);
+        state.start_native_boot(env.clone(), epoch);
+        assert_eq!(
+            state
+                .native_handle()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .env
+                .backend_choice,
+            BackendChoice::Auto
+        );
+        assert_eq!(state.snapshot().backend.selected, None);
+        state.shutdown();
+    }
+    fs::write(&env.boot_id_path, "new-device-boot").unwrap();
+    let state = load(root.path(), 3);
+    state.start_native_boot(env, 3);
+    assert_eq!(
+        state
+            .native_handle()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .env
+            .backend_choice,
+        BackendChoice::Fixed {
+            backend: NativeBackend::Kpm
+        }
+    );
+    assert_eq!(
+        state.snapshot().backend.selected,
+        None,
+        "missing managed bundle never substitutes another family"
+    );
+    state.shutdown();
 }

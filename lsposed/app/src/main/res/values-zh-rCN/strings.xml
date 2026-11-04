@@ -596,4 +596,10 @@
     <string name="core_maintenance_failed">更新被拒绝，未重新运行安装程序。</string>
     <string name="core_maintenance_unknown">无法确认更新。请在重试前检查 Core 状态。</string>
     <string name="core_maintenance_refresh">检查更新状态</string>
+    <string name="backend_choice_title">原生后端（高级）</string>
+    <string name="backend_choice_auto">自动（内核）</string>
+    <string name="backend_choice_current">当前</string>
+    <string name="backend_choice_pending">等待设备重启</string>
+    <string name="backend_choice_unverified">未确认</string>
+    <string name="backend_choice_explanation">选择下次设备启动使用的后端。Core 会检查兼容性和完整配置。此操作不会切换正在运行的后端，也不会重启设备。所选后端失败时不会自动尝试其他后端。</string>
 </resources>

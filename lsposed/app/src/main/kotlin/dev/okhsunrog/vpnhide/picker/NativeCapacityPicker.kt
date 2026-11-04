@@ -1,13 +1,12 @@
 package dev.okhsunrog.vpnhide.picker
 
 import android.content.res.Resources
-import dev.okhsunrog.vpnhide.NativeBackendId
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.toCore
-import uniffi.vpnhide_core_ffi.CoreNativeBackend
+import uniffi.vpnhide_core_ffi.CoreNativePickerDecision
 import uniffi.vpnhide_core_ffi.CoreNativePolicyUsage
-import uniffi.vpnhide_core_ffi.nativePolicyIsReduction
-import uniffi.vpnhide_core_ffi.previewNativePolicy
+import uniffi.vpnhide_core_ffi.previewNativePickerChange
+import uniffi.vpnhide_core_ffi.previewNativePickerSave
 
 internal fun nativeSelectionChangeError(
     current: List<AppEntry>,
@@ -18,11 +17,20 @@ internal fun nativeSelectionChangeError(
 ): String? {
     val before = nativePickerConfig(current, targets, selfPkg)
     val after = nativePickerConfig(candidate, targets, selfPkg)
-    if (nativePolicyIsReduction(before.toCore(), after.toCore(), targets.selectedNativeBackendId?.toPolicyBackend())) return null
-    val currentUsage = nativeCapacityUsage(current, targets, selfPkg)
-    val candidateUsage = nativeCapacityUsage(candidate, targets, selfPkg)
-    if (currentUsage == null || candidateUsage == null) return resources.getString(R.string.native_capacity_unavailable)
-    return nativeCapacityIncreaseViolation(currentUsage, candidateUsage)?.message(resources)
+    return when (
+        val decision =
+            previewNativePickerChange(
+                before.toCore(),
+                after.toCore(),
+                targets.capacityBackends,
+                targets.packageUids.mapValues { (_, uids) -> uids.map(Int::toUInt) },
+                targets.nativeInventoryComplete,
+            )
+    ) {
+        CoreNativePickerDecision.Allowed -> null
+        CoreNativePickerDecision.InventoryUnavailable -> resources.getString(R.string.native_capacity_unavailable)
+        is CoreNativePickerDecision.Capacity -> decision.usage.message(resources)
+    }
 }
 
 internal fun nativeSelectionSaveError(
@@ -30,20 +38,25 @@ internal fun nativeSelectionSaveError(
     targets: TargetsSnapshot,
     selfPkg: String,
     resources: Resources,
-): String? = nativeCapacityUsage(entries, targets, selfPkg)?.takeUnless(::nativePolicyFits)?.message(resources)
+): String? =
+    when (val decision = nativePickerSaveDecision(entries, targets, selfPkg)) {
+        is CoreNativePickerDecision.Capacity -> decision.usage.message(resources)
 
-/** UI interaction rule only; all UID, hook, profile and byte accounting comes from Rust. */
-internal fun nativeCapacityIncreaseViolation(
-    current: CoreNativePolicyUsage,
-    candidate: CoreNativePolicyUsage,
-): CoreNativePolicyUsage? =
-    candidate.takeIf {
-        (it.targetUids > it.targetCapacity && it.targetUids > current.targetUids) ||
-            (it.wireBytes > it.wireCapacity && it.wireBytes > current.wireBytes)
+        // Save still goes through fresh Core admission when accounting is unavailable.
+        CoreNativePickerDecision.Allowed, CoreNativePickerDecision.InventoryUnavailable -> null
     }
 
-internal fun nativePolicyFits(usage: CoreNativePolicyUsage): Boolean =
-    usage.targetUids <= usage.targetCapacity && usage.wireBytes <= usage.wireCapacity
+internal fun nativePickerSaveDecision(
+    entries: Collection<AppEntry>,
+    targets: TargetsSnapshot,
+    selfPkg: String,
+): CoreNativePickerDecision =
+    previewNativePickerSave(
+        nativePickerConfig(entries, targets, selfPkg).toCore(),
+        targets.capacityBackends,
+        targets.packageUids.mapValues { (_, uids) -> uids.map(Int::toUInt) },
+        targets.nativeInventoryComplete,
+    )
 
 internal fun AppEntry.toRoleSelection(): AppRoleSelection =
     AppRoleSelection(
@@ -57,25 +70,6 @@ internal fun AppEntry.toRoleSelection(): AppRoleSelection =
         ports = ports,
         portPolicy = portPolicy,
     )
-
-internal fun nativeCapacityUsage(
-    entries: Collection<AppEntry>,
-    targets: TargetsSnapshot,
-    selfPkg: String,
-): CoreNativePolicyUsage? {
-    if (!targets.nativeInventoryComplete) return null
-    val backend = targets.selectedNativeBackendId?.toPolicyBackend() ?: return null
-    val config = nativePickerConfig(entries, targets, selfPkg)
-    return previewNativePolicy(config.toCore(), backend, targets.packageUids.mapValues { (_, uids) -> uids.map(Int::toUInt) })
-}
-
-private fun NativeBackendId.toPolicyBackend(): CoreNativeBackend =
-    when (this) {
-        NativeBackendId.Kmod -> CoreNativeBackend.KMOD
-        NativeBackendId.Builtin -> CoreNativeBackend.BUILTIN
-        NativeBackendId.Kpm -> CoreNativeBackend.KPM
-        NativeBackendId.Zygisk -> CoreNativeBackend.ZYGISK
-    }
 
 private fun nativePickerConfig(
     entries: Collection<AppEntry>,

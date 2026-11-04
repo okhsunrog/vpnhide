@@ -207,6 +207,8 @@ Executable acceptance includes:
 - Both compiled ARM ABIs, actual frame/ELF bounds, appropriate host/QEMU behavior,
   and separately listed device/provider/kernel/signing acceptance.
 
-Main publication remains withheld until the maintainer separately confirms it.
+The maintainer confirmed publication on 4 November 2026: verified code may be
+committed and pushed to main. This does not authorize releases, provider/device
+operations, boot writes or automatic reboot.
 No test count, helper or updated RFC is a claim that the production vertical or
 physical-device acceptance is complete.

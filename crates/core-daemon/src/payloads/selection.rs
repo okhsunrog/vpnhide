@@ -132,6 +132,22 @@ pub fn assess_projected(
     requirements: &[(NativeBackend, Policy)],
     support: &[(NativeBackend, Support)],
 ) -> std::io::Result<Assessment> {
+    assess_choice(
+        manifest,
+        device,
+        requirements,
+        support,
+        vpnhide_core_rpc::BackendChoice::Auto,
+    )
+}
+
+pub fn assess_choice(
+    manifest: &Manifest,
+    device: &Capabilities,
+    requirements: &[(NativeBackend, Policy)],
+    support: &[(NativeBackend, Support)],
+    choice: vpnhide_core_rpc::BackendChoice,
+) -> std::io::Result<Assessment> {
     manifest.validate()?;
     let kmi = super::kmi::resolve_with_modules(
         manifest,
@@ -216,8 +232,13 @@ pub fn assess_projected(
             // Auto admits one kernel candidate. Eligibility of KPM/Zygisk is
             // still reported for explicit choices, never an implicit fallback.
             .find(|c| {
-                matches!(c.backend, NativeBackend::Builtin | NativeBackend::Kmod)
-                    && c.eligibility.is_ok()
+                let requested = match choice {
+                    vpnhide_core_rpc::BackendChoice::Auto => {
+                        matches!(c.backend, NativeBackend::Builtin | NativeBackend::Kmod)
+                    }
+                    vpnhide_core_rpc::BackendChoice::Fixed { backend } => c.backend == backend,
+                };
+                requested && c.eligibility.is_ok()
             })
             .map(|c| Decision::Select(c.backend))
             .unwrap_or(Decision::NoEligibleCandidate),
