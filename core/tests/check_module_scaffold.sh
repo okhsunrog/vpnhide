@@ -24,13 +24,15 @@ exec "${0%/*}/vpnhide-core" service'
   bad "core/module/service.sh must be exactly the exec stub:
 $expected_service"
 
-# 2. customize.sh only keeps this device's binary ($ARCH from the manager) executable.
+# 2. customize.sh places the manager-selected binary, then enters the Rust handoff.
+#    Continuity validation/publication and failure policy live in Rust.
 expected_customize='#!/system/bin/sh
 mv -f "$MODPATH/bin/$ARCH/vpnhide-core" "$MODPATH/vpnhide-core"
 rm -rf "${MODPATH:?}/bin"
-set_perm "$MODPATH/vpnhide-core" 0 0 0755'
+set_perm "$MODPATH/vpnhide-core" 0 0 0755
+"$MODPATH/vpnhide-core" install-handoff "$MODPATH" || abort "Core continuity preparation failed"'
 [ "$(cat "$MOD/customize.sh")" = "$expected_customize" ] ||
-  bad "core/module/customize.sh must be exactly the binary-placement hook:
+  bad "core/module/customize.sh must be exactly the binary-placement and Rust-entry hook:
 $expected_customize"
 
 # 3. No other script in any module tree: backend modules ship artifacts only (default

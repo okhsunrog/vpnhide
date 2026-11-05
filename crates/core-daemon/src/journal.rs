@@ -164,6 +164,13 @@ pub struct PendingPersist {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandIntent {
+    AdoptInstallHandoff {
+        intent_sha256: String,
+    },
+    AcknowledgeBackendOffer {
+        source_commit: String,
+        keep: bool,
+    },
     StageBackendChoice {
         request: vpnhide_core_rpc::BackendChoiceRequest,
     },
@@ -409,6 +416,21 @@ pub struct NativeQuarantine {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Journal {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub projection_history: Vec<crate::maintenance::zygisk_projection::history::RetiredProjection>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resolved_bootstraps: Vec<crate::server::projection_boot::resolution::BootstrapResolution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bootstrap_resolution:
+        Option<crate::server::projection_boot::resolution::BootstrapResolution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub withdrawal_followup:
+        Option<crate::maintenance::zygisk_projection::withdrawal::followup::WithdrawalFollowup>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_offer: Option<vpnhide_core_rpc::BackendMigrationOffer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zygisk_withdrawal:
+        Option<crate::maintenance::zygisk_projection::withdrawal::work::WithdrawalWork>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zygisk_bootstrap: Option<projection_bootstrap::ProjectionBootstrap>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -480,6 +502,12 @@ pub struct Journal {
 impl Default for Journal {
     fn default() -> Self {
         Journal {
+            projection_history: vec![],
+            resolved_bootstraps: vec![],
+            bootstrap_resolution: None,
+            withdrawal_followup: None,
+            backend_offer: None,
+            zygisk_withdrawal: None,
             zygisk_bootstrap: None,
             zygisk_projection: None,
             backend_choice: None,
@@ -515,6 +543,80 @@ impl Default for Journal {
 }
 
 impl Journal {
+    pub(crate) fn withdrawal_source<'a>(
+        &'a self,
+        work: &'a crate::maintenance::zygisk_projection::withdrawal::work::WithdrawalWork,
+    ) -> &'a crate::maintenance::image::ImageFence {
+        if let Some(replacement) = &self.replacement
+            && replacement
+                .withdrawn_source
+                .as_ref()
+                .is_some_and(|source| source.operation == work.operation)
+        {
+            if replacement.status.stage == vpnhide_core_rpc::CoreMaintenanceStage::Verified {
+                return replacement.staged.as_ref().unwrap_or(&work.source);
+            }
+            return &replacement.before;
+        }
+        &work.source
+    }
+    pub(crate) fn projection_identity(
+        &self,
+    ) -> Option<(
+        &vpnhide_artifact_model::zygisk_projection::Descriptor,
+        &crate::maintenance::image::ImageFence,
+        &str,
+    )> {
+        if let Some(source) = self
+            .replacement
+            .as_ref()
+            .and_then(|replacement| replacement.withdrawn_source.as_ref())
+        {
+            return Some((&source.descriptor.published, &source.origin_source, ""));
+        }
+        if let Some(replacement) = &self.replacement
+            && let Some(update) = &replacement.projection
+        {
+            if replacement.status.stage == vpnhide_core_rpc::CoreMaintenanceStage::Verified {
+                return Some((
+                    &update.descriptor,
+                    replacement.staged.as_ref()?,
+                    &replacement.boot_id,
+                ));
+            }
+            return Some((&update.previous, &replacement.before, &replacement.boot_id));
+        }
+        self.zygisk_projection
+            .as_ref()
+            .filter(|work| work.outcome == PhaseOutcome::Confirmed)
+            .map(|work| (&work.descriptor, &work.source, work.boot_id.as_str()))
+    }
+    pub(crate) fn owns_projection_descriptor(
+        &self,
+        descriptor: &vpnhide_artifact_model::zygisk_projection::Descriptor,
+    ) -> bool {
+        self.projection_history
+            .iter()
+            .any(|cycle| cycle.owns(descriptor))
+            || self
+                .replacement
+                .as_ref()
+                .and_then(|replacement| replacement.withdrawn_source.as_ref())
+                .is_some_and(|source| source.history.contains(descriptor))
+            || self.zygisk_projection.as_ref().is_some_and(|work| {
+                work.outcome == PhaseOutcome::Confirmed && &work.descriptor == descriptor
+            })
+            || self
+                .replacement
+                .as_ref()
+                .and_then(|work| work.projection.as_ref().map(|update| (work, update)))
+                .is_some_and(|(work, update)| {
+                    update.history.contains(descriptor)
+                        || (work.status.stage == vpnhide_core_rpc::CoreMaintenanceStage::Verified
+                            && &update.descriptor == descriptor)
+                })
+    }
+
     pub(crate) fn record_selection_evidence(
         &mut self,
         evidence: vpnhide_core_rpc::NativeSelectionEvidence,
@@ -570,6 +672,16 @@ impl Journal {
         self.zygisk_authority
             .iter()
             .chain(self.prior_zygisk_authority.iter())
+            .chain(
+                self.resolved_bootstraps
+                    .iter()
+                    .map(|r| &r.observed.authority),
+            )
+            .chain(
+                self.resolved_bootstraps
+                    .iter()
+                    .filter_map(|r| r.observed.previous_authority.as_ref()),
+            )
             .chain(self.zygisk_bootstrap.iter().map(|work| &work.authority))
             .chain(
                 self.zygisk_bootstrap
@@ -579,7 +691,10 @@ impl Journal {
     }
     /// True when any stored operation still carries unresolved uncertainty.
     pub fn has_unknown(&self) -> bool {
-        self.bootstrap_uncertain()
+        self.zygisk_withdrawal
+            .as_ref()
+            .is_some_and(|work| work.blocks_runtime())
+            || self.bootstrap_uncertain()
             || self.native_lifecycle_uncertain()
             || self
                 .zygisk_projection
@@ -598,9 +713,19 @@ impl Journal {
             .is_some_and(NativeStartup::uncertain)
     }
 
+    #[cfg(test)]
     pub(crate) fn check_native_safety(
         &self,
         intent: &crate::native_boot::prepared::TransitionIntent,
+    ) -> Result<(), String> {
+        self.check_native_safety_with_withdrawal(intent, None)
+    }
+    pub(crate) fn check_native_safety_with_withdrawal(
+        &self,
+        intent: &crate::native_boot::prepared::TransitionIntent,
+        proof: Option<
+            &crate::maintenance::zygisk_projection::withdrawal::observation::WithdrawalBootProof,
+        >,
     ) -> Result<(), String> {
         use crate::native_boot::prepared::TransitionAction;
         if !intent.valid_selection_evidence() {
@@ -620,6 +745,18 @@ impl Journal {
                 })
         {
             return Err("retained current-boot KMI conflict requires fresh corroborated evidence before loading".into());
+        }
+        if self.zygisk_withdrawal.as_ref().is_some_and(|work| {
+            work.retained()
+                && proof.is_none_or(|proof| {
+                    !proof.valid_for(work)
+                        || !proof.source.same_content(self.withdrawal_source(work))
+                        || proof.boot_id != intent.boot_id
+                        || self.zygisk_exposed_in(&intent.boot_id)
+                })
+        }) && matches!(intent.action, TransitionAction::Load(backend) | TransitionAction::Adopt(backend) if backend != NativeBackend::Zygisk)
+        {
+            return Err("managed withdrawal requires new-boot negative verification before kernel admission".into());
         }
         if self.bootstrap_uncertain() {
             return Err("managed bootstrap publication is uncertain".into());
@@ -652,13 +789,24 @@ impl Journal {
         }
         Ok(())
     }
+    #[cfg(test)]
     pub fn check_native_attempt(
         &self,
         intent: &crate::native_boot::prepared::TransitionIntent,
         explicit: bool,
     ) -> Result<(), String> {
+        self.check_native_attempt_with_withdrawal(intent, explicit, None)
+    }
+    pub(crate) fn check_native_attempt_with_withdrawal(
+        &self,
+        intent: &crate::native_boot::prepared::TransitionIntent,
+        explicit: bool,
+        proof: Option<
+            &crate::maintenance::zygisk_projection::withdrawal::observation::WithdrawalBootProof,
+        >,
+    ) -> Result<(), String> {
         use crate::native_boot::prepared::TransitionAction;
-        self.check_native_safety(intent)?;
+        self.check_native_safety_with_withdrawal(intent, proof)?;
         if let TransitionAction::Load(backend) = intent.action {
             if intent.payload.is_none() {
                 return Ok(());
@@ -814,6 +962,13 @@ impl Journal {
         {
             held.push(ConfigPhase::Maintenance);
         }
+        if self
+            .zygisk_withdrawal
+            .as_ref()
+            .is_some_and(|work| work.blocks_runtime())
+        {
+            held.push(ConfigPhase::Maintenance);
+        }
         held.sort_by_key(|phase| *phase as u8);
         held.dedup();
         held
@@ -835,7 +990,17 @@ impl Journal {
     pub fn prune(&mut self) {
         let retain = self.retain_settled;
         let replacement_op = self.replacement.as_ref().map(|w| w.status.operation);
+        let offer_op = self
+            .backend_offer
+            .as_ref()
+            .and_then(|offer| offer.operation);
         let projection_op = self.zygisk_projection.as_ref().map(|w| w.operation);
+        let bootstrap_resolution_op = self.bootstrap_resolution.as_ref().map(|r| r.operation);
+        let withdrawal_op = self.zygisk_withdrawal.as_ref().map(|w| w.operation);
+        let followup_op = self
+            .withdrawal_followup
+            .as_ref()
+            .map(|w| w.choice.operation);
         let revocation_op = self
             .zygisk_revocation
             .as_ref()
@@ -848,7 +1013,19 @@ impl Journal {
             .filter(|(_, e)| {
                 e.record.settled.is_some()
                     && Some(e.record.op) != replacement_op
+                    && Some(e.record.op) != offer_op
                     && Some(e.record.op) != projection_op
+                    && !self
+                        .projection_history
+                        .iter()
+                        .any(|cycle| cycle.retains(e.record.op))
+                    && Some(e.record.op) != bootstrap_resolution_op
+                    && !self
+                        .resolved_bootstraps
+                        .iter()
+                        .any(|r| r.operation == e.record.op)
+                    && Some(e.record.op) != withdrawal_op
+                    && Some(e.record.op) != followup_op
                     && Some(e.record.op) != self.debug_restore_op
                     && !(Some(e.record.op) == revocation_op && e.is_revocation_only_repair())
             })
@@ -896,6 +1073,33 @@ impl Journal {
     /// Effects are never re-dispatched here; [`crate::recovery`] may resolve Unknown
     /// from durable evidence afterward.
     pub fn fence_unresolved(&mut self) {
+        if let Some(work) = self.zygisk_withdrawal.as_mut() {
+            work.fence_restart();
+            if work.outcome == PhaseOutcome::FailedKnown
+                && let Some(entry) = self
+                    .operations
+                    .iter_mut()
+                    .find(|e| e.record.op == work.operation)
+                && !entry.finalized_unknown
+                && entry.record.settled.is_none()
+            {
+                entry.record.phases[0].outcome = PhaseOutcome::FailedKnown;
+                entry.record.settled = Some(PhaseOutcome::FailedKnown);
+            }
+        }
+        if self
+            .bootstrap_resolution
+            .as_ref()
+            .is_some_and(|resolution| {
+                resolution.withdrawal.is_some()
+                    && self.zygisk_withdrawal.as_ref().is_some_and(|work| {
+                        work.operation == resolution.operation
+                            && work.outcome == PhaseOutcome::FailedKnown
+                    })
+            })
+        {
+            self.bootstrap_resolution = None;
+        }
         if let Some(work) = self.zygisk_bootstrap.as_mut() {
             work.fence_restart();
         }
@@ -915,6 +1119,7 @@ impl Journal {
                 entry.record.settled = Some(PhaseOutcome::FailedKnown);
             }
         }
+        crate::maintenance::zygisk_projection::history::restore_failed_reentry(self);
         if let Some(work) = self.replacement.as_mut() {
             work.fence_restart();
         }
@@ -991,6 +1196,37 @@ pub fn read(path: &Path) -> io::Result<Journal> {
             ),
         ));
     }
+    if !crate::maintenance::zygisk_projection::history::valid(&journal) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid retired projection history",
+        ));
+    }
+    if journal.resolved_bootstraps.len() > 32
+        || journal
+            .resolved_bootstraps
+            .iter()
+            .any(|r| !r.valid_record(&journal))
+        || journal
+            .resolved_bootstraps
+            .windows(2)
+            .any(|pair| pair[0].operation.0 >= pair[1].operation.0)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid bootstrap resolution history",
+        ));
+    }
+    if journal
+        .bootstrap_resolution
+        .as_ref()
+        .is_some_and(|r| !r.valid(&journal))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid explicit bootstrap resolution",
+        ));
+    }
     if journal
         .zygisk_bootstrap
         .as_ref()
@@ -1001,10 +1237,24 @@ pub fn read(path: &Path) -> io::Result<Journal> {
             "invalid managed bootstrap record",
         ));
     }
+    if !crate::maintenance::zygisk_projection::withdrawal::followup::valid_optional(&journal)
+        || !crate::maintenance::zygisk_projection::withdrawal::work::validate_journal(&journal)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid managed withdrawal journal record",
+        ));
+    }
     if !crate::maintenance::zygisk_projection::work::validate_journal(&journal) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "invalid managed projection journal record",
+        ));
+    }
+    if !crate::server::backend_choice::offer::valid_offer(&journal) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid retained backend migration offer",
         ));
     }
     if !backend_choice::validate_entries(&journal)
@@ -1063,24 +1313,13 @@ pub fn read(path: &Path) -> io::Result<Journal> {
             "selection evidence is not supported by the recorded journal schema",
         ));
     }
-    if let Some(work) = &journal.replacement {
-        let valid_entry = journal.get(work.status.operation).is_some_and(|entry| {
-            entry.command
-                == Some(CommandIntent::StageCoreReplacement {
-                    request_sha256: work.request_hash(),
-                })
-                && entry.record.phases.len() == 1
-                && entry.record.phases[0].phase == ConfigPhase::Maintenance
-                && entry.candidate.is_none()
-                && entry.native_intent.is_none()
-                && entry.maintenance.is_none()
-        });
-        if journal.version < 13 || !work.valid(journal.issued_through) || !valid_entry {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "invalid Core replacement identity",
-            ));
-        }
+    if let Some(work) = &journal.replacement
+        && !crate::maintenance::replacement::valid_journal(&journal, work)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid Core replacement identity",
+        ));
     }
     if journal.version < 18
         && journal
@@ -1129,12 +1368,7 @@ pub fn read(path: &Path) -> io::Result<Journal> {
                 .zygisk_recipient
                 .as_ref()
         })
-        .any(|recipient| {
-            journal.zygisk_projection.as_ref().is_none_or(|work| {
-                work.outcome != PhaseOutcome::Confirmed
-                    || work.descriptor != recipient.image.descriptor
-            })
-        });
+        .any(|recipient| !journal.owns_projection_descriptor(&recipient.image.descriptor));
     let invalid_startup = journal
         .native_startup
         .iter()

@@ -69,6 +69,7 @@ class CoreStateBindingContractTest {
         CorePublication(
             backendChoice =
                 uniffi.vpnhide_core_ffi.CoreBackendChoiceStatus(
+                    migrationOffer = null,
                     revision = 1uL,
                     operation = 8uL,
                     desired = uniffi.vpnhide_core_ffi.CoreBackendChoice.Fixed(CoreNativeBackend.KPM),

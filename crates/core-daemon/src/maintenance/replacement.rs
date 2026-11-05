@@ -62,6 +62,10 @@ impl ReplacementPaths {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplacementWork {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub withdrawn_source: Option<super::zygisk_projection::withdrawal::source::WithdrawnSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projection: Option<super::zygisk_projection::update::ProjectionUpdate>,
     pub request: CoreReplacementRequest,
     pub status: CoreMaintenanceStatus,
     pub boot_id: String,
@@ -85,7 +89,15 @@ impl ReplacementWork {
                     .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
         };
         let stage = self.status.stage;
-        self.status.operation.0 > 0
+        self.withdrawn_source
+            .as_ref()
+            .is_none_or(|source| source.valid(self))
+            && !(self.withdrawn_source.is_some() && self.projection.is_some())
+            && self
+                .projection
+                .as_ref()
+                .is_none_or(|projection| projection.valid(self))
+            && self.status.operation.0 > 0
             && self.status.operation.0 <= issued
             && self.request.descriptor.len() <= vpnhide_package_trust::MAX_ENVELOPE_BYTES
             && !self.request.descriptor.is_empty()
@@ -141,7 +153,32 @@ impl ReplacementWork {
         }
     }
 }
+/// One validator serves active and archived replacement identities.
+pub(crate) fn valid_journal(journal: &crate::journal::Journal, work: &ReplacementWork) -> bool {
+    journal.version >= 13
+        && work.valid(journal.issued_through)
+        && journal.get(work.status.operation).is_some_and(|entry| {
+            entry.command
+                == Some(crate::journal::CommandIntent::StageCoreReplacement {
+                    request_sha256: work.request_hash(),
+                })
+                && entry.record.phases.len() == 1
+                && entry.record.phases[0].phase == vpnhide_core_rpc::ConfigPhase::Maintenance
+                && entry.candidate.is_none()
+                && entry.native_intent.is_none()
+                && entry.maintenance.is_none()
+        })
+        && work
+            .projection
+            .as_ref()
+            .is_none_or(|projection| journal.version >= 20 && projection.linked(journal))
+        && work
+            .withdrawn_source
+            .as_ref()
+            .is_none_or(|source| journal.version >= 20 && source.linked(journal))
+}
 pub struct PreparedReplacement {
+    pub projection: Option<super::zygisk_projection::update::PreparedProjectionUpdate>,
     pub(super) _permit: PreparationPermit,
     owner_uid: u32,
     running: File,
@@ -159,6 +196,7 @@ impl PreparedReplacement {
         operation: OperationId,
         caller: Option<u32>,
         permit: PreparationPermit,
+        journal: &crate::journal::Journal,
     ) -> Result<Self, String> {
         let expected_uid = std::fs::metadata(&paths.app)
             .map_err(|e| e.to_string())?
@@ -193,7 +231,46 @@ impl PreparedReplacement {
             .map_err(|e| e.to_string())?;
         require_absent(&paths.staged()).map_err(|e| e.to_string())?;
         let manager = Manager::discover(&paths.root).map_err(|e| e.to_string())?;
+        let withdrawn_source = if journal
+            .zygisk_withdrawal
+            .as_ref()
+            .is_some_and(|work| work.retained())
+        {
+            Some(
+                super::zygisk_projection::withdrawal::source::WithdrawnSource::capture(
+                    &paths, journal, &before,
+                )
+                .map_err(|e| e.to_string())?,
+            )
+        } else {
+            None
+        };
+        let projection = if withdrawn_source.is_none()
+            && journal
+                .zygisk_projection
+                .as_ref()
+                .is_some_and(|work| work.outcome == vpnhide_core_rpc::PhaseOutcome::Confirmed)
+        {
+            Some(
+                super::zygisk_projection::update::PreparedProjectionUpdate::prepare(
+                    super::zygisk_projection::ProjectionPaths {
+                        root: paths.root.clone(),
+                        persistent: paths.persistent.clone(),
+                    },
+                    operation,
+                    journal,
+                    &package,
+                )
+                .map_err(|e| e.to_string())?,
+            )
+        } else {
+            None
+        };
         let work = ReplacementWork {
+            withdrawn_source,
+            projection: projection
+                .as_ref()
+                .map(|projection| projection.work.clone()),
             status: CoreMaintenanceStatus {
                 operation,
                 target_commit: request.expected_commit.clone(),
@@ -209,7 +286,20 @@ impl PreparedReplacement {
             retired: false,
             dispatch_intent: false,
         };
-        Ok(Self {
+        if !work.valid(operation.0)
+            || work
+                .projection
+                .as_ref()
+                .is_some_and(|projection| !projection.linked(journal))
+            || work
+                .withdrawn_source
+                .as_ref()
+                .is_some_and(|source| !source.linked(journal))
+        {
+            return Err("combined replacement identity or history budget is invalid".into());
+        }
+        let prepared = Self {
+            projection,
             _permit: permit,
             owner_uid: 0,
             running,
@@ -218,9 +308,34 @@ impl PreparedReplacement {
             floor,
             manager,
             work,
-        })
+        };
+        prepared
+            .require_fresh()
+            .map_err(|error| error.to_string())?;
+        Ok(prepared)
     }
     pub fn require_fresh(&self) -> io::Result<()> {
+        // Legacy injection cannot disappear as an incidental Core replacement.
+        // Its isolated continuity/adoption path must be completed first.
+        if self
+            .work
+            .before
+            .files
+            .keys()
+            .any(|name| name.starts_with("zygisk/"))
+            || self.work.legacy.modules.iter().any(|module| {
+                std::path::Path::new(&module.relative_path)
+                    .file_name()
+                    .is_some_and(|name| name == "vpnhide_zygisk")
+            })
+        {
+            return Err(io::Error::other(
+                "legacy_zygisk_continuity_preparation_required",
+            ));
+        }
+        if let Some(projection) = &self.projection {
+            projection.require_fresh()?;
+        }
         if self.paths.boot()? != self.work.boot_id {
             return Err(io::Error::other("maintenance boot changed"));
         }
@@ -230,6 +345,12 @@ impl PreparedReplacement {
         require_absent(&self.paths.staged())
     }
     pub(crate) fn live_unchanged(&self) -> io::Result<()> {
+        if let Some(source) = &self.work.withdrawn_source {
+            source.require_unchanged_owned(&self.paths.root, self.owner_uid)?;
+        }
+        if let Some(projection) = &self.projection {
+            projection.require_active()?;
+        }
         self.work
             .before
             .require_unchanged_owned(&self.paths.active(), self.owner_uid)?;

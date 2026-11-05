@@ -302,6 +302,7 @@ fn env(root: &Path) -> NativeEnv {
         payload_override: None,
         bundle_identity: None,
         backend_choice: vpnhide_core_rpc::BackendChoice::Auto,
+        withdrawal: None,
         loader: None,
     }
 }
@@ -722,6 +723,7 @@ fn restored_kpm_auth_loss_preserves_credential_recovery_without_selection() {
         payload_override: None,
         bundle_identity: None,
         backend_choice: vpnhide_core_rpc::BackendChoice::Auto,
+        withdrawal: None,
         loader: None,
     };
     let boot = NativeBoot::blocked(env, 1, "fixture".into()).reconcile_restored_facts(

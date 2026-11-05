@@ -221,6 +221,19 @@ impl ImageFile {
     }
 }
 impl ImageFence {
+    pub(crate) fn valid_source(&self, manifest_file_sha256: &str) -> bool {
+        self.root.1 > 0
+            && self.files.len() <= 32
+            && self.files.contains_key("vpnhide-core")
+            && self
+                .files
+                .get("payloads/manifest.json")
+                .is_some_and(|file| file.identity.sha256 == manifest_file_sha256)
+            && self
+                .files
+                .values()
+                .all(|file| file.valid(crate::payloads::MAX_PAYLOAD_BYTES))
+    }
     pub(crate) fn verified_layout(&self) -> bool {
         self.verified_layout
     }
@@ -288,7 +301,7 @@ impl ImageFence {
     pub fn require_running(&self, running: &File) -> io::Result<()> {
         self.require_running_owned(running, 0)
     }
-    pub(super) fn require_running_owned(&self, running: &File, uid: u32) -> io::Result<()> {
+    pub(crate) fn require_running_owned(&self, running: &File, uid: u32) -> io::Result<()> {
         let expected = self.files.get("vpnhide-core").ok_or_else(invalid)?;
         let actual = read_file(
             running,
@@ -309,6 +322,13 @@ impl ImageFence {
     ) -> io::Result<Self> {
         Self::inspect_layout(root, descriptor, abi, uid, descriptor.is_some())
     }
+    /// Capture through the same verifier while retaining every inspected inode.
+    pub(crate) fn lease_owned(root: &Path, uid: u32) -> io::Result<(Self, Vec<File>)> {
+        let mut leases = Vec::new();
+        let image =
+            Self::inspect_layout_keep(root, None, Abi::Arm64, uid, false, Some(&mut leases))?;
+        Ok((image, leases))
+    }
     fn inspect_layout(
         root: &Path,
         descriptor: Option<&VerifiedDescriptor>,
@@ -316,11 +336,24 @@ impl ImageFence {
         uid: u32,
         verified_layout: bool,
     ) -> io::Result<Self> {
+        Self::inspect_layout_keep(root, descriptor, abi, uid, verified_layout, None)
+    }
+    fn inspect_layout_keep(
+        root: &Path,
+        descriptor: Option<&VerifiedDescriptor>,
+        abi: Abi,
+        uid: u32,
+        verified_layout: bool,
+        mut leases: Option<&mut Vec<File>>,
+    ) -> io::Result<Self> {
         let deadline = Instant::now() + IMAGE_BUDGET;
         let dir = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
             .open(root)?;
+        if let Some(leases) = &mut leases {
+            leases.push(dir.try_clone()?);
+        }
         let metadata = dir.metadata()?;
         if metadata.uid() != uid || metadata.mode() & 0o022 != 0 {
             return Err(invalid());
@@ -394,6 +427,9 @@ impl ImageFence {
             }
             if path == "vpnhide-core" && actual.mode & 0o111 == 0 {
                 return Err(invalid());
+            }
+            if let Some(leases) = &mut leases {
+                leases.push(file);
             }
             // module.prop is checked for replacement completeness, but normal
             // manager staging mutates its live copy before swapping any code.

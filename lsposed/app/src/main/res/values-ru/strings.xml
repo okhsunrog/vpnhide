@@ -614,4 +614,10 @@
     <string name="backend_choice_pending">Ожидает перезагрузки устройства</string>
     <string name="backend_choice_unverified">Не подтверждён</string>
     <string name="backend_choice_explanation">Выберите бэкенд для следующей загрузки устройства. Core проверит совместимость и все настроенные правила. Работающий бэкенд не изменится, устройство не перезагрузится. При отказе выбранного бэкенда другой не запускается автоматически.</string>
+    <string name="backend_choice_zygisk_warning_title">Использовать Zygisk?</string>
+    <string name="backend_choice_zygisk_warning">Zygisk внедряет код в процессы приложений и может обнаруживаться, в том числе играми и банковскими приложениями. Будет подготовлен управляемый модуль для следующей перезагрузки. Текущие перехваты сохранятся до перезагрузки. Core не перезагружает устройство автоматически.</string>
+    <string name="backend_migration_offer_title">Доступна защита на уровне ядра</string>
+    <string name="backend_migration_offer_body">После обновления доступен совместимый backend ядра. Можно сохранить Zygisk или подготовить добровольный переход. Текущий backend продолжит работать до перезагрузки; Core не перезагружает устройство автоматически.</string>
+    <string name="backend_migration_offer_switch">Подготовить переход</string>
+    <string name="backend_migration_offer_keep">Оставить Zygisk</string>
 </resources>

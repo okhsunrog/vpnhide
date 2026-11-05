@@ -73,6 +73,8 @@ pub struct NativeEnv {
     /// Device-local desired family, supplied by the writer for a new boot.
     /// Existing same-boot durable decisions are restored independently.
     pub(crate) backend_choice: vpnhide_core_rpc::BackendChoice,
+    pub(crate) withdrawal:
+        Option<crate::maintenance::zygisk_projection::withdrawal::observation::WithdrawalBootProof>,
     pub(crate) loader: Option<std::sync::Arc<crate::zygisk_loader::LoaderRegistry>>,
 }
 
@@ -95,6 +97,7 @@ impl NativeEnv {
             payload_override: None,
             bundle_identity: None,
             backend_choice: vpnhide_core_rpc::BackendChoice::Auto,
+            withdrawal: None,
             loader: None,
         })
     }
@@ -565,6 +568,13 @@ pub fn obsolete_modules(modules_root: &Path) -> Vec<String> {
 /// Directory absence is the only negative observation. Disabled/removed trees,
 /// links and unreadable metadata cannot prove that earlier process hooks exited.
 pub(crate) fn managed_projection_may_exist(env: &NativeEnv) -> bool {
+    if env
+        .withdrawal
+        .as_ref()
+        .is_some_and(|proof| proof.recheck(env).is_ok())
+    {
+        return false;
+    }
     env.modules.as_ref().is_some_and(|modules| {
         !matches!(fs::symlink_metadata(modules.join(vpnhide_protocol::zygisk_activation::MANAGED_MODULE_ID)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound)

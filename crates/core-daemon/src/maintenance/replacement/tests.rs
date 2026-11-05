@@ -6,7 +6,7 @@ use ring::{
 use std::{collections::BTreeMap, fs, os::unix::fs::PermissionsExt};
 use vpnhide_package_trust::{DOMAIN, Envelope, PublicKey, TrustStore, VerifiedDescriptor};
 
-fn sign(d: &vpnhide_package_trust::Descriptor) -> (Vec<u8>, VerifiedDescriptor) {
+pub(crate) fn sign(d: &vpnhide_package_trust::Descriptor) -> (Vec<u8>, VerifiedDescriptor) {
     let rng = SystemRandom::new();
     let key = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng).unwrap();
     let key =
@@ -92,6 +92,8 @@ pub(crate) fn prepared(paths: ReplacementPaths, op: OperationId) -> PreparedRepl
     let package = stage.copy_verified(&verified, op.0).unwrap();
     package.verify_bundle().unwrap();
     let work = ReplacementWork {
+        withdrawn_source: None,
+        projection: None,
         request: CoreReplacementRequest {
             descriptor: envelope,
             expected_commit: d.source_commit.clone(),
@@ -113,6 +115,7 @@ pub(crate) fn prepared(paths: ReplacementPaths, op: OperationId) -> PreparedRepl
         dispatch_intent: false,
     };
     PreparedReplacement {
+        projection: None,
         _permit: PreparationPermit::acquire(Arc::new(AtomicBool::new(false))).unwrap(),
         owner_uid: uid,
         running,
@@ -239,4 +242,49 @@ fn recovered_predispatch_proof_does_not_replay_manager() {
     assert!(!p.paths.root.join("data/adb/dispatch-count").exists());
     fs::create_dir_all(p.paths.staged()).unwrap();
     assert!(p.work.same_boot(&p.paths, &p.running, p.owner_uid).is_err());
+}
+
+pub(crate) fn copy_test_package(
+    paths: &ReplacementPaths,
+    verified: &VerifiedDescriptor,
+    op: u64,
+) -> super::super::package::PreparedPackage {
+    let uid = unsafe { libc::geteuid() };
+    PackageStaging::open_owned(&paths.persistent, &paths.app, uid, uid)
+        .unwrap()
+        .copy_verified(verified, op)
+        .unwrap()
+}
+
+#[test]
+fn unhandled_legacy_zygisk_is_preserved_before_core_update_dispatch() {
+    let (root, mut prepared) = fixture();
+    let legacy = root.path().join("data/adb/modules/vpnhide_zygisk");
+    fs::create_dir_all(&legacy).unwrap();
+    fs::write(
+        legacy.join("module.prop"),
+        "id=vpnhide_zygisk\nauthor=okhsunrog\n",
+    )
+    .unwrap();
+    fs::write(
+        legacy.join("targets.txt"),
+        b"keep the existing exact policy",
+    )
+    .unwrap();
+    prepared.work.legacy =
+        LegacyInventory::capture_owned(root.path(), unsafe { libc::geteuid() }).unwrap();
+    assert!(
+        prepared
+            .require_fresh()
+            .unwrap_err()
+            .to_string()
+            .contains("legacy_zygisk_continuity_preparation_required")
+    );
+    assert_eq!(
+        fs::read(legacy.join("targets.txt")).unwrap(),
+        b"keep the existing exact policy"
+    );
+    assert!(!legacy.join("remove").exists());
+    assert!(!root.path().join("data/adb/dispatch-count").exists());
+    assert!(!prepared.paths.staged().exists());
 }

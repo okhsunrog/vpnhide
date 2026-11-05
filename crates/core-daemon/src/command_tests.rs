@@ -112,6 +112,7 @@ fn native_none(state: &CoreState, root: &std::path::Path) {
         payload_override: None,
         bundle_identity: None,
         backend_choice: vpnhide_core_rpc::BackendChoice::Auto,
+        withdrawal: None,
         loader: None,
     };
     state.install_native_boot(crate::native_boot::NativeBoot {
@@ -1137,6 +1138,7 @@ fn explicit_repair_releases_only_covered_resources_and_preserves_old_unknown_rec
         payload_override: None,
         bundle_identity: None,
         backend_choice: vpnhide_core_rpc::BackendChoice::Auto,
+        withdrawal: None,
         loader: None,
     };
     state.install_native_boot(crate::native_boot::NativeBoot {
@@ -1491,6 +1493,7 @@ fn startup_env(root: &std::path::Path) -> crate::native_boot::NativeEnv {
         payload_override: None,
         bundle_identity: None,
         backend_choice: vpnhide_core_rpc::BackendChoice::Auto,
+        withdrawal: None,
         loader: None,
     }
 }
@@ -2338,6 +2341,7 @@ fn staged_family_waits_for_device_boot_and_survives_daemon_restart() {
     let journal = Journal {
         issued_through: 1,
         backend_choice: Some(journal::backend_choice::BackendChoiceRecord {
+            inherited: false,
             revision: 1,
             operation: OperationId(1),
             requested_in_boot: "test-boot".into(),

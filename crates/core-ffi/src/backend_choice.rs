@@ -77,6 +77,7 @@ impl From<rpc::BackendChoiceStage> for CoreBackendChoiceStage {
 }
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreBackendChoiceStatus {
+    pub migration_offer: Option<CoreBackendMigrationOffer>,
     pub revision: u64,
     pub operation: Option<u64>,
     pub desired: CoreBackendChoice,
@@ -89,6 +90,7 @@ pub struct CoreBackendChoiceStatus {
 impl From<rpc::BackendChoiceStatus> for CoreBackendChoiceStatus {
     fn from(value: rpc::BackendChoiceStatus) -> Self {
         Self {
+            migration_offer: value.migration_offer.map(Into::into),
             revision: value.revision,
             operation: value.operation.map(|op| op.0),
             desired: value.desired.into(),
@@ -118,4 +120,24 @@ pub fn backend_choice_request_confirmed(
         && status.operation == Some(operation)
         && request.expected_revision.checked_add(1) == Some(status.revision)
         && status.desired == request.choice
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CoreBackendMigrationOffer {
+    pub source_commit: String,
+    pub target: CoreBackendChoice,
+    pub displayed: bool,
+    pub kept: bool,
+    pub operation: Option<u64>,
+}
+impl From<rpc::BackendMigrationOffer> for CoreBackendMigrationOffer {
+    fn from(value: rpc::BackendMigrationOffer) -> Self {
+        Self {
+            source_commit: value.source_commit,
+            target: value.target.into(),
+            displayed: value.displayed,
+            kept: value.kept,
+            operation: value.operation.map(|op| op.0),
+        }
+    }
 }

@@ -20,6 +20,11 @@ use std::{
 use vpnhide_artifact_model::zygisk_projection::{Descriptor, FILE_NAME, MAX_DESCRIPTOR_BYTES};
 use vpnhide_protocol::zygisk_activation::{MANAGED_MODULE_ID, Recipient, recipient_from_manifest};
 
+pub(crate) mod history;
+pub mod install;
+pub(crate) mod legacy;
+pub mod update;
+pub mod withdrawal;
 pub mod work;
 
 const BUDGET: Duration = Duration::from_secs(30);
@@ -68,6 +73,23 @@ fn bytes(
     }
     Ok((bytes, image))
 }
+fn seal_files(
+    persistent: &File,
+    prefix: &str,
+    files: &BTreeMap<String, Vec<u8>>,
+) -> io::Result<FrozenPayload> {
+    let parent = PathBuf::from(format!("/proc/self/fd/{}", persistent.as_raw_fd()));
+    let temporary = tempfile::Builder::new().prefix(prefix).tempdir_in(parent)?;
+    let package_path = temporary.path().join("projection.zip");
+    vpnhide_artifact_model::archive::write_archive(&package_path, files)?;
+    let package = FrozenPayload::copy_with_limit(
+        &File::open(package_path)?,
+        crate::payloads::MAX_BUNDLE_BYTES,
+    )?;
+    temporary.close()?;
+    Ok(package)
+}
+
 #[derive(Clone)]
 pub struct ProjectionPaths {
     pub root: PathBuf,
@@ -111,6 +133,39 @@ impl ProjectionPaths {
         }
         Ok(())
     }
+}
+
+fn managed_properties(root: &File, uid: u32, deadline: Instant) -> io::Result<()> {
+    let (prop, _) = bytes(
+        root,
+        "module.prop",
+        vpnhide_protocol::zygisk_activation::MAX_MODULE_PROP_BYTES as u64,
+        uid,
+        deadline,
+    )?;
+    if recipient_from_manifest(&prop) != Some(Recipient::Managed) {
+        return Err(invalid());
+    }
+    let prop = std::str::from_utf8(&prop).map_err(|_| invalid())?;
+    // Friendly manager labels are mutable. An independent update channel,
+    // installer or other property is not part of this managed projection.
+    let properties = super::manager::simple_properties(prop)?;
+    if properties.keys().any(|k| {
+        !matches!(
+            k.as_str(),
+            "id" | "name"
+                | "version"
+                | "versionCode"
+                | "author"
+                | "description"
+                | "vpnhideControl"
+                | "vpnhideActivation"
+                | "vpnhideProjection"
+        )
+    }) {
+        return Err(invalid());
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,35 +263,7 @@ impl ProjectionImage {
             Descriptor::member_name(crate::payloads::Abi::Arm32),
         ]);
         require_layout(&root, &allowed, &large_files, uid, deadline)?;
-        let (prop, _) = bytes(
-            &root,
-            "module.prop",
-            vpnhide_protocol::zygisk_activation::MAX_MODULE_PROP_BYTES as u64,
-            uid,
-            deadline,
-        )?;
-        if recipient_from_manifest(&prop) != Some(Recipient::Managed) {
-            return Err(invalid());
-        }
-        let prop = std::str::from_utf8(&prop).map_err(|_| invalid())?;
-        // Friendly manager labels are mutable. An independent update channel,
-        // installer or other property is not part of this managed projection.
-        let properties = super::manager::simple_properties(prop)?;
-        if properties.keys().any(|k| {
-            !matches!(
-                k.as_str(),
-                "id" | "name"
-                    | "version"
-                    | "versionCode"
-                    | "author"
-                    | "description"
-                    | "vpnhideControl"
-                    | "vpnhideActivation"
-                    | "vpnhideProjection"
-            )
-        }) {
-            return Err(invalid());
-        }
+        managed_properties(&root, uid, deadline)?;
         let (metadata, metadata_image) =
             bytes(&root, FILE_NAME, MAX_DESCRIPTOR_BYTES as u64, uid, deadline)?;
         let descriptor = Descriptor::parse(&metadata)?;
@@ -319,6 +346,8 @@ impl ProjectionImage {
 }
 
 pub struct PreparedProjection {
+    legacy: Option<legacy::PreparedLegacyAdoption>,
+    previous_withdrawal: Option<withdrawal::WithdrawalImage>,
     pub descriptor: Descriptor,
     pub source: ImageFence,
     pub manager: Manager,
@@ -342,8 +371,48 @@ impl PreparedProjection {
         running: File,
         uid: u32,
     ) -> io::Result<Self> {
+        Self::prepare_owned_kind(paths, operation, manager, running, uid, None)
+    }
+    pub(crate) fn prepare_after_withdrawal(
+        paths: ProjectionPaths,
+        operation: u64,
+        proof: &withdrawal::observation::WithdrawalBootProof,
+    ) -> io::Result<Self> {
+        let manager = Manager::discover(&paths.root)?;
+        let running = File::open("/proc/self/exe")?;
+        proof.recheck_owned(&running, 0)?;
+        Self::prepare_owned_kind(
+            paths,
+            operation,
+            manager,
+            running,
+            0,
+            Some(proof.image.clone()),
+        )
+    }
+    pub(crate) fn prepare_owned_kind(
+        paths: ProjectionPaths,
+        operation: u64,
+        manager: Manager,
+        running: File,
+        uid: u32,
+        previous_withdrawal: Option<withdrawal::WithdrawalImage>,
+    ) -> io::Result<Self> {
         let boot_id = paths.boot()?;
-        absent(&paths.active())?;
+        let legacy = if previous_withdrawal.is_none() {
+            legacy::PreparedLegacyAdoption::capture(&paths.root, uid)?
+        } else {
+            None
+        };
+        if let Some(image) = &previous_withdrawal {
+            if withdrawal::WithdrawalImage::inspect_owned(&paths.active(), &image.descriptor, uid)?
+                != *image
+            {
+                return Err(invalid());
+            }
+        } else {
+            absent(&paths.active())?;
+        }
         absent(&paths.staged())?;
         paths.require_source_enabled(uid)?;
         let persistent = directory(&paths.persistent)?;
@@ -381,19 +450,11 @@ impl PreparedProjection {
             libraries.next().ok_or_else(invalid)?,
             libraries.next().ok_or_else(invalid)?,
         )?;
-        let parent = PathBuf::from(format!("/proc/self/fd/{}", persistent.as_raw_fd()));
-        let temporary = tempfile::Builder::new()
-            .prefix("projection-prepare-")
-            .tempdir_in(parent)?;
-        let package_path = temporary.path().join("projection.zip");
-        vpnhide_artifact_model::archive::write_archive(&package_path, &files)?;
+        let package = seal_files(&persistent, "projection-prepare-", &files)?;
         drop(files);
-        let package = FrozenPayload::copy_with_limit(
-            &File::open(package_path)?,
-            crate::payloads::MAX_BUNDLE_BYTES,
-        )?;
-        temporary.close()?;
         let prepared = Self {
+            legacy,
+            previous_withdrawal,
             descriptor,
             source,
             manager,
@@ -407,6 +468,7 @@ impl PreparedProjection {
         Ok(prepared)
     }
     pub fn require_fresh(&self) -> io::Result<()> {
+        self.require_legacy_unchanged()?;
         if self.paths.boot()? != self.boot_id {
             return Err(invalid());
         }
@@ -415,7 +477,18 @@ impl PreparedProjection {
             .require_unchanged_owned(&self.paths.source(), self.uid)?;
         self.source.require_running_owned(&self.running, self.uid)?;
         self.manager.require_unchanged()?;
-        absent(&self.paths.active())?;
+        if let Some(image) = &self.previous_withdrawal {
+            if withdrawal::WithdrawalImage::inspect_owned(
+                &self.paths.active(),
+                &image.descriptor,
+                self.uid,
+            )? != *image
+            {
+                return Err(invalid());
+            }
+        } else {
+            absent(&self.paths.active())?;
+        }
         absent(&self.paths.staged())
     }
     /// The caller must journal dispatch intent before passing this immutable FD
@@ -424,6 +497,7 @@ impl PreparedProjection {
         self.package.file()
     }
     pub fn verify_staged(&self) -> io::Result<ProjectionStaging> {
+        self.require_legacy_unchanged()?;
         if self.paths.boot()? != self.boot_id {
             return Err(invalid());
         }
@@ -431,15 +505,31 @@ impl PreparedProjection {
         self.source
             .require_unchanged_owned(&self.paths.source(), self.uid)?;
         self.source.require_running_owned(&self.running, self.uid)?;
-        ProjectionStaging::inspect_owned(&self.paths, &self.descriptor, self.uid)
+        let staging = ProjectionStaging::inspect_owned(&self.paths, &self.descriptor, self.uid)?;
+        match (&self.previous_withdrawal, &staging.active) {
+            (Some(expected), Some(ActiveProjection::Withdrawn { image }))
+                if expected == image.as_ref() => {}
+            (None, Some(ActiveProjection::Withdrawn { .. })) | (Some(_), _) => {
+                return Err(invalid());
+            }
+            _ => {}
+        }
+        Ok(staging)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ActiveProjection {
-    Placeholder { directory: (u64, u64) },
-    Complete { image: Box<ProjectionImage> },
+    Withdrawn {
+        image: Box<withdrawal::WithdrawalImage>,
+    },
+    Placeholder {
+        directory: (u64, u64),
+    },
+    Complete {
+        image: Box<ProjectionImage>,
+    },
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -459,6 +549,11 @@ impl ProjectionStaging {
                     directory.1 > 0 && self.staged.is_some()
                 }
                 ActiveProjection::Complete { image } => image.valid_for(expected),
+                ActiveProjection::Withdrawn { image } => {
+                    self.staged.is_some()
+                        && image.valid_for(&image.descriptor)
+                        && image.descriptor.operation < expected.operation
+                }
             })
     }
     fn inspect_owned(paths: &ProjectionPaths, expected: &Descriptor, uid: u32) -> io::Result<Self> {
@@ -498,28 +593,49 @@ impl ProjectionStaging {
                         )?),
                     }),
                     Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                        require_layout(
-                            &root,
-                            &BTreeSet::from(["module.prop".into(), "update".into()]),
-                            &BTreeSet::new(),
-                            uid,
-                            Instant::now() + BUDGET,
-                        )?;
-                        let (prop, _) = bytes(
-                            &root,
-                            "module.prop",
-                            vpnhide_protocol::zygisk_activation::MAX_MODULE_PROP_BYTES as u64,
-                            uid,
-                            Instant::now() + BUDGET,
-                        )?;
-                        // A placeholder is never a ready image or authority. Its
-                        // exact generated metadata only accompanies a full stage.
-                        if prop != Descriptor::module_prop() {
-                            return Err(invalid());
+                        let withdrawal_path = paths
+                            .active()
+                            .join(vpnhide_artifact_model::zygisk_projection::WITHDRAWAL_FILE_NAME);
+                        if fs::symlink_metadata(&withdrawal_path).is_ok() {
+                            let (raw, _) = bytes(
+                                &root,
+                                vpnhide_artifact_model::zygisk_projection::WITHDRAWAL_FILE_NAME,
+                                MAX_DESCRIPTOR_BYTES as u64,
+                                uid,
+                                Instant::now() + BUDGET,
+                            )?;
+                            let descriptor = vpnhide_artifact_model::zygisk_projection::WithdrawalDescriptor::parse(&raw)?;
+                            Some(ActiveProjection::Withdrawn {
+                                image: Box::new(withdrawal::WithdrawalImage::inspect_owned(
+                                    &paths.active(),
+                                    &descriptor,
+                                    uid,
+                                )?),
+                            })
+                        } else {
+                            require_layout(
+                                &root,
+                                &BTreeSet::from(["module.prop".into(), "update".into()]),
+                                &BTreeSet::new(),
+                                uid,
+                                Instant::now() + BUDGET,
+                            )?;
+                            let (prop, _) = bytes(
+                                &root,
+                                "module.prop",
+                                vpnhide_protocol::zygisk_activation::MAX_MODULE_PROP_BYTES as u64,
+                                uid,
+                                Instant::now() + BUDGET,
+                            )?;
+                            // A placeholder is never a ready image or authority. Its
+                            // exact generated metadata only accompanies a full stage.
+                            if prop != Descriptor::module_prop() {
+                                return Err(invalid());
+                            }
+                            Some(ActiveProjection::Placeholder {
+                                directory: identity(&root)?,
+                            })
                         }
-                        Some(ActiveProjection::Placeholder {
-                            directory: identity(&root)?,
-                        })
                     }
                     Err(e) => return Err(e),
                 }

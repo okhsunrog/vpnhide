@@ -693,6 +693,7 @@ mod tests {
                 payload_override: None,
                 bundle_identity: None,
                 backend_choice: vpnhide_core_rpc::BackendChoice::Auto,
+                withdrawal: None,
                 loader: None,
             },
             1,

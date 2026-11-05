@@ -21,14 +21,20 @@ fn previous_authority(
         .retained_zygisk_authorities()
         .find(|record| {
             record.intent.zygisk_module.as_deref() == Some(path)
-                && target.check_authorization(record).is_ok()
+                && target.require_authorization(record).is_ok()
         })
         .cloned()
         .map(Some)
         .ok_or_else(|| "managed authorization has no retained exact owner".into())
 }
 fn same_intent(before: &Journal, current: &Journal) -> bool {
-    before.zygisk_projection == current.zygisk_projection
+    before.projection_history == current.projection_history
+        && before.withdrawal_followup == current.withdrawal_followup
+        && before.bootstrap_resolution == current.bootstrap_resolution
+        && before.resolved_bootstraps == current.resolved_bootstraps
+        && before.replacement == current.replacement
+        && before.zygisk_withdrawal == current.zygisk_withdrawal
+        && before.zygisk_projection == current.zygisk_projection
         && before.backend_choice == current.backend_choice
         && before.zygisk_authority == current.zygisk_authority
         && before.prior_zygisk_authority == current.prior_zygisk_authority
@@ -69,6 +75,15 @@ impl CoreState {
             .expect("config mutex")
             .journal
             .clone();
+        // A prepared withdrawal preserves the actual existing grant. Never
+        // publish a new one from the superseded choice, including on restart.
+        if before
+            .zygisk_withdrawal
+            .as_ref()
+            .is_some_and(|work| work.retained())
+        {
+            return Ok(());
+        }
         let Some(work) = before
             .zygisk_projection
             .as_ref()
@@ -83,7 +98,10 @@ impl CoreState {
         if !crate::maintenance::zygisk_projection::work::valid_boot(&boot) {
             return Err("managed bootstrap boot identity unavailable".into());
         }
-        if work.boot_id == boot {
+        if before
+            .projection_identity()
+            .is_some_and(|(_, _, requested_boot)| requested_boot == boot)
+        {
             return Ok(());
         }
         if work.outcome != PhaseOutcome::Confirmed
@@ -135,7 +153,12 @@ impl CoreState {
             // confirmed bootstrap. Never clear it just to run the worker again.
             if before.zygisk_bootstrap.as_ref().is_some_and(|work| {
                 work.authority == *previous.as_ref().expect("matched authority")
-                    && (work.outcome != PhaseOutcome::Confirmed || work.binding != binding)
+                    && ((work.outcome != PhaseOutcome::Confirmed
+                        && before
+                            .bootstrap_resolution
+                            .as_ref()
+                            .is_none_or(|r| !r.valid(&before)))
+                        || work.binding != binding)
             }) {
                 return Err("current managed bootstrap is unconfirmed or changed".into());
             }
@@ -198,6 +221,12 @@ impl CoreState {
                     .ok_or("operation ids exhausted")?,
             );
             journal.issued_through = op.0;
+            if journal.bootstrap_resolution.is_some() && journal.resolved_bootstraps.len() >= 32 {
+                return Err("bootstrap resolution history budget exhausted".into());
+            }
+            if let Some(resolution) = journal.bootstrap_resolution.take() {
+                journal.resolved_bootstraps.push(resolution);
+            }
             journal.zygisk_bootstrap = Some(ProjectionBootstrap {
                 binding,
                 authority: ZygiskAuthorityRecord {
@@ -276,7 +305,7 @@ impl CoreState {
             };
             crate::recovery::maybe_crash_for_test("projection-bootstrap-effect");
             let (outcome, reason) = match result {
-                Ok(()) if target.check_authorization(&authority).is_ok() => {
+                Ok(()) if target.require_authorization(&authority).is_ok() => {
                     (PhaseOutcome::Confirmed, None)
                 }
                 Ok(()) => (

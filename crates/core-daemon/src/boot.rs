@@ -78,6 +78,19 @@ pub fn run_boot_with_native(
 ) -> BootApplyReport {
     crate::alog::info("boot: waiting for PackageManager before native selection");
     vpnhide_activator::wait_for_package_manager();
+    if let Some((env, epoch)) = &native
+        && let Err(reason) = state.adopt_install_handoff(env, *epoch)
+    {
+        let report = BootApplyReport {
+            status: BootApplyStatus::Refused {
+                reason: reason.clone(),
+            },
+            op: None,
+            detail: format!("Install handoff unverified: {reason}"),
+        };
+        report.write_status_file(&default_boot_status_path());
+        return report;
+    }
     if let Err(error) = state.prepare_boot_self_targets() {
         let report = BootApplyReport {
             status: BootApplyStatus::Refused {
@@ -89,17 +102,31 @@ pub fn run_boot_with_native(
         report.write_status_file(&default_boot_status_path());
         return report;
     }
-    if let Some((env, epoch)) = native {
-        if let Err(reason) = state.bind_projection_for_boot(&env, epoch) {
+    if let Some((mut env, epoch)) = native {
+        if let Err(reason) = state.reconcile_maintenance_for_boot(epoch) {
             let report = BootApplyReport {
                 status: BootApplyStatus::Refused {
                     reason: reason.clone(),
                 },
                 op: None,
-                detail: format!("Managed discovery generation unverified: {reason}"),
+                detail: format!("Core replacement unverified: {reason}"),
             };
             report.write_status_file(&default_boot_status_path());
             return report;
+        }
+        match state.bind_projection_for_boot(&env, epoch) {
+            Ok(proof) => env.withdrawal = proof,
+            Err(reason) => {
+                let report = BootApplyReport {
+                    status: BootApplyStatus::Refused {
+                        reason: reason.clone(),
+                    },
+                    op: None,
+                    detail: format!("Managed discovery generation unverified: {reason}"),
+                };
+                report.write_status_file(&default_boot_status_path());
+                return report;
+            }
         }
         if let Err(reason) = state.prepare_projection_bootstrap(&env, epoch) {
             let report = BootApplyReport {
@@ -119,7 +146,11 @@ pub fn run_boot_with_native(
         }
         state.start_native_boot(env, epoch);
     }
-    run_boot_passes(state, false)
+    let report = run_boot_passes(state, false);
+    if let Err(reason) = state.prepare_backend_offer() {
+        crate::alog::info(&format!("backend migration offer deferred: {reason}"));
+    }
+    report
 }
 
 /// The full boot sequence the activators used to run, now core's: wait (unbounded) for

@@ -602,4 +602,10 @@
     <string name="backend_choice_pending">等待设备重启</string>
     <string name="backend_choice_unverified">未确认</string>
     <string name="backend_choice_explanation">选择下次设备启动使用的后端。Core 会检查兼容性和完整配置。此操作不会切换正在运行的后端，也不会重启设备。所选后端失败时不会自动尝试其他后端。</string>
+    <string name="backend_choice_zygisk_warning_title">使用 Zygisk？</string>
+    <string name="backend_choice_zygisk_warning">Zygisk 会向应用进程注入代码，可能被游戏和银行应用等检测到。此操作将为下次重启准备由 Core 管理的运行模块。现有钩子会保留到重启。Core 不会自动重启设备。</string>
+    <string name="backend_migration_offer_title">内核保护可用</string>
+    <string name="backend_migration_offer_body">此次更新后，有兼容的内核后端可用。您可以保留 Zygisk，或自愿准备切换。当前后端将继续工作，直到您重启设备；Core 不会自动重启。</string>
+    <string name="backend_migration_offer_switch">准备切换</string>
+    <string name="backend_migration_offer_keep">保留 Zygisk</string>
 </resources>

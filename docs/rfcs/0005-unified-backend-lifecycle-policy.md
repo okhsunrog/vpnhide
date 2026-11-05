@@ -212,3 +212,45 @@ committed and pushed to main. This does not authorize releases, provider/device
 operations, boot writes or automatic reboot.
 No test count, helper or updated RFC is a claim that the production vertical or
 physical-device acceptance is complete.
+
+
+## Scope clarification — 4 November 2026
+
+The maintainer excluded the proposed secondary32 system-server ABI hook and
+launcher from the current implementation/delivery task. The unexecuted proposal
+is retained only in [branch `research/secondary32-abi`](https://github.com/okhsunrog/vpnhide/tree/research/secondary32-abi), archive commit
+`08fc73b2`, for possible later review. No runtime hook, Service, provider operation
+or helper APK was introduced. This supersedes treating that launcher as part of
+the current critical path or a release blocker. It does not relax image/ABI proof:
+32-bit diagnostic coverage stays explicitly unverified where no genuine evidence
+exists, and ARMv7 compilation is still not runtime acceptance.
+
+The original request was to avoid unnecessary Zygisk loading, warn on new use,
+retain the user's existing backend across upgrades and consider first-version
+migration and later updates. The concrete process-launch hook was a newly
+investigated mechanism, not a previously accepted RFC decision.
+
+
+## Legacy install boundary and approval — 4–5 November 2026
+
+The initial code review found that a binary-placement-only install hook could not
+capture the old executing inode, recipient and grant before manager replacement.
+Post-replacement module presence and an imported preference cannot reconstruct
+working Zygisk authority. This was a code gap, not a physical-device gate.
+
+On 5 November the maintainer explicitly approved the proposed root-only installer
+handoff and additionally requested installation and verification on the connected
+phone. That authorization does not include the deferred secondary32 hook, arbitrary
+provider changes, boot-image flashing or deleting user data.
+
+The implemented bounded contract is described in
+[maintenance](../core-maintenance.md#old-core-install-continuity). Installer-side
+immutable capture/publication never writes canonical policy or the live journal;
+the next boot’s existing writer alone records inherited ownership after independent
+actual image checks. This preserves an exact confirmed previous Native generation
+without fabricating a new warning acknowledgement or granting hooks at install.
+Concurrent user edits cause safe refusal. It does not infer standalone legacy
+continuity from module presence. The ordinary updater retains its refusal for
+incidental legacy retirement; recognized separate legacy adoption is explicitly
+warned. Production callsites and focused crash/ownership fixtures are present;
+final-file qualification and actual phone/provider acceptance remain separate.

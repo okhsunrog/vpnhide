@@ -182,6 +182,11 @@ impl From<CoreEdit> for rpc::ConfigEdit {
 }
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum CoreCommand {
+    AcknowledgeBackendOffer {
+        base_revision: u64,
+        source_commit: String,
+        keep: bool,
+    },
     StageBackendChoice {
         base_revision: u64,
         request: crate::CoreBackendChoiceRequest,
@@ -236,6 +241,17 @@ impl From<CoreLegacyImportMode> for rpc::LegacyImportMode {
 impl From<CoreCommand> for rpc::CoreCommand {
     fn from(value: CoreCommand) -> Self {
         match value {
+            CoreCommand::AcknowledgeBackendOffer {
+                base_revision,
+                source_commit,
+                keep,
+            } => Self::AcknowledgeBackendOffer {
+                base: rpc::BaseRef {
+                    revision: base_revision,
+                },
+                source_commit,
+                keep,
+            },
             CoreCommand::StageBackendChoice {
                 base_revision,
                 request,

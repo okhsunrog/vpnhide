@@ -28,6 +28,22 @@ fn main() {
     if let Some(code) = vpnhide_core_daemon::probe_cli::run(&all) {
         std::process::exit(code);
     }
+    if all.first().map(String::as_str) == Some("install-handoff") {
+        let result = match all.as_slice() {
+            [_, path] => {
+                vpnhide_core_daemon::maintenance::zygisk_projection::install::run(Path::new(path))
+            }
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "install-handoff requires the manager Core stage",
+            )),
+        };
+        if let Err(error) = result {
+            eprintln!("Core installation refused: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if all.first().map(String::as_str) == Some("service") {
         // The module's boot entry (`service.sh` is one `exec` of this): production
         // profile, persist dir, detach, then serve. Before any thread exists.

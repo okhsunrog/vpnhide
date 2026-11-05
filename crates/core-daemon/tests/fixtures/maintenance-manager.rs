@@ -38,7 +38,7 @@ fn main() {
             assert_eq!(env::var("BOOTMODE").unwrap(), "true");
             assert!(env::var("VP_HIDE_FORGED").is_err());
             let input = fs::read(path).unwrap();
-            fs::write(adb.join("observed-package"), input).unwrap();
+            fs::write(adb.join("observed-package"), &input).unwrap();
             let count = fs::read_to_string(adb.join("dispatch-count"))
                 .unwrap_or_default()
                 .parse::<u32>()
@@ -60,7 +60,8 @@ fn main() {
             if mode == "delay" {
                 std::thread::sleep(std::time::Duration::from_millis(500));
             }
-            let projection = mode.starts_with("projection");
+            let projection = mode.starts_with("projection") || (mode.starts_with("combined") && input.windows(b"vpnhide-projection.json".len()).any(|part| part == b"vpnhide-projection.json"));
+            if projection && mode == "combined-missing-projection" { return; }
             let id = if projection { "vpnhide_zygisk_runtime" } else { "vpnhide_core" };
             let staged = adb.join("modules_update").join(id);
             if mode == "partial" {

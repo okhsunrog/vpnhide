@@ -7,8 +7,9 @@ See [architecture](core-architecture.md), [maintenance](core-maintenance.md) and
 
 ## Entrypoints and layout
 
-`core/module/service.sh` directly execs `vpnhide-core service`. `customize.sh` only
-places the selected ARM ABI executable and sets its mode. `sepolicy.rule` is
+`core/module/service.sh` directly execs `vpnhide-core service`. `customize.sh`
+places the selected ARM ABI executable, sets its mode and calls the root-only
+`install-handoff` Rust entry point; a refused handoff aborts installation. `sepolicy.rule` is
 manager-applied policy. Recovery installer shims are installation adapters. The
 scaffold check enforces these boundaries; backend activation is not shell logic.
 
@@ -19,7 +20,7 @@ completed Zygisk runtime. The accepted [continuity policy](rfcs/0005-unified-bac
 keeps working backends and excludes automatic cross-family fallback. The existing
 writer can stage a device-local kernel choice for the next device boot; it does
 not change the running family. Core-package update PendingRestart is a separate
-maintenance receipt. Managed Zygisk public dispatch/withdrawal remains incomplete.
+maintenance receipt. Managed Zygisk dispatch/withdrawal and authenticated combined update now use the existing writer; explicit warned legacy adoption and bounded old-Core install continuity are connected; final acceptance remains separate.
 
 ## Service startup
 
@@ -109,14 +110,15 @@ Prepared policy and same-boot restore freeze this recipient's path, directory,
 descriptor and both library identities separately from the Core catalog (journal18).
 A bounded opaque authorization file is not grant evidence during code validation;
 boot qualification still needs an exact retained grant.
-The current public chooser is not yet connected to dispatch; its caller
-must be the existing writer. Boot now separately publishes a journal19 empty-worker
+The informed public chooser now submits to the existing writer. It never
+performs publication itself. Boot now separately publishes a journal19 empty-worker
 authority for confirmed retained code, with no replay after uncertainty and no
 user-policy application claim. New managed recipients
 require current-boot journaled authority and exact consumed generation/policy proof;
 a qualified worker response to an empty bootstrap proves code consumption only,
 never hooks or behavioral coverage.
-Production still refuses new Zygisk choice and current-Zygisk retirement. Production
-projection admission, explicit bootstrap-uncertainty resolution,
-continuity/withdrawal/update and the genuine
-mixed-ABI secondary32 worker remain implementation work.
+RPC34/journal21 connect explicit publication, boot-bound withdrawal and
+authenticated Core/companion update. Current-boot code/grant stays in place;
+new kernel admission needs fresh new-boot tombstone/no-grant proof. Source-only
+updates after withdrawal preserve that inert tombstone. Explicit Repair can settle current-boot bootstrap Unknown from exact source/grant readback and an independent fresh worker; historical Unknown and exposure remain. Later non-Zygisk choices and warned reentry after withdrawal retain separate receipts and prior-cycle history. Explicit withdrawal may settle an absent or exact older bootstrap grant without reauthorization; other holds, Unknown and exposure remain. Explicit warned legacy adoption and bounded old-Core install continuity are connected; same-family reauthorization without an exact current grant remains held. The secondary32 launcher/system-server hook is deferred by the maintainer outside current delivery and is absent from this checkout; unproven legacy Zygisk replacement remains refused.
+See [the writer contract](core-architecture.md#managed-lifecycle-writer-rpc34--journal21).

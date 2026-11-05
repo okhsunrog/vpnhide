@@ -54,6 +54,11 @@ internal sealed class CoreRootEffect {
 
     data object PrepareSelfTargets : CoreRootEffect()
 
+    data class AcknowledgeBackendOffer(
+        val sourceCommit: String,
+        val keep: Boolean,
+    ) : CoreRootEffect()
+
     data class StageBackendChoice(
         val request: uniffi.vpnhide_core_ffi.CoreBackendChoiceRequest,
     ) : CoreRootEffect()

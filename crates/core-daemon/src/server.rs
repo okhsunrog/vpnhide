@@ -30,7 +30,8 @@ use crate::operation::{self, PhaseHook, PlanKind, RealPhaseRunner};
 use crate::publisher::Publisher;
 pub(crate) mod backend_choice;
 mod core_maintenance;
-mod projection_boot;
+mod install_continuity;
+pub(crate) mod projection_boot;
 mod revocation;
 mod root_probe_admission;
 mod self_target;
@@ -286,6 +287,7 @@ impl CoreState {
         op: OperationId,
         command: CoreCommand,
     ) -> Result<Accepted, SubmitError> {
+        self.prepare_bootstrap_recovery(op, &command)?;
         let maintenance = self.prepare_maintenance(op, &command)?;
         let replacement = self.prepare_replacement(op, &command, None)?;
         let backend_choice = self.prepare_backend_choice(
@@ -466,6 +468,11 @@ impl CoreState {
             CoreCommand::StageCoreReplacement { .. } => {
                 return Err(SubmitError::Rejected {
                     reason: "replacement_preparation_required".into(),
+                });
+            }
+            CoreCommand::AcknowledgeBackendOffer { .. } => {
+                return Err(SubmitError::Rejected {
+                    reason: "backend_offer_writer_required".into(),
                 });
             }
             CoreCommand::StageBackendChoice { .. } => {
@@ -1514,6 +1521,16 @@ impl CoreState {
             && record.requested_in_boot != boot_id
         {
             env.backend_choice = record.request.choice;
+        }
+        if store
+            .journal
+            .zygisk_withdrawal
+            .as_ref()
+            .is_some_and(|work| work.retained() && work.boot_id == boot_id)
+        {
+            env.backend_choice = vpnhide_core_rpc::BackendChoice::Fixed {
+                backend: vpnhide_core_rpc::NativeBackend::Zygisk,
+            };
         }
         if !vpnhide_core_rpc::recovery::permits_boot_phase(
             ConfigPhase::Native,
@@ -2799,6 +2816,46 @@ impl PhaseHook for JournalPhaseHook<'_> {
                 || self.fence.load(Ordering::SeqCst) == self.ticket,
             )?;
         }
+        if phase == ConfigPhase::Native
+            && self.runner.recover_startup
+            && self.edit == &ConfigEdit::RepairActivation
+            && self.journal.bootstrap_uncertain()
+        {
+            let env = self
+                .runner
+                .native
+                .as_ref()
+                .ok_or(PhaseOutcome::FailedKnown)?
+                .lock()
+                .expect("native boot")
+                .env
+                .clone();
+            let observed =
+                projection_boot::resolution::inspect(self.journal, &env, 0).map_err(|reason| {
+                    eprintln!("bootstrap recovery refused: {reason}");
+                    PhaseOutcome::FailedKnown
+                })?;
+            self.journal.bootstrap_resolution =
+                Some(projection_boot::resolution::BootstrapResolution {
+                    operation: self.op,
+                    observed,
+                    withdrawal: None,
+                });
+            journal::record_phase_running(
+                &self.path,
+                self.journal,
+                self.op,
+                self.base,
+                self.edit,
+                self.candidate,
+                &self.plan,
+                &self.completed,
+                phase,
+                None,
+            )
+            .map_err(|_| PhaseOutcome::Unknown)?;
+            self.state.publish_progress(self.journal);
+        }
         let native_intent = if phase == ConfigPhase::Native {
             match self
                 .runner
@@ -3227,6 +3284,7 @@ impl VpnhideCore for CoreServer {
             if state.shutting_down.load(Ordering::SeqCst) {
                 return Err(SubmitError::Unavailable);
             }
+            state.prepare_bootstrap_recovery(op, &command)?;
             let maintenance =
                 state.prepare_maintenance_before(op, &command, ctx.deadline, &cancelled)?;
             let replacement = state.prepare_replacement(op, &command, caller)?;

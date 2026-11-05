@@ -221,7 +221,11 @@ pub(super) fn activate_with(
     })?;
     writer
         .journal()
-        .check_native_attempt(&prepared.intent, explicit)
+        .check_native_attempt_with_withdrawal(
+            &prepared.intent,
+            explicit,
+            prepared.environment().withdrawal.as_ref(),
+        )
         .map_err(|_| PhaseOutcome::FailedKnown)?;
     writer.begin(&prepared)?;
     crate::recovery::maybe_crash_for_test("startup-intent");

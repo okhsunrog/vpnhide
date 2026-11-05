@@ -148,7 +148,10 @@ fn complete_bundle_retains_one_passive_pair_and_keeps_core_out_of_zygisk_catalog
     let m: Manifest = metadata(&files, "payloads/manifest.json").unwrap();
     m.require_complete().unwrap();
     assert_eq!(m.bundle_commit, COMMIT);
-    assert_eq!(files["module.prop"], b"id=vpnhide_core\nvpnhideControl=2\n");
+    assert_eq!(
+        files["module.prop"],
+        b"id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n"
+    );
     assert!(
         !files
             .keys()

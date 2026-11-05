@@ -5,6 +5,8 @@ use vpnhide_core_rpc::{BackendChoiceRequest, OperationId};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BackendChoiceRecord {
+    #[serde(default)]
+    pub inherited: bool,
     pub revision: u64,
     pub request: BackendChoiceRequest,
     pub operation: OperationId,
@@ -12,10 +14,18 @@ pub struct BackendChoiceRecord {
 }
 
 impl BackendChoiceRecord {
-    pub(super) fn valid(&self, issued: u64) -> bool {
+    pub(crate) fn valid(&self, issued: u64) -> bool {
         self.revision > 0
             && self.request.expected_revision.checked_add(1) == Some(self.revision)
-            && self.request.validate().is_ok()
+            && if self.inherited {
+                self.request.acknowledged_warning.is_none()
+                    && self.request.choice
+                        == (vpnhide_core_rpc::BackendChoice::Fixed {
+                            backend: vpnhide_core_rpc::NativeBackend::Zygisk,
+                        })
+            } else {
+                self.request.validate().is_ok()
+            }
             && self.operation.0 > 0
             && self.operation.0 <= issued
             && !self.requested_in_boot.is_empty()
@@ -27,6 +37,9 @@ impl BackendChoiceRecord {
 pub(crate) fn validate_entries(journal: &super::Journal) -> bool {
     use vpnhide_core_rpc::{ConfigEdit, ConfigPhase, PhaseOutcome};
     for entry in &journal.operations {
+        if !crate::maintenance::zygisk_projection::install::valid_receipt(entry) {
+            return false;
+        }
         let Some(super::CommandIntent::StageBackendChoice { request }) = &entry.command else {
             continue;
         };
@@ -48,18 +61,36 @@ pub(crate) fn validate_entries(journal: &super::Journal) -> bool {
         }
     }
     journal.backend_choice.as_ref().is_none_or(|record| {
-        journal.get(record.operation).is_none_or(|entry| {
-            entry.command
-                == Some(super::CommandIntent::StageBackendChoice {
-                    request: record.request.clone(),
-                })
-                && entry.record.settled == Some(PhaseOutcome::Confirmed)
-                && entry
-                    .record
-                    .phases
-                    .iter()
-                    .all(|p| p.outcome == PhaseOutcome::Confirmed)
-        })
+        journal
+            .get(record.operation)
+            .map_or(!record.inherited, |entry| {
+                if record.inherited {
+                    return journal.version >= 21
+                        && journal.zygisk_projection.as_ref().is_some_and(|work| {
+                            work.operation == record.operation
+                                && work.install_continuity.as_ref().is_some_and(|origin| {
+                                    origin.valid(work)
+                                        && entry.command
+                                            == Some(super::CommandIntent::AdoptInstallHandoff {
+                                                intent_sha256: origin.intent.digest(),
+                                            })
+                                })
+                                && work.request == record.request
+                                && work.boot_id == record.requested_in_boot
+                                && work.outcome == PhaseOutcome::Confirmed
+                        });
+                }
+                entry.command
+                    == Some(super::CommandIntent::StageBackendChoice {
+                        request: record.request.clone(),
+                    })
+                    && entry.record.settled == Some(PhaseOutcome::Confirmed)
+                    && entry
+                        .record
+                        .phases
+                        .iter()
+                        .all(|p| p.outcome == PhaseOutcome::Confirmed)
+            })
     })
 }
 
@@ -79,7 +110,29 @@ pub fn record_projection(
             "projection intent cannot replace retained work",
         )
     };
-    if journal.version != super::JOURNAL_VERSION
+    if work.install_continuity.is_some() {
+        return Err(invalid());
+    }
+    if journal
+        .zygisk_projection
+        .as_ref()
+        .is_some_and(|prior| prior.operation != work.operation)
+        && work.previous_withdrawal.is_some()
+    {
+        let mut next = journal.clone();
+        crate::maintenance::zygisk_projection::history::retire_for_reentry(&mut next, work)?;
+        record_projection(&mut next, base, work)?;
+        *journal = next;
+        return Ok(());
+    }
+    if !crate::maintenance::zygisk_projection::history::predecessor_valid(journal, work) {
+        return Err(invalid());
+    }
+    if journal
+        .zygisk_withdrawal
+        .as_ref()
+        .is_some_and(|work| work.retained())
+        || journal.version != super::JOURNAL_VERSION
         || !work.valid(journal.issued_through)
         || base.revision != journal.config_revision
     {
@@ -113,13 +166,119 @@ pub fn record_projection(
     }
     if work.outcome == PhaseOutcome::Confirmed {
         journal.backend_choice = Some(BackendChoiceRecord {
+            inherited: false,
             revision: work.request.expected_revision + 1,
             request: work.request.clone(),
             operation: work.operation,
             requested_in_boot: work.boot_id.clone(),
         });
     }
+    if work.legacy_adoption.is_some() {
+        journal.note_zygisk_exposure(&work.boot_id);
+    }
     journal.zygisk_projection = Some(work.clone());
+    journal.upsert(super::JournalEntry {
+        admission: Some(super::Admission {
+            from_revision: base.revision,
+            commit_revision: base.revision,
+            writes: vec![],
+        }),
+        command: Some(super::CommandIntent::StageBackendChoice {
+            request: work.request.clone(),
+        }),
+        maintenance: None,
+        maintenance_report: None,
+        superseded_by: None,
+        superseded_phases: vec![],
+        finalized_unknown: work.outcome == PhaseOutcome::Unknown,
+        base,
+        edit: ConfigEdit::RepairActivation,
+        candidate: None,
+        native_intent: None,
+        record: OperationRecord {
+            op: work.operation,
+            phases: vec![PhaseRecord {
+                phase: ConfigPhase::Maintenance,
+                outcome: work.outcome,
+            }],
+            settled: (work.outcome != PhaseOutcome::Running).then_some(work.outcome),
+            ports: None,
+        },
+    });
+    crate::maintenance::zygisk_projection::history::restore_failed_reentry(journal);
+    Ok(())
+}
+
+/// Retain the publication and exact withdrawal independently. Confirmation
+/// changes desired choice only; it is never proof that current hooks are gone.
+pub fn record_withdrawal(
+    journal: &mut super::Journal,
+    base: vpnhide_core_rpc::BaseRef,
+    work: &crate::maintenance::zygisk_projection::withdrawal::work::WithdrawalWork,
+) -> std::io::Result<()> {
+    use vpnhide_core_rpc::{ConfigEdit, ConfigPhase, OperationRecord, PhaseOutcome, PhaseRecord};
+    let invalid = || {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "withdrawal cannot replace retained work",
+        )
+    };
+    if journal.version != super::JOURNAL_VERSION
+        || !work.valid(journal.issued_through)
+        || base.revision != journal.config_revision
+        || !crate::maintenance::zygisk_projection::work::validate_journal(journal)
+        || !crate::maintenance::zygisk_projection::withdrawal::work::validate_journal(journal)
+        || journal.zygisk_projection.as_ref().is_none_or(|published| {
+            published.outcome != PhaseOutcome::Confirmed
+                || journal
+                    .projection_identity()
+                    .is_none_or(|(descriptor, source, _)| {
+                        descriptor != &work.descriptor.published
+                            || !source.same_content(&work.source)
+                    })
+                || work.request.expected_revision != published.request.expected_revision + 1
+        })
+    {
+        return Err(invalid());
+    }
+    let prior = journal.zygisk_withdrawal.as_ref();
+    if let Some(previous) = prior.filter(|previous| previous.operation == work.operation) {
+        if journal
+            .get(work.operation)
+            .is_none_or(|entry| entry.base != base)
+            || !previous.permits_successor(work)
+        {
+            return Err(invalid());
+        }
+        if previous == work {
+            return Ok(());
+        }
+    } else if prior.is_some_and(|previous| previous.retained())
+        || journal.get(work.operation).is_some()
+        || journal.is_retired(work.operation)
+        || work.dispatch_intent
+        || work.outcome != PhaseOutcome::Running
+    {
+        return Err(invalid());
+    }
+    if journal
+        .backend_choice
+        .as_ref()
+        .map_or(0, |choice| choice.revision)
+        != work.request.expected_revision
+    {
+        return Err(invalid());
+    }
+    if work.outcome == PhaseOutcome::Confirmed {
+        journal.backend_choice = Some(BackendChoiceRecord {
+            inherited: false,
+            revision: work.request.expected_revision + 1,
+            request: work.request.clone(),
+            operation: work.operation,
+            requested_in_boot: work.boot_id.clone(),
+        });
+    }
+    journal.zygisk_withdrawal = Some(work.clone());
     journal.upsert(super::JournalEntry {
         admission: Some(super::Admission {
             from_revision: base.revision,
@@ -166,6 +325,10 @@ pub(crate) fn reconcile_unfinished(journal: &mut super::Journal) -> bool {
             .zygisk_projection
             .as_ref()
             .is_some_and(|work| work.operation == entry.record.op)
+            || journal
+                .zygisk_withdrawal
+                .as_ref()
+                .is_some_and(|work| work.operation == entry.record.op)
             || entry.finalized_unknown
             || entry.record.settled.is_some()
             || entry.record.phases.len() != 1
@@ -208,6 +371,7 @@ mod tests {
         Journal {
             issued_through: 8,
             backend_choice: confirmed.then(|| BackendChoiceRecord {
+                inherited: false,
                 revision: 1,
                 request: request.clone(),
                 operation: OperationId(8),

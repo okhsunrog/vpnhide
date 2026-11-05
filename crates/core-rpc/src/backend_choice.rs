@@ -55,6 +55,7 @@ pub enum BackendChoiceStage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackendChoiceStatus {
+    pub migration_offer: Option<BackendMigrationOffer>,
     pub revision: u64,
     pub operation: Option<OperationId>,
     pub desired: BackendChoice,
@@ -114,4 +115,14 @@ mod tests {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackendMigrationOffer {
+    pub source_commit: String,
+    pub target: BackendChoice,
+    pub displayed: bool,
+    pub kept: bool,
+    pub operation: Option<OperationId>,
 }

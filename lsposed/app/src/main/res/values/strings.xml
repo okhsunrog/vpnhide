@@ -630,4 +630,10 @@
     <string name="backend_choice_pending">Pending device restart</string>
     <string name="backend_choice_unverified">Not confirmed</string>
     <string name="backend_choice_explanation">Choose the backend for the next device boot. Core checks compatibility and the complete configured policy. This does not change the running backend or restart the device. No other backend is tried automatically if the selected one fails.</string>
+    <string name="backend_choice_zygisk_warning_title">Use Zygisk?</string>
+    <string name="backend_choice_zygisk_warning">Zygisk injects code into app processes and may be detected, including by games and banking apps. This prepares a managed runtime for your next restart. Existing hooks remain until you restart. Core will not reboot automatically.</string>
+    <string name="backend_migration_offer_title">Kernel protection is available</string>
+    <string name="backend_migration_offer_body">A compatible kernel backend is available after this update. You can keep Zygisk or prepare a voluntary switch. Your current backend stays active until you restart; Core will not reboot automatically.</string>
+    <string name="backend_migration_offer_switch">Prepare switch</string>
+    <string name="backend_migration_offer_keep">Keep Zygisk</string>
 </resources>

@@ -31,6 +31,7 @@ import uniffi.vpnhide_core_ffi.CoreBackendChoiceRequest
 import uniffi.vpnhide_core_ffi.CoreBackendChoiceStage
 import uniffi.vpnhide_core_ffi.CoreBackendChoiceStatus
 import uniffi.vpnhide_core_ffi.CoreNativeBackend
+import uniffi.vpnhide_core_ffi.CoreZygiskChoiceWarning
 
 /** Thin device-local intent adapter. Core owns applicability, staging and receipts. */
 @Composable
@@ -51,7 +52,7 @@ internal fun BackendChoiceSettingsSection() {
         onClick = { if (checkWrite()) open = true },
     )
     if (open) {
-        BackendChoiceDialog(status, onDismiss = { open = false }) { choice ->
+        BackendChoiceDialog(status, onDismiss = { open = false }) { choice, warning ->
             if (checkWrite()) {
                 open = false
                 submitting = true
@@ -62,7 +63,7 @@ internal fun BackendChoiceSettingsSection() {
                                 emptyList(),
                                 coupledEffects =
                                     listOf(
-                                        CoreRootEffect.StageBackendChoice(CoreBackendChoiceRequest(status.revision, choice, null)),
+                                        CoreRootEffect.StageBackendChoice(CoreBackendChoiceRequest(status.revision, choice, warning)),
                                     ),
                                 protectAllDrafts = true,
                             ),
@@ -80,9 +81,10 @@ internal fun BackendChoiceSettingsSection() {
 private fun BackendChoiceDialog(
     status: CoreBackendChoiceStatus,
     onDismiss: () -> Unit,
-    onConfirm: (CoreBackendChoice) -> Unit,
+    onConfirm: (CoreBackendChoice, CoreZygiskChoiceWarning?) -> Unit,
 ) {
     var selected by remember(status.revision) { mutableStateOf(status.desired) }
+    var warningOpen by remember(status.revision) { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.backend_choice_title)) },
@@ -98,10 +100,34 @@ private fun BackendChoiceDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(selected) }, enabled = selected in status.options) { Text(stringResource(R.string.btn_save)) }
+            TextButton(
+                onClick = {
+                    if (selected == CoreBackendChoice.Fixed(CoreNativeBackend.ZYGISK)) {
+                        warningOpen = true
+                    } else {
+                        onConfirm(selected, null)
+                    }
+                },
+                enabled = selected in status.options && selected != status.desired,
+            ) { Text(stringResource(R.string.btn_save)) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_cancel)) } },
     )
+    if (warningOpen) {
+        AlertDialog(
+            onDismissRequest = { warningOpen = false },
+            title = { Text(stringResource(R.string.backend_choice_zygisk_warning_title)) },
+            text = { Text(stringResource(R.string.backend_choice_zygisk_warning)) },
+            confirmButton = {
+                TextButton(onClick = { onConfirm(selected, CoreZygiskChoiceWarning.PROCESS_INJECTION_V1) }) {
+                    Text(stringResource(R.string.btn_save))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { warningOpen = false }) { Text(stringResource(R.string.btn_cancel)) }
+            },
+        )
+    }
 }
 
 @Composable

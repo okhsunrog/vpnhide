@@ -206,22 +206,43 @@ impl ZygiskTarget {
         Ok(absent)
     }
 
+    /// Absence is valid for idempotent revocation. This must not be used as
+    /// proof that publication or policy delivery succeeded.
     pub(crate) fn check_authorization(
         &self,
         expected: &crate::journal::ZygiskAuthorityRecord,
     ) -> Result<(), String> {
+        self.matching_authorization(expected).map(|_| ())
+    }
+    pub(crate) fn require_authorization(
+        &self,
+        expected: &crate::journal::ZygiskAuthorityRecord,
+    ) -> Result<(), String> {
+        self.matching_authorization(expected)?
+            .ok_or("authorization is absent")?;
+        Ok(())
+    }
+    fn matching_authorization(
+        &self,
+        expected: &crate::journal::ZygiskAuthorityRecord,
+    ) -> Result<Option<vpnhide_protocol::zygisk_activation::Authorization>, String> {
         let reference = expected
             .reference()
             .ok_or("invalid authorization reference")?;
-        if self.revalidate_identity()? != (reference.directory_device, reference.directory_inode) {
+        let identity = (reference.directory_device, reference.directory_inode);
+        if self.revalidate_identity()? != identity {
             return Err("authorization directory replaced".into());
         }
-        if let Some(actual) = self.read_authorized(&reference.boot_id)?
-            && (actual.generation != reference.generation || actual.wire != expected.intent.wire)
-        {
+        let actual = self.read_authorized(&reference.boot_id)?;
+        if actual.as_ref().is_some_and(|actual| {
+            actual.generation != reference.generation || actual.wire != expected.intent.wire
+        }) {
             return Err("different authorization generation or policy".into());
         }
-        Ok(())
+        if self.revalidate_identity()? != identity {
+            return Err("authorization directory replaced during readback".into());
+        }
+        Ok(actual)
     }
 
     pub(crate) fn revoke_expected(
@@ -387,6 +408,53 @@ mod tests {
         fs::write(path.join("targets.txt"), OLD).unwrap();
     }
 
+    #[test]
+    fn publication_readback_requires_presence_while_revocation_accepts_absence() {
+        let root = tempfile::tempdir().unwrap();
+        fixture(root.path());
+        fs::write(
+            root.path().join("module.prop"),
+            "id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n",
+        )
+        .unwrap();
+        let target = ZygiskTarget::open(root.path()).unwrap();
+        let boot = "12345678-1234-1234-1234-123456789abc";
+        let expected = crate::journal::ZygiskAuthorityRecord {
+            operation: vpnhide_core_rpc::OperationId(42),
+            intent: crate::journal::NativeIntent {
+                backend: vpnhide_core_rpc::NativeBackend::Zygisk,
+                wire: WIRE.into(),
+                zygisk_module: Some(root.path().into()),
+                zygisk_authorization: Some(crate::journal::ZygiskAuthorizationIntent {
+                    boot_id: boot.into(),
+                    generation: 42,
+                    directory_identity: target.identity().unwrap(),
+                }),
+            },
+        };
+        target.check_authorization(&expected).unwrap();
+        assert!(target.require_authorization(&expected).is_err());
+        target
+            .publish_authorized(&vpnhide_protocol::zygisk_activation::Authorization {
+                boot_id: boot.into(),
+                generation: 42,
+                wire: WIRE.into(),
+            })
+            .unwrap();
+        target.require_authorization(&expected).unwrap();
+        target
+            .publish_authorized(&vpnhide_protocol::zygisk_activation::Authorization {
+                boot_id: boot.into(),
+                generation: 43,
+                wire: WIRE.into(),
+            })
+            .unwrap();
+        assert!(target.require_authorization(&expected).is_err());
+        assert!(target.check_authorization(&expected).is_err());
+        target.revoke_authorization().unwrap();
+        assert!(target.require_authorization(&expected).is_err());
+        target.check_authorization(&expected).unwrap();
+    }
     #[test]
     fn revocation_removes_future_authority_not_an_already_consumed_generation() {
         use vpnhide_protocol::zygisk_activation::{Authorization, FILE_NAME};

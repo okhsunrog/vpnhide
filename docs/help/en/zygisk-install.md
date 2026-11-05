@@ -37,3 +37,13 @@ target after changing its configuration. Provider discovery changes can need a
 reboot; an app restart alone does not guarantee discovery. Core owns delivery and
 current-boot authorization; you do not edit target files. A fresh diagnostic
 worker does not prove that every old game process updated.
+
+In Settings → Native backend (advanced), select Zygisk and read/confirm its injection warning before saving. A compatible provider must already be available. Core prepares its managed runtime and reports when a device restart is required. Staging, provider discovery, current-boot authorization, actual code consumption and hook health are separate; a pending or unverified result is not protection. Auto never silently enters Zygisk. Existing old separate installations can require an isolated migration path; keep them when Core refuses an unverified transition.
+
+When upgrading an old Core that already uses Zygisk, the installer can retain that
+choice only from exact confirmed Core policy and runtime records. It stages the
+matching managed payload without changing the running policy; a real reboot and
+new code verification are required. An unused old payload is not enabled. If Core
+cannot prove continuity, keep the old installation and follow its refusal message.
+For later updates of an already managed Zygisk runtime, use Core’s paired updater;
+a different manual Core-only ZIP is refused to preserve the current runtime.

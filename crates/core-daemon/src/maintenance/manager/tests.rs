@@ -5,23 +5,29 @@ use std::{
     sync::OnceLock,
 };
 fn binary() -> &'static Path {
-    static BINARY: OnceLock<PathBuf> = OnceLock::new();
-    BINARY.get_or_init(|| {
-        let root = tempfile::tempdir().unwrap().keep();
-        let output = root.join("fixture-manager");
-        let status = Command::new("rustc")
-            .arg("--edition=2024")
-            .arg(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/maintenance-manager.rs"
-            ))
-            .arg("-o")
-            .arg(&output)
-            .status()
-            .unwrap();
-        assert!(status.success());
-        output
-    })
+    static BINARY: OnceLock<(File, PathBuf)> = OnceLock::new();
+    &BINARY
+        .get_or_init(|| {
+            let root = tempfile::tempdir().unwrap();
+            let output = root.path().join("fixture-manager");
+            let status = Command::new("rustc")
+                .arg("--edition=2024")
+                .arg(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/tests/fixtures/maintenance-manager.rs"
+                ))
+                .arg("-o")
+                .arg(&output)
+                .status()
+                .unwrap();
+            assert!(status.success());
+            // Keep an FD lease, not a leaked temporary directory. Rust statics do
+            // not run destructors at process exit; the kernel still closes this FD.
+            let binary = File::open(&output).unwrap();
+            let path = PathBuf::from(format!("/proc/self/fd/{}", binary.as_raw_fd()));
+            (binary, path)
+        })
+        .1
 }
 pub(crate) fn install(root: &Path) -> Manager {
     fs::create_dir_all(root.join("data/adb/modules/vpnhide_core")).unwrap();
@@ -35,6 +41,10 @@ pub(crate) fn install(root: &Path) -> Manager {
     fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
     Manager::discover_owned(root, unsafe { libc::geteuid() }).unwrap()
 }
+pub(crate) fn discover(root: &Path) -> Manager {
+    Manager::discover_owned(root, unsafe { libc::geteuid() }).unwrap()
+}
+
 #[test]
 fn real_manager_reads_retained_package_fd_and_exit_zero_is_only_dispatch_evidence() {
     let root = tempfile::tempdir().unwrap();

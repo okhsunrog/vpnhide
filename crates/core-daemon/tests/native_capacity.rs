@@ -99,6 +99,7 @@ async fn start_with_preference(
             issued_through: 1,
             backend_choice: Some(
                 vpnhide_core_daemon::journal::backend_choice::BackendChoiceRecord {
+                    inherited: false,
                     revision: 1,
                     operation: OperationId(1),
                     requested_in_boot: "previous-kernel-boot".into(),

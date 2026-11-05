@@ -75,6 +75,9 @@ fn fixture() -> (tempfile::TempDir, Arc<CoreState>, PreparedBackendChoice) {
         "fixture".into(),
     ));
     let prepared = PreparedBackendChoice {
+        bootstrap_resolution: None,
+        publication: None,
+        withdrawal: None,
         config,
         preview: ChoicePreview {
             boot_id: "boot-a".into(),
@@ -278,5 +281,268 @@ fn warning_acknowledgement_cannot_prepare_zygisk_without_its_projection_executor
         assert!(journal.get(op).is_none());
         assert!(journal.zygisk_authority.is_none());
     }
+    state.shutdown();
+}
+
+#[test]
+fn production_writer_dispatches_withdrawal_once_and_keeps_current_backend_files() {
+    use crate::maintenance::zygisk_projection::withdrawal::tests::fixture as withdrawal_fixture;
+    let (root, withdrawal) = withdrawal_fixture(true);
+    let persistent = root.path().join("persistent");
+    let config = CanonicalConfig::default();
+    std::fs::write(
+        persistent.join("config.json"),
+        serde_json::to_vec(&config).unwrap(),
+    )
+    .unwrap();
+    let state = CoreState::load_with_journal(
+        Publisher::new(7, StateSnapshot::default()),
+        persistent.join("config.json"),
+        Some(persistent.join("journal.json")),
+        None,
+    )
+    .unwrap();
+    state.set_effect_paths(Some(crate::effects::EffectPaths {
+        root: root.path().into(),
+    }));
+    let mut env = crate::native_boot::NativeEnv::from_env(Some(root.path().join("ctl"))).unwrap();
+    env.boot_id_path = root.path().join("proc/sys/kernel/random/boot_id");
+    env.modules = Some(root.path().join("data/adb/modules"));
+    env.kpm_lock = None;
+    env.legacy_root = None;
+    env.apatch_kpms = root.path().join("apatch");
+    env.state_file = root.path().join("native.json");
+    let catalog = Catalog::open(&root.path().join("data/adb/modules/vpnhide_core")).unwrap();
+    let binding = BundleIdentity {
+        root: root.path().join("data/adb/modules/vpnhide_core"),
+        root_identity: Some(catalog.root_identity),
+        manifest_sha256: format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&catalog.manifest).unwrap())
+        ),
+        manifest_file_sha256: Some(catalog.manifest_sha256),
+        source_commit: catalog.manifest.bundle_commit,
+        wire: String::new(),
+        zygisk_recipient: None,
+    };
+    let boot_id = std::fs::read_to_string(&env.boot_id_path).unwrap();
+    state.install_native_boot(crate::native_boot::NativeBoot::blocked(
+        env,
+        7,
+        "fixture".into(),
+    ));
+    let prepared = PreparedBackendChoice {
+        bootstrap_resolution: None,
+        config,
+        preview: ChoicePreview {
+            boot_id,
+            binding,
+            ownership: Ownership::Clear,
+            assessment: Assessment {
+                kmi: crate::payloads::kmi::KmiResolution {
+                    series: None,
+                    release_hint: None,
+                    conflicting_hints: false,
+                    module_hint: None,
+                    candidates: vec![],
+                },
+                decision: Decision::Select(NativeBackend::Kmod),
+                candidates: vec![Candidate {
+                    backend: NativeBackend::Kmod,
+                    payload_indices: vec![],
+                    eligibility: Ok(()),
+                }],
+            },
+        },
+        publication: None,
+        withdrawal: Some(withdrawal),
+    };
+    let request = BackendChoiceRequest {
+        expected_revision: 1,
+        choice: BackendChoice::Auto,
+        acknowledged_warning: None,
+    };
+    let base = BaseRef {
+        revision: state.config_revision(),
+    };
+    let command = CoreCommand::StageBackendChoice {
+        base,
+        request: request.clone(),
+    };
+    state
+        .call_writer(move |state| {
+            state.execute_backend_choice(OperationId(10), base, request, None, Some(prepared))
+        })
+        .unwrap()
+        .unwrap();
+    let saved = journal::read(&persistent.join("journal.json")).unwrap();
+    assert_eq!(
+        saved.zygisk_withdrawal.unwrap().outcome,
+        PhaseOutcome::Confirmed
+    );
+    assert!(saved.zygisk_authority.is_some());
+    assert!(
+        root.path()
+            .join("data/adb/modules/vpnhide_zygisk_runtime/zygisk/arm64-v8a.so")
+            .exists()
+    );
+    state.submit_command(OperationId(10), command).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("data/adb/dispatch-count")).unwrap(),
+        "2"
+    );
+    state.shutdown();
+}
+
+#[test]
+fn existing_separate_zygisk_is_adopted_only_by_warned_choice_on_the_same_writer() {
+    use crate::maintenance::zygisk_projection::legacy::tests::fixture as legacy_fixture;
+    use vpnhide_core_rpc::{SelectionMode, ZygiskChoiceWarning};
+    let (root, publication, old) = legacy_fixture();
+    let persistent = root.path().join("persistent");
+    let config = CanonicalConfig::default();
+    std::fs::write(
+        persistent.join("config.json"),
+        serde_json::to_vec(&config).unwrap(),
+    )
+    .unwrap();
+    journal::write_atomic(
+        &persistent.join("journal.json"),
+        &Journal {
+            issued_through: 8,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let state = CoreState::load_with_journal(
+        Publisher::new(7, StateSnapshot::default()),
+        persistent.join("config.json"),
+        Some(persistent.join("journal.json")),
+        None,
+    )
+    .unwrap();
+    state.set_effect_paths(Some(crate::effects::EffectPaths {
+        root: root.path().into(),
+    }));
+    let mut env = crate::native_boot::NativeEnv::from_env(Some(root.path().join("ctl"))).unwrap();
+    env.boot_id_path = root.path().join("proc/sys/kernel/random/boot_id");
+    env.modules = Some(root.path().join("data/adb/modules"));
+    env.zygisk_module = None;
+    env.kpm_lock = None;
+    env.legacy_root = None;
+    env.apatch_kpms = root.path().join("apatch");
+    env.state_file = root.path().join("native.json");
+    let boot_id = std::fs::read_to_string(&env.boot_id_path).unwrap();
+    let mut boot = crate::native_boot::NativeBoot::blocked(
+        env,
+        7,
+        "retained legacy fixture, no health claim".into(),
+    );
+    boot.selection = Some(crate::native_boot::Selection {
+        backend: NativeBackend::Zygisk,
+        mode: SelectionMode::Adopted,
+        filesystem_hiding: None,
+    });
+    state.install_native_boot(boot);
+    let base = BaseRef {
+        revision: state.config_revision(),
+    };
+    let mut request = BackendChoiceRequest {
+        expected_revision: 0,
+        choice: BackendChoice::Fixed {
+            backend: NativeBackend::Zygisk,
+        },
+        acknowledged_warning: None,
+    };
+    assert!(matches!(
+        state.submit_command(
+            OperationId(8),
+            CoreCommand::StageBackendChoice {
+                base,
+                request: request.clone()
+            }
+        ),
+        Err(SubmitError::Rejected { .. })
+    ));
+    assert!(!old.join("remove").exists());
+    request.acknowledged_warning = Some(ZygiskChoiceWarning::ProcessInjectionV1);
+    let catalog = Catalog::open(&root.path().join("data/adb/modules/vpnhide_core")).unwrap();
+    let prepared = PreparedBackendChoice {
+        bootstrap_resolution: None,
+        publication: Some(publication),
+        withdrawal: None,
+        config,
+        preview: ChoicePreview {
+            boot_id,
+            ownership: Ownership::Clear,
+            binding: BundleIdentity {
+                root: root.path().join("data/adb/modules/vpnhide_core"),
+                root_identity: Some(catalog.root_identity),
+                manifest_sha256: format!(
+                    "{:x}",
+                    Sha256::digest(serde_json::to_vec(&catalog.manifest).unwrap())
+                ),
+                manifest_file_sha256: Some(catalog.manifest_sha256),
+                source_commit: catalog.manifest.bundle_commit,
+                wire: String::new(),
+                zygisk_recipient: None,
+            },
+            assessment: Assessment {
+                kmi: crate::payloads::kmi::KmiResolution {
+                    series: None,
+                    release_hint: None,
+                    conflicting_hints: false,
+                    module_hint: None,
+                    candidates: vec![],
+                },
+                decision: Decision::Select(NativeBackend::Zygisk),
+                candidates: vec![Candidate {
+                    backend: NativeBackend::Zygisk,
+                    payload_indices: vec![],
+                    eligibility: Ok(()),
+                }],
+            },
+        },
+    };
+    let duplicate = CoreCommand::StageBackendChoice {
+        base,
+        request: request.clone(),
+    };
+    state
+        .call_writer(move |state| {
+            state.execute_backend_choice(OperationId(8), base, request, None, Some(prepared))
+        })
+        .unwrap()
+        .unwrap();
+    let saved = journal::read(&persistent.join("journal.json")).unwrap();
+    assert!(
+        saved
+            .zygisk_projection
+            .as_ref()
+            .unwrap()
+            .legacy_adoption
+            .as_ref()
+            .unwrap()
+            .retired
+    );
+    assert_eq!(
+        saved.zygisk_projection.as_ref().unwrap().outcome,
+        PhaseOutcome::Confirmed
+    );
+    assert_eq!(
+        state.native_handle().unwrap().lock().unwrap().selected(),
+        Some(NativeBackend::Zygisk)
+    );
+    assert!(old.join("zygisk/arm64-v8a.so").exists());
+    assert_eq!(
+        std::fs::read(root.path().join("data/adb/vpnhide_zygisk/targets.txt")).unwrap(),
+        b"user policy retained"
+    );
+    assert!(saved.zygisk_authority.is_none());
+    state.submit_command(OperationId(8), duplicate).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("data/adb/dispatch-count")).unwrap(),
+        "1"
+    );
     state.shutdown();
 }

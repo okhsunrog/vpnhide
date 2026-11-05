@@ -42,10 +42,4 @@ A backend being present is not proof that protection works. See
 
 ## Advanced kernel choice
 
-Settings → Native backend (advanced) can record Auto or an explicit kernel family
-for the next device boot. Core checks compatibility and the complete configured
-policy before accepting it. This does not restart the device or switch the
-running backend. Pending restart and unconfirmed application remain separate
-from protection health. Auto chooses compatible Built-in then Kmod, and does not
-automatically try KPM or Zygisk after a failure. New Zygisk selection and managed
-publication are still being implemented; this chooser does not enable them.
+Settings → Native backend (advanced) keeps Save/Cancel and records a next-boot choice. Auto prefers compatible Built-in then Kmod and never newly selects Zygisk or tries another family after failure. An explicit Zygisk choice requires the injection/detection warning and prepares a Core-managed discovery copy; it is not current protection. Core checks complete policy and current applicability. A voluntary post-update kernel offer can be declined to keep managed Zygisk. The current backend remains active while a safe change is staged; only Core's verified next-boot result can authorize the transition. Core never reboots automatically.

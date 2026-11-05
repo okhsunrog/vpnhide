@@ -175,6 +175,41 @@ pub(crate) fn preview_choice(
     config: &CanonicalConfig,
     packages: &PackageUidMap,
 ) -> Result<ChoicePreview, PreparationFailure> {
+    preview_choice_kind(env, config, packages, false, None)
+}
+
+/// Next-boot publication applicability. Current provider mapping is only a
+/// prerequisite to staging, never recipient consumption or hook coverage.
+pub(crate) fn preview_projection_choice(
+    env: &NativeEnv,
+    config: &CanonicalConfig,
+    packages: &PackageUidMap,
+) -> Result<ChoicePreview, PreparationFailure> {
+    preview_choice_kind(env, config, packages, true, None)
+}
+pub(crate) fn preview_projection_adoption_choice(
+    env: &NativeEnv,
+    config: &CanonicalConfig,
+    packages: &PackageUidMap,
+    root: &Path,
+    legacy: &crate::maintenance::legacy_modules::LegacyInventory,
+) -> Result<ChoicePreview, PreparationFailure> {
+    if env.modules.as_ref() != Some(&root.join("data/adb/modules"))
+        || env.module_dir(NativeBackend::Zygisk)
+            != Some(root.join("data/adb/modules/vpnhide_zygisk"))
+    {
+        return Err("legacy adoption namespace changed".into());
+    }
+    legacy.require_unchanged(root).map_err(|e| e.to_string())?;
+    preview_choice_kind(env, config, packages, true, Some((root, legacy)))
+}
+fn preview_choice_kind(
+    env: &NativeEnv,
+    config: &CanonicalConfig,
+    packages: &PackageUidMap,
+    publication: bool,
+    legacy: Option<(&Path, &crate::maintenance::legacy_modules::LegacyInventory)>,
+) -> Result<ChoicePreview, PreparationFailure> {
     let boot_id = read_boot_id(&env.boot_id_path);
     if boot_id.is_empty() || boot_id.len() > 128 {
         return Err("backend_choice_boot_identity_unavailable".into());
@@ -186,9 +221,31 @@ pub(crate) fn preview_choice(
         .require_complete()
         .map_err(|e| e.to_string())?;
     let probe = probe_kpm(env.kpm_lock.as_deref());
-    let facts = gather(env, probe.fact);
+    let mut facts = gather(env, probe.fact);
+    if let Some((root, legacy)) = legacy {
+        legacy.require_unchanged(root).map_err(|e| e.to_string())?;
+        facts
+            .installed
+            .retain(|backend| *backend != NativeBackend::Zygisk);
+    }
+    // The exact Core-owned recipient is already bound/read back. Its installed
+    // directory is not an unowned competing legacy installation. Other facts,
+    // including kernel/KPM conflicts, remain untouched.
+    if let Some(recipient) = env
+        .loader
+        .as_ref()
+        .and_then(|loader| loader.managed_recipient(&catalog).ok().flatten())
+        && env.module_dir(NativeBackend::Zygisk).as_ref() == Some(&recipient.path)
+    {
+        facts
+            .installed
+            .retain(|backend| *backend != NativeBackend::Zygisk);
+    }
     let (mut capabilities, support) = observe_support(env, &facts, probe.client.as_ref(), &catalog);
     let ownership = capabilities.ownership;
+    if publication {
+        capabilities.zygisk = crate::payloads::device::zygisk_loader(std::path::Path::new("/proc"));
+    }
     // Only a read-only next-boot applicability preview. The caller retains and
     // checks actual ownership separately; this never enters a load executor.
     capabilities.ownership = selection::Ownership::Clear;
@@ -1077,6 +1134,7 @@ mod tests {
             payload_override: None,
             bundle_identity: None,
             backend_choice: vpnhide_core_rpc::BackendChoice::Auto,
+            withdrawal: None,
             loader: None,
         };
         let mut config = CanonicalConfig::default();

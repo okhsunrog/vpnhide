@@ -131,6 +131,11 @@ pub struct OperationId(pub u64);
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CoreCommand {
+    AcknowledgeBackendOffer {
+        base: BaseRef,
+        source_commit: String,
+        keep: bool,
+    },
     StageBackendChoice {
         base: BaseRef,
         request: BackendChoiceRequest,

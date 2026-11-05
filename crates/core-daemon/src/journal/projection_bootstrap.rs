@@ -45,10 +45,7 @@ impl ProjectionBootstrap {
             && (reference.directory_device, reference.directory_inode) == recipient.image.directory
             && self.authority.operation.0 > recipient.image.descriptor.operation
             && self.authority.operation.0 <= journal.issued_through
-            && journal.zygisk_projection.as_ref().is_some_and(|work| {
-                work.outcome == PhaseOutcome::Confirmed
-                    && work.descriptor == recipient.image.descriptor
-            })
+            && journal.owns_projection_descriptor(&recipient.image.descriptor)
             && self.previous_authority.as_ref().is_none_or(|previous| {
                 previous.reference().is_some_and(|prior| {
                     previous.operation.0 < self.authority.operation.0
@@ -69,5 +66,9 @@ impl Journal {
         self.zygisk_bootstrap
             .as_ref()
             .is_some_and(ProjectionBootstrap::held)
+            && self
+                .bootstrap_resolution
+                .as_ref()
+                .is_none_or(|r| !r.valid(self))
     }
 }

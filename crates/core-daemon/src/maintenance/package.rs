@@ -78,6 +78,22 @@ impl PreparedPackage {
         vpnhide_artifact_model::archive::verify_package(&bytes, self.descriptor())?;
         Ok(())
     }
+    pub(crate) fn verified_files(
+        &self,
+    ) -> Result<std::collections::BTreeMap<String, Vec<u8>>, PackageError> {
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_CLOEXEC)
+            .open(format!("/proc/self/fd/{}", self.file.as_raw_fd()))?;
+        let mut bytes = Vec::new();
+        (&mut file)
+            .take(vpnhide_package_trust::MAX_PACKAGE_BYTES + 1)
+            .read_to_end(&mut bytes)?;
+        vpnhide_artifact_model::archive::verify_package(&bytes, self.descriptor())?;
+        Ok(vpnhide_artifact_model::archive::read_archive_bytes(
+            &bytes, 128,
+        )?)
+    }
     pub fn file(&self) -> &File {
         &self.file
     }

@@ -1,6 +1,6 @@
 # Core architecture
 
-Current implementation, app/core RPC33 and journal19 (reads1–18). Backend policy
+Current implementation, app/core RPC34 and journal21 (reads1–20). Backend policy
 implementation and publication of verified changes are approved under
 [RFC0005](rfcs/0005-unified-backend-lifecycle-policy.md); remaining flows and device
 gates are tracked separately. Kernel control-v2 / telemetry-v1 is unchanged.
@@ -278,9 +278,9 @@ an older schema. These records do not establish applied policy or health.
 
 Save and Repair use the writer's prepared selection and retained attempt budgets.
 Possible same-boot Zygisk hook consumption blocks a kernel transition even after
-revocation. Diagnostic failure does not initiate fallback. The accepted lifecycle
-policy is being implemented; explicit backend intent, existing Zygisk
-continuity and the post-update migration offer remain unfinished code. See
+revocation. Diagnostic failure does not initiate fallback. Explicit backend intent, bounded existing-Zygisk continuity and the voluntary
+post-update migration offer have production writer callsites; final qualification
+and physical-device acceptance remain separate. See
 [ROADMAP](../ROADMAP.md).
 Core never reboots the phone automatically.
 
@@ -475,7 +475,7 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-The current paired APK/Core contract is RPC33; journal19 reads schemas1–18. These
+The current paired APK/Core contract is RPC34; journal21 reads schemas1–20. These
 versions are independent of kernel control2/telemetry1 and do not require a
 compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
 publication and sampled current/stale/unattributed process consumption are separate
@@ -576,7 +576,7 @@ Zygisk authorization cannot claim global process coverage.
 The foreign-VPN observer, UID-in-tunnel probe and routing RPC/FFI field are removed.
 Dashboard/diagnostics consume Core evidence independently of external VPN presence
 and split-tunnel membership. Real fixture/hook API observations and manual network
-forensics remain. APK/Core must both speak RPC33; journal19 and the frozen
+forensics remain. APK/Core must both speak RPC34; journal21 and the frozen
 kernel control2/telemetry1 are independent, so a compatible builtin kernel does not
 need rebuilding merely because the app protocol changed.
 
@@ -664,11 +664,11 @@ inventory. Proven reductions remain available without complete inventory.
 Save/Cancel is unchanged. FullReset clears the device-local preference; imports
 cannot grant backend selection or Zygisk consent.
 
-This is not the complete RFC0005 lifecycle: requests for new Zygisk publication
-or retirement of a currently selected Zygisk are explicitly refused until the
-owned projection admission/withdrawal lifecycle is complete. Cross-upgrade continuity/last-successful
-hints, the informed Zygisk chooser and voluntary migration offer remain code
-work. No warning acknowledgement alone grants Auto fallback or standby loading.
+The RPC34/journal21 managed lifecycle below now connects informed Zygisk
+publication, owned withdrawal, authenticated combined update and a voluntary
+migration offer. Legacy existing-user adoption, scoped post-withdrawal choice/reentry
+settlement and bootstrap-Unknown resolution remain code work. No warning
+acknowledgement grants Auto fallback or standby loading.
 
 ## Loader source and recipient qualification
 
@@ -726,18 +726,18 @@ boot permits source content continuity only with the actual running inode and an
 exact active projection, with no pending stage; that still proves code bytes only.
 
 The work and its receipt survive retention, including a zero receipt budget.
-Uncertain work holds Maintenance; retained prepared work blocks reset, another
-choice or an independent Core replacement until owned withdrawal/combined update
-is implemented. Those checks run on the actual Core command writer. Schema16
+Uncertain work holds Maintenance; retained prepared work blocks reset and unrelated
+replacement. Only the linked withdrawal or authenticated combined update paths
+below can advance it. Those checks run on the actual Core command writer. Schema16
 preferences, counters and existing holds migrate intact; older writers reject
 journal17. Public RPC33 and backend control2 are unchanged.
 
-The production choice path still refuses new Zygisk publication and selected-Zygisk
-retirement. The journal callback executor is exercised by offline manager/process
-fixtures, not wired into the public chooser. Production admission, owned
-withdrawal/update and existing-user continuity remain code work. A separate
-empty-worker authority is now connected to boot for confirmed retained work. No new module, provider refresh or device reboot is
-performed by ordinary startup or these journal migrations.
+The callback executor is now wired into the informed public chooser through the
+same command owner. Managed withdrawal and authenticated combined update retain
+its historical receipts. Legacy existing-user adoption remains code work. Separate
+empty-worker authority is connected to boot for confirmed retained code; it does
+not claim policy delivery. Ordinary startup or journal migration does not publish
+a new discovery module, refresh a provider or reboot the device.
 
 
 ## Production managed-recipient boot readback
@@ -760,8 +760,9 @@ selection without loading or spending an attempt. Prepared KMOD/KPM loads also
 recheck residue before and after durable admission. Appearance during admission
 retains an uncertain result and budget; neither window calls the loader. An owned
 namespace alone does not authorize a new kernel load while discovery remains.
-The explicit chooser, bootstrap grant and owned withdrawal/update remain closed
-implementation gaps; this read-side connection does not complete RFC0005.
+The writer-connected lifecycle described below now owns explicit publication,
+withdrawal and authenticated combined update. This read-side evidence still does
+not certify real provider behavior or genuine secondary32 coverage.
 
 
 ## Frozen managed policy recipient (journal18)
@@ -785,10 +786,10 @@ Journal18 reads1–17 without inventing recipients for old startup records. It r
 new recipient semantics in older schemas, malformed bindings, non-Zygisk actions
 and current managed startup with no matching confirmed projection work. Holds,
 counters and prior intent are preserved. Public RPC33 and kernel control2/telemetry1
-are unchanged. This internal delivery connection still does not enable the public
-Zygisk chooser: production admission/dispatch, owned withdrawal/combined update,
-continuity and migration offer remain code work. The separately durable empty-worker
-bootstrap is connected to boot as described below.
+are unchanged. The current RPC34 writer now connects informed publication, withdrawal,
+authenticated managed update and upgrade-offer receipts. Bounded install continuity is connected below. Secondary32 coverage is deferred
+outside current delivery. Empty-worker bootstrap stays separate from
+user-policy delivery as described below.
 
 
 ## Empty-worker authority (journal19)
@@ -827,7 +828,107 @@ a revoked grant. Older-epoch failures cannot replace a newer native failure.
 Journal19 reads1–18, preserves holds/counters and rejects bootstrap in an older
 schema or with a nonempty policy. RPC33 and kernel control2 remain unchanged.
 
-Public Zygisk admission/publication, owned update/withdrawal, explicit resolution of
-bootstrap uncertainty, existing-user continuity/migration offer and the genuine
-secondary32 launcher remain code work. Provider, Android/SELinux/background-worker
+Explicit bootstrap resolution and bounded old-Core install continuity are
+connected below. The genuine secondary32 launcher remains deferred. Managed writer publication,
+withdrawal, update and the voluntary upgrade offer are connected below. Provider, Android/SELinux/background-worker
 acceptance are additional device gates; host filesystem fixtures do not satisfy them.
+
+
+## Managed lifecycle writer (RPC34 / journal21)
+
+`server/backend_choice` prepares inert inputs off-writer and dispatches informed
+managed publication or withdrawal on the existing command owner. Full canonical
+policy and current source/provider applicability are checked before publication;
+provider mapping is a staging prerequisite, never consumption or hook proof.
+The APK retains Save/Cancel and explicitly acknowledges the injection warning.
+No Auto choice, diagnostic failure or prior consent newly publishes Zygisk.
+
+The journal separately retains the original publication and exact withdrawal.
+Intent and dispatch markers are synced before manager effects. Confirmation needs
+actual closed-layout readback; exit0 is insufficient. Initial intents interrupted
+before dispatch become known no-effect; interrupted dispatch stays Unknown.
+Terminal Unknown is never rewritten by later bytes and the manager is never
+replayed. Both retained receipts survive zero settled-receipt retention.
+
+Same-boot withdrawal readback preserves the exact active code and independently
+checks the current journal-owned grant. It never publishes a replacement grant
+from the superseded choice. A different real boot needs the exact owned inert
+tombstone, no staged discovery copy, no grant and no current-boot exposure.
+`WithdrawalBootProof` is ephemeral and rechecked against the current executing
+source inode around native admission and dispatch. Directory absence does not
+prove hooks exited. Durable load budgets and other holds remain independent.
+
+`replacement::PreparedReplacement` now freezes a managed companion update from
+the authenticated incoming full ZIP. Core stages and verifies its own replacement,
+syncs a separate companion dispatch marker, then stages/verifies that exact ABI
+pair. Both halves must be read back before PendingRestart. The old source,
+recipient and actual grant stay active. Signed new-source verification and exact
+companion promotion precede new-boot loader binding. A bounded descriptor history
+preserves original consent and historical recipients across managed updates.
+
+After confirmed withdrawal, a Core-only update retains the inert tombstone and
+its original publication history. Its signed new source becomes the expected
+source for fresh negative proof; the old source proof cannot authorize it. An
+unhandled legacy autoload/separate Zygisk installation is refused rather than
+incidentally retired by Core replacement. The manager’s separate install hook now supports the bounded
+[old-Core continuity path](core-maintenance.md#old-core-install-continuity);
+module presence or an imported preference alone still cannot authorize it.
+
+Core prepares a voluntary kernel migration offer only after a verified managed
+upgrade, established current Zygisk policy and a compatible complete-policy
+Builtin/KMOD candidate. The first eligible APK presentation acknowledges display
+through a durable typed command; Keep is separately retained. Neither command
+changes backend or runs a manager. Accept uses the ordinary staged backend-choice
+path, which rechecks current compatibility and lifecycle holds. Stale generations
+and pending updates do not expose an offer. No automatic reboot exists.
+
+Journal20 rejects these new fields/receipts in older schemas and reads1–20 without
+dropping holds, budgets or prior authority. RPC34 pairs the new typed offer with
+the APK; kernel control2/telemetry1 is unchanged. Host/FFI fixtures are engineering
+evidence. Final combined qualification, genuine secondary32, legacy adoption,
+production signing and real provider/Android acceptance remain separate gates.
+
+
+### Withdrawal followup, reentry and bootstrap recovery (journal21)
+
+An ordinary later non-Zygisk choice requires a rechecked new-boot withdrawal
+proof before admission and again after the durable intent. A changed proof
+settles the new request as known no-effect and preserves the previous choice.
+Its separate followup receipt keeps the original withdrawal immutable. Signed
+source-only updates retain bounded exact prior source fences for old receipts;
+future native admission still checks the current source, never an old fence.
+
+A new warned Zygisk choice after withdrawal prepares a new immutable ABI pair
+against the exact inert tombstone. The single writer retains the completed old
+cycle, including publication, withdrawal, choice and update identities, in at
+most sixteen cycles. It never overwrites a terminal Unknown. A before-spawn
+failure restores the prior cycle and retains or expires the known no-effect receipt
+under ordinary retention; a dispatch uncertainty stays held without replay.
+Until the next boot, a proof may include only that exact no-grant staged pair and
+the unchanged active tombstone. It is not an active-hook or delivery claim.
+
+Explicit RepairActivation may settle an Unknown empty bootstrap only when the
+same boot's exact retained grant, current executing source and recipient image
+are rechecked. Off-writer preparation requires independent fresh Android
+specialization; the writer rechecks the grant/source before persisting a separate
+resolution linked to the Repair receipt. Historical bootstrap Unknown and boot
+exposure survive, so kernel admission cannot follow in that boot. Automatic
+startup never resolves it, republishes it or infers process exit from readback.
+Resolved bootstrap evidence survives later publications in bounded history.
+A mismatched source or foreign grant remains refused. An explicit non-Zygisk
+choice may instead prepare withdrawal when the bootstrap grant is absent or
+matches exactly this bootstrap/its retained predecessor, including another boot.
+Its pinned source/recipient readback is rechecked by the existing writer and
+committed atomically with the withdrawal receipt. Only that bootstrap hold is
+scoped away; other holds still block. Pre-spawn failure restores the bootstrap
+hold, ambiguous manager effects retain their own hold, and no manager is replayed.
+Kernel admission still needs a later real boot and exact tombstone/no-grant proof.
+This path never republishes Zygisk; same-family reauthorization without an exact
+current grant remains held.
+
+Explicit warned adoption of the recognized old separate Zygisk module is wired
+through the existing writer: it stages and verifies new payloads before durable
+retirement intent and fixed old-module markers. It preserves old bytes, user
+policy, exposure and interrupted Unknown receipts. Old-Core autoload continuity is connected through the manager install hook when an exact confirmed Native receipt, current grant and running source establish prior user Zygisk use. The installer preserves old policy/grant and stages an inert pair; the next boot’s existing writer alone adopts it after exact running-image readback. Unproven legacy installations remain refused or require the explicit warned adoption path. See [install continuity](core-maintenance.md#old-core-install-continuity). The secondary32 launcher and proposed system-server hook are deferred outside
+current delivery; existing ABI coverage limits remain explicit. Android/vendor/
+provider acceptance remains separate in ROADMAP.

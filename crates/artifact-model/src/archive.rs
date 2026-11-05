@@ -316,7 +316,11 @@ fn assemble_with_budget(
     }
     files.insert(
         "module.prop".into(),
-        format!("{}\nvpnhideControl=2\n", properties.trim_end_matches('\n')).into_bytes(),
+        format!(
+            "{}\nvpnhideControl=2\nvpnhideActivation=1\n",
+            properties.trim_end_matches('\n')
+        )
+        .into_bytes(),
     );
     let mut identities: Vec<PayloadKind> = KMIS
         .iter()

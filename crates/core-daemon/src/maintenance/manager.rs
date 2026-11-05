@@ -93,7 +93,17 @@ fn invalid() -> io::Error {
 /// Check every resolved ancestor, then pin metadata without opening a device or
 /// FIFO. The root argument is fixed by Core's production profile, never RPC.
 fn executable(root: &Path, relative: &str, uid: u32) -> io::Result<(String, File, ImageFile)> {
-    let resolved = std::fs::canonicalize(root.join(relative))?;
+    let candidate = root.join(relative);
+    std::fs::symlink_metadata(&candidate)?;
+    // A present dangling candidate is unknown, not absence. Otherwise a broken
+    // alternate-manager link silently turns ambiguity into a selected manager.
+    let resolved = std::fs::canonicalize(candidate).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            invalid()
+        } else {
+            error
+        }
+    })?;
     let relative = resolved.strip_prefix(root).map_err(|_| invalid())?;
     let mut current = OpenOptions::new()
         .read(true)
@@ -165,7 +175,7 @@ impl Manager {
     pub fn discover(root: &Path) -> io::Result<Self> {
         Self::discover_owned(root, 0)
     }
-    fn discover_owned(root: &Path, uid: u32) -> io::Result<Self> {
+    pub(super) fn discover_owned(root: &Path, uid: u32) -> io::Result<Self> {
         let mut found = Vec::<Self>::new();
         for (kind, path) in [
             (ManagerKind::KernelSu, "data/adb/ksud"),

@@ -139,6 +139,60 @@ impl Descriptor {
     }
 }
 
+/// A manager-staged replacement of discovery, with no libraries, hooks,
+/// updater or executable. Installing this archive must not alter the active
+/// image before the manager's normal boot promotion.
+pub const WITHDRAWAL_FILE_NAME: &str = "vpnhide-withdrawal.json";
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WithdrawalDescriptor {
+    pub schema: u32,
+    pub operation: u64,
+    pub published: Descriptor,
+}
+impl WithdrawalDescriptor {
+    pub fn bind(published: Descriptor, operation: u64) -> io::Result<Self> {
+        let value = Self {
+            schema: 1,
+            operation,
+            published,
+        };
+        value.validate()?;
+        Ok(value)
+    }
+    pub fn validate(&self) -> io::Result<()> {
+        self.published.validate()?;
+        if self.schema != 1 || self.operation <= self.published.operation {
+            return Err(invalid("withdrawal must follow its exact publication"));
+        }
+        Ok(())
+    }
+    pub fn parse(bytes: &[u8]) -> io::Result<Self> {
+        if bytes.len() > MAX_DESCRIPTOR_BYTES {
+            return Err(invalid("withdrawal descriptor budget"));
+        }
+        let value: Self = serde_json::from_slice(bytes).map_err(invalid)?;
+        value.validate()?;
+        Ok(value)
+    }
+    pub fn encode(&self) -> io::Result<Vec<u8>> {
+        self.validate()?;
+        let bytes = serde_json::to_vec(self).map_err(invalid)?;
+        if bytes.len() > MAX_DESCRIPTOR_BYTES {
+            return Err(invalid("withdrawal descriptor budget"));
+        }
+        Ok(bytes)
+    }
+    pub fn files(&self) -> io::Result<BTreeMap<String, Vec<u8>>> {
+        // Identical critical markers keep an existing active image eligible if
+        // a manager refreshes friendly metadata before promoting the directory.
+        Ok(BTreeMap::from([
+            ("module.prop".into(), Descriptor::module_prop()),
+            (WITHDRAWAL_FILE_NAME.into(), self.encode()?),
+        ]))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,6 +227,32 @@ mod tests {
             vpnhide_protocol::zygisk_activation::recipient_from_manifest(&members["module.prop"]),
             Some(vpnhide_protocol::zygisk_activation::Recipient::Managed)
         );
+    }
+    #[test]
+    fn withdrawal_is_a_closed_inert_replacement_bound_to_one_earlier_publication() {
+        let source = source();
+        let published = Descriptor::bind(&source["payloads/manifest.json"], 8).unwrap();
+        for operation in [0, 7, 8] {
+            assert!(WithdrawalDescriptor::bind(published.clone(), operation).is_err());
+        }
+        let withdrawal = WithdrawalDescriptor::bind(published.clone(), 9).unwrap();
+        let files = withdrawal.files().unwrap();
+        assert_eq!(
+            files.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["module.prop", WITHDRAWAL_FILE_NAME]
+        );
+        assert_eq!(files["module.prop"], Descriptor::module_prop());
+        assert_eq!(
+            WithdrawalDescriptor::parse(&files[WITHDRAWAL_FILE_NAME]).unwrap(),
+            withdrawal
+        );
+        let mut adversary = serde_json::to_value(&withdrawal).unwrap();
+        adversary["published"]["payloads"] = serde_json::json!([]);
+        assert!(WithdrawalDescriptor::parse(&serde_json::to_vec(&adversary).unwrap()).is_err());
+        let mut adversary = serde_json::to_value(&withdrawal).unwrap();
+        adversary["execute"] = serde_json::json!("service.sh");
+        assert!(WithdrawalDescriptor::parse(&serde_json::to_vec(&adversary).unwrap()).is_err());
+        assert!(WithdrawalDescriptor::parse(&vec![b' '; MAX_DESCRIPTOR_BYTES + 1]).is_err());
     }
     #[test]
     fn exact_source_and_both_final_libraries_are_required() {

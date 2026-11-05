@@ -258,7 +258,13 @@ fun VpnHideApp(mainProfile: Boolean = isMainAppProfile(Process.myUid())) {
                         },
                     )
                 }
-                ConfigFeedbackProvider { MainScreen() }
+                ConfigFeedbackProvider {
+                    MainScreen()
+                    if (granted && !showBackgroundUpdatePrompt) {
+                        dev.okhsunrog.vpnhide.settings
+                            .BackendMigrationOffer()
+                    }
+                }
             }
             if (settings.agentControlEnabled) AgentUiScenarioHost()
         }

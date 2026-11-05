@@ -199,3 +199,80 @@ unqualified old generation can be retired safely rather than blocking recovery.
 The [build qualification](../kmod/BUILDING.md#export-and-loader-version-qualification)
 uses the same portable Rust inspector; generic non-MODVERSIONS test kernels have
 a separate scope and cannot qualify a new GKI replacement.
+
+
+## Managed Zygisk companion
+
+Replacement of a confirmed managed recipient prepares its ABI pair only from
+authenticated incoming ZIP members. A separate durable marker precedes that
+manager effect. Core and companion staging must both verify before PendingRestart;
+missing/extra code or changed old source/grant retains uncertainty. Same-boot
+restart keeps the old code and current journal-owned policy. Signed source and
+exact promoted companion are checked before new-boot bootstrap; no silent live
+refresh or reboot occurs.
+
+A confirmed inert withdrawal stays withdrawn during a later Core source update.
+The retained tombstone and signed new source bind the subsequent negative proof;
+old source evidence cannot authorize new kernel admission. Historical publication,
+withdrawal and Unknown receipts are preserved. The manager install hook supports bounded old-Core continuity below.
+Core replacement still refuses incidental legacy retirement instead of deleting
+a working installation. Explicit warned separate-module adoption is bounded as
+described below; it does not claim automatic continuation.
+
+
+Explicit warned adoption can replace a recognized old separate `vpnhide_zygisk`
+module when the current Core source is passive. The prepared token retains the
+exact owned live/staged legacy tree and file descriptors. The existing command
+writer verifies the newly staged ABI pair from current Core payloads before a
+separate durable retirement intent; only then may it create the old module's
+fixed disable/remove markers. Old library bytes and user policy are retained.
+Interrupted dispatch or retirement remains Unknown without manager replay. New
+boot admission independently checks old retirement and actual promoted code;
+neither marker creation nor exit zero proves existing hooks have exited. This
+path requires the normal explicit injection warning and does not infer consent
+from an installed module, imported preference or old payload. Standalone legacy installations without a trustworthy Core Native receipt still
+need this explicit warning; module presence does not establish prior use.
+
+
+## Old-Core install continuity
+
+The manager-selected incoming daemon runs `install-handoff` as root before the
+manager replaces the old Core tree. Fresh passive installs have no continuity
+side effects. An unused old autoload payload is not published as standby.
+
+For actual old root-autoload Zygisk use, the helper requires the exact latest
+confirmed Native receipt and canonical policy, its current-boot owned grant,
+old executable identity obtained from the root socket peer, complete old source,
+and exact incoming passive Core/ABI bytes. Later user intent or an independent
+hold refuses inheritance. The root manager authorizes this initial package
+installation; the helper checks the actual closed layout and byte bindings, not
+an app-supplied catalog as independent signing authority. Subsequent privileged
+Core updates retain the existing signed-package contract.
+
+The helper retains source/grant descriptors and serializes installers. It writes
+immutable root-private `install-handoff/intent.json` before atomic same-filesystem
+publication of a grant-free `modules_update/vpnhide_zygisk_runtime` pair. The
+optional `published.json` records completed readback. It does not write canonical
+policy, the live journal, old grant, old module markers or provider settings;
+it neither runs a nested manager nor stops the old daemon. Core module metadata
+retains control/activation compatibility for an old manager’s live metadata copy;
+that metadata cannot make a passive Core an eligible recipient.
+
+On a genuinely new boot, exact active pair, absent staged copy/grant and actual
+running passive Core inode are checked before the existing command writer records
+inherited intent. This is a separate private receipt, not a manufactured injection
+warning. The original Native receipt and old grant remain historical; current-boot
+bootstrap and independent fresh-worker proof are still required before ordinary
+policy authorization. Compatible-kernel offers additionally need confirmed current
+Zygisk policy and real kernel eligibility. No automatic family switch occurs.
+
+Interrupted intent/publication is never dispatched again. Retry reads back the
+exact existing pair or refuses; malformed/incomplete private records retain a
+hold. A missing handoff for the last confirmed user Zygisk choice refuses startup
+rather than silently selecting a kernel. An unconfirmed policy change or later non-Zygisk choice invalidates adoption;
+a latest confirmed Zygisk receipt for the same old source retains current policy.
+An already managed recipient must be updated through the paired Core updater;
+a different manual Core-only install refuses to preserve the existing runtime.
+Standalone legacy use without these Core receipts still requires warned adoption.
+Filesystem fixtures cover these boundaries; real manager/SELinux/provider and
+reboot acceptance remain separate. The secondary32 hook is excluded.

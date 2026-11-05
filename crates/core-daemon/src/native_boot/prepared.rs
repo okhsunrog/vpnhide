@@ -7,8 +7,10 @@ use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 mod bundled;
 mod selection_evidence;
-pub(crate) use bundled::preview_choice;
 pub use bundled::{BundleIdentity, ZygiskRecipientBinding, restore_environment};
+pub(crate) use bundled::{
+    preview_choice, preview_projection_adoption_choice, preview_projection_choice,
+};
 pub(crate) struct ChoicePreview {
     pub assessment: crate::payloads::selection::Assessment,
     pub ownership: crate::payloads::selection::Ownership,
@@ -237,7 +239,12 @@ impl Prepared {
         journal: &crate::journal::Journal,
         explicit: bool,
     ) -> Result<Self, String> {
-        journal.check_native_safety(&self.intent)?;
+        if let Some(proof) = &self.env.withdrawal {
+            proof
+                .recheck(&self.env)
+                .map_err(|e| format!("withdrawal evidence changed: {e}"))?;
+        }
+        journal.check_native_safety_with_withdrawal(&self.intent, self.env.withdrawal.as_ref())?;
         if let TransitionAction::Load(backend) = self.intent.action
             && journal.backend_rejected(&self.intent.boot_id, backend)
         {
@@ -245,7 +252,11 @@ impl Prepared {
                 "selected backend already rejected in this boot; no automatic successor".into(),
             );
         }
-        journal.check_native_attempt(&self.intent, explicit)?;
+        journal.check_native_attempt_with_withdrawal(
+            &self.intent,
+            explicit,
+            self.env.withdrawal.as_ref(),
+        )?;
         Ok(self)
     }
     pub(crate) fn dispatch_ownership_clear(&self) -> bool {
@@ -279,6 +290,11 @@ impl Prepared {
         }
     }
     pub(crate) fn validate_binding(&self) -> Result<(), String> {
+        if let Some(proof) = &self.env.withdrawal {
+            proof
+                .recheck(&self.env)
+                .map_err(|e| format!("withdrawal evidence changed: {e}"))?;
+        }
         if matches!(
             self.intent.action,
             TransitionAction::Load(NativeBackend::Kmod | NativeBackend::Kpm)
@@ -496,6 +512,7 @@ mod tests {
             payload_override: None,
             bundle_identity: None,
             backend_choice: vpnhide_core_rpc::BackendChoice::Auto,
+            withdrawal: None,
             loader: None,
         };
         fs::write(&env.boot_id_path, boot).unwrap();

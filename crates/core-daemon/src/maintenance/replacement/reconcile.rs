@@ -42,6 +42,16 @@ impl ReplacementWork {
             .require_unchanged_owned(&paths.active(), uid)
             .and_then(|_| self.before.require_running_owned(running, uid))
             .map_err(|_| Failure::RunningImageMismatch)?;
+        if let Some(source) = &self.withdrawn_source {
+            source
+                .require_unchanged_owned(&paths.root, uid)
+                .map_err(|_| Failure::LiveImageChanged)?;
+        }
+        if let Some(projection) = &self.projection {
+            projection
+                .require_old_owned(&paths.root, uid)
+                .map_err(|_| Failure::LiveImageChanged)?;
+        }
         if !self.dispatch_intent {
             // This boundary precedes the only dispatch intent. Prove sources
             // are unchanged before releasing its hold for a NEW user command.
@@ -53,7 +63,7 @@ impl ReplacementWork {
         }
         Ok(GenerationProof::OldRunning)
     }
-    pub(super) fn new_boot(
+    pub(crate) fn new_boot(
         &self,
         paths: &ReplacementPaths,
         running: &File,
@@ -99,6 +109,16 @@ impl ReplacementWork {
         active
             .require_running_owned(running, uid)
             .map_err(|_| Failure::RunningImageMismatch)?;
+        if let Some(source) = &self.withdrawn_source {
+            source
+                .require_unchanged_owned(&paths.root, uid)
+                .map_err(|_| Failure::StagedImageInvalid)?;
+        }
+        if let Some(projection) = &self.projection {
+            projection
+                .require_new_owned(&paths.root, uid)
+                .map_err(|_| Failure::StagedImageInvalid)?;
+        }
         if !self
             .legacy
             .retirement_observed_owned(&paths.root, uid)

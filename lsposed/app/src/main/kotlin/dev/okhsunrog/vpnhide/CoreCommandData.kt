@@ -32,8 +32,13 @@ internal fun coreCommand(
             CoreCommand.MigrateLegacy(revision, effect.mode)
         }
 
+        is CoreRootEffect.AcknowledgeBackendOffer -> {
+            requireEffectOnlyMutation(mutation, intent)
+            CoreCommand.AcknowledgeBackendOffer(revision, effect.sourceCommit, effect.keep)
+        }
+
         is CoreRootEffect.StageBackendChoice -> {
-            require(intent.edits.isEmpty() && !mutation.removesCanonical && !mutation.forceActivation)
+            requireEffectOnlyMutation(mutation, intent)
             CoreCommand.StageBackendChoice(revision, effect.request)
         }
 
@@ -55,4 +60,12 @@ internal fun coreCommand(
             }
         }
     }
+}
+
+/** These device-local effects carry no canonical edit or activation request. */
+private fun requireEffectOnlyMutation(
+    mutation: CanonicalMutation,
+    intent: PreparedConfigIntent,
+) {
+    require(intent.edits.isEmpty() && !mutation.removesCanonical && !mutation.forceActivation)
 }

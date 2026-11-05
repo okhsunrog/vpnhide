@@ -642,3 +642,382 @@ fn unavailable_boot_identity_never_commits_an_invalid_bootstrap_or_spends_a_gene
         state.shutdown();
     }
 }
+
+#[test]
+fn explicit_bootstrap_readback_keeps_unknown_and_exposure_and_requires_exact_current_source() {
+    let (_root, state, env, paths) = ready_bootstrap();
+    bootstrap(&state, &env).unwrap();
+    let path = paths.persistent.join("journal.json");
+    let mut saved = journal::read(&path).unwrap();
+    // Model a crash after the grant rename but before completion fsync.
+    saved.zygisk_bootstrap.as_mut().unwrap().outcome = PhaseOutcome::Unknown;
+    let historical = saved.zygisk_bootstrap.clone();
+    assert!(saved.bootstrap_uncertain());
+    let running = File::open(paths.source().join("vpnhide-core")).unwrap();
+    let uid = unsafe { libc::geteuid() };
+    let observed = super::resolution::inspect_owned(&saved, &env, &running, uid).unwrap();
+    saved.issued_through = 10;
+    saved.bootstrap_resolution = Some(super::resolution::BootstrapResolution {
+        operation: OperationId(10),
+        observed,
+        withdrawal: None,
+    });
+    journal::record_phase_running(
+        &path,
+        &mut saved,
+        OperationId(10),
+        BaseRef { revision: 0 },
+        &vpnhide_core_rpc::ConfigEdit::RepairActivation,
+        &CanonicalConfig::default(),
+        &[vpnhide_core_rpc::ConfigPhase::Native],
+        &[],
+        vpnhide_core_rpc::ConfigPhase::Native,
+        None,
+    )
+    .unwrap();
+    saved.get_mut(OperationId(10)).unwrap().command = Some(journal::CommandIntent::Edit);
+    journal::write_atomic(&path, &saved).unwrap();
+    let restored = journal::read(&path).unwrap();
+    assert!(!restored.bootstrap_uncertain());
+    assert_eq!(restored.zygisk_bootstrap, historical);
+    assert!(restored.zygisk_exposed_in(BOOT_B));
+    // The receipt is readback settlement, never policy delivery or loader health.
+    assert!(restored.zygisk_authority.is_none());
+    assert!(restored.native_startup.is_none());
+    for variant in 0..4 {
+        let mut bad = restored.clone();
+        match variant {
+            0 => {
+                bad.bootstrap_resolution
+                    .as_mut()
+                    .unwrap()
+                    .observed
+                    .authority
+                    .intent
+                    .wire = "foreign".into()
+            }
+            1 => bad.operations.clear(),
+            2 => bad.bootstrap_resolution.as_mut().unwrap().operation = OperationId(9),
+            _ => bad.version = 20,
+        }
+        journal::write_atomic(&path, &bad).unwrap();
+        assert!(journal::read(&path).is_err(), "bad resolution {variant}");
+    }
+    fs::write(&env.boot_id_path, BOOT_A).unwrap();
+    assert!(super::resolution::inspect_owned(&saved, &env, &running, uid).is_err());
+    fs::write(&env.boot_id_path, BOOT_B).unwrap();
+    let grant_path = paths
+        .active()
+        .join(vpnhide_protocol::zygisk_activation::FILE_NAME);
+    let grant = fs::read(&grant_path).unwrap();
+    fs::remove_file(&grant_path).unwrap();
+    assert!(super::resolution::inspect_owned(&saved, &env, &running, uid).is_err());
+    fs::write(&grant_path, grant).unwrap();
+    fs::write(paths.source().join("vpnhide-core"), b"changed").unwrap();
+    assert!(super::resolution::inspect_owned(&saved, &env, &running, uid).is_err());
+    state.shutdown();
+}
+
+#[test]
+fn malformed_or_expired_repair_never_launches_a_bootstrap_worker() {
+    use vpnhide_core_rpc::{ConfigEdit, CoreCommand};
+    let (root, state, _env, _paths) = ready_bootstrap();
+    bootstrap(&state, &_env).unwrap();
+    state
+        .engine
+        .store
+        .lock()
+        .unwrap()
+        .journal
+        .zygisk_bootstrap
+        .as_mut()
+        .unwrap()
+        .outcome = PhaseOutcome::Unknown;
+    let command = CoreCommand::Edit {
+        base: BaseRef { revision: 0 },
+        edit: ConfigEdit::RepairActivation,
+    };
+    for operation in [OperationId(0), OperationId(1000)] {
+        assert_eq!(
+            state.prepare_bootstrap_recovery(operation, &command),
+            Err(SubmitError::Rejected {
+                reason: "operation_not_allocated".into()
+            })
+        );
+    }
+    let operation = state.issue_operation_id().unwrap();
+    let future = CoreCommand::Edit {
+        base: BaseRef { revision: u64::MAX },
+        edit: ConfigEdit::RepairActivation,
+    };
+    assert!(matches!(
+        state.prepare_bootstrap_recovery(operation, &future),
+        Err(SubmitError::Conflict { .. })
+    ));
+    let mut store = state.engine.store.lock().unwrap();
+    store.journal.expired_through = operation.0;
+    drop(store);
+    assert_eq!(
+        state.prepare_bootstrap_recovery(operation, &command),
+        Err(SubmitError::Expired)
+    );
+    assert_eq!(
+        fs::read_to_string(root.path().join("data/adb/dispatch-count")).unwrap(),
+        "1"
+    );
+    state.shutdown();
+}
+
+#[test]
+fn explicit_withdrawal_settles_missing_or_old_bootstrap_grant_without_erasing_unknown() {
+    use super::resolution::withdrawal::{PreparedBootstrapWithdrawal, can_withdraw};
+    use crate::maintenance::zygisk_projection::withdrawal::PreparedWithdrawal;
+    use crate::native_boot::prepared::ChoicePreview;
+    use crate::payloads::selection::{Assessment, Candidate, Decision, Ownership};
+    for (new_boot, absent_grant, mode, fail_initial) in [
+        (false, true, "projection", false),
+        (true, false, "projection", false),
+        (true, true, "projection", false),
+        (false, true, "none", false),
+        (false, true, "projection", true),
+    ] {
+        let (root, state, mut env, paths) = ready_bootstrap();
+        bootstrap(&state, &env).unwrap();
+        let path = paths.persistent.join("journal.json");
+        let mut saved = journal::read(&path).unwrap();
+        saved.zygisk_bootstrap.as_mut().unwrap().outcome = PhaseOutcome::Unknown;
+        saved.issued_through = 10;
+        let historical = saved.zygisk_bootstrap.clone();
+        if new_boot {
+            fs::write(&env.boot_id_path, "33333333-3333-3333-3333-333333333333").unwrap();
+        }
+        if absent_grant {
+            fs::remove_file(
+                paths
+                    .active()
+                    .join(vpnhide_protocol::zygisk_activation::FILE_NAME),
+            )
+            .unwrap();
+        }
+        let request = BackendChoiceRequest {
+            expected_revision: 1,
+            choice: BackendChoice::Auto,
+            acknowledged_warning: None,
+        };
+        assert!(can_withdraw(&saved, &request));
+        let mut other_hold = saved.clone();
+        other_hold
+            .expired_holds
+            .push(vpnhide_core_rpc::ConfigPhase::Persist);
+        assert!(!can_withdraw(&other_hold, &request));
+        assert!(!can_withdraw(
+            &saved,
+            &BackendChoiceRequest {
+                choice: BackendChoice::Fixed {
+                    backend: NativeBackend::Zygisk
+                },
+                acknowledged_warning: Some(ZygiskChoiceWarning::ProcessInjectionV1),
+                ..request.clone()
+            }
+        ));
+        let uid = unsafe { libc::geteuid() };
+        let running = File::open(paths.source().join("vpnhide-core")).unwrap();
+        let readback = PreparedBootstrapWithdrawal::prepare_owned(
+            &saved,
+            &env,
+            OperationId(10),
+            running.try_clone().unwrap(),
+            uid,
+        )
+        .unwrap();
+        let grant_path = paths
+            .active()
+            .join(vpnhide_protocol::zygisk_activation::FILE_NAME);
+        let original_grant = fs::read(&grant_path).ok();
+        fs::write(&grant_path, b"foreign grant").unwrap();
+        assert!(readback.require_fresh(&saved, &env).is_err());
+        if let Some(bytes) = original_grant {
+            fs::write(&grant_path, bytes).unwrap();
+        } else {
+            fs::remove_file(&grant_path).unwrap();
+        }
+        readback.require_fresh(&saved, &env).unwrap();
+        let withdrawal = PreparedWithdrawal::prepare_owned(
+            paths.clone(),
+            10,
+            &saved,
+            crate::maintenance::manager::tests::discover(root.path()),
+            running,
+            uid,
+        )
+        .unwrap();
+        assert_eq!(
+            readback.receipt.withdrawal.as_ref().unwrap().grant,
+            withdrawal.authority
+        );
+        let template = root.path().join("data/adb/projection-template");
+        fs::remove_dir_all(&template).unwrap();
+        fs::create_dir(&template).unwrap();
+        for (name, bytes) in withdrawal.descriptor.files().unwrap() {
+            fs::write(template.join(name), bytes).unwrap();
+        }
+        fs::write(root.path().join("data/adb/mode"), mode).unwrap();
+        journal::write_atomic(&path, &saved).unwrap();
+        let config = CanonicalConfig::default();
+        {
+            let mut store = state.engine.store.lock().unwrap();
+            store.config = Some(config.clone());
+            store.config_revision = 0;
+            store.journal = saved.clone();
+        }
+        let mut binding = historical.as_ref().unwrap().binding.clone();
+        // Ordinary kernel-choice preview binds only the source catalog. The
+        // separate bootstrap recovery token still checks the exact recipient.
+        binding.zygisk_recipient = None;
+        let boot_id = crate::native_boot::read_boot_id(&env.boot_id_path);
+        env.loader = Some(state.loader.clone());
+        state.install_native_boot(crate::native_boot::NativeBoot::blocked(
+            env,
+            7,
+            "fixture".into(),
+        ));
+        let prepared = crate::server::backend_choice::PreparedBackendChoice {
+            bootstrap_resolution: Some(readback),
+            config,
+            publication: None,
+            withdrawal: Some(withdrawal),
+            preview: ChoicePreview {
+                boot_id,
+                binding,
+                ownership: Ownership::Clear,
+                assessment: Assessment {
+                    kmi: crate::payloads::kmi::KmiResolution {
+                        series: None,
+                        release_hint: None,
+                        conflicting_hints: false,
+                        module_hint: None,
+                        candidates: vec![],
+                    },
+                    decision: Decision::Select(NativeBackend::Kmod),
+                    candidates: vec![Candidate {
+                        backend: NativeBackend::Kmod,
+                        payload_indices: vec![],
+                        eligibility: Ok(()),
+                    }],
+                },
+            },
+        };
+        let duplicate = vpnhide_core_rpc::CoreCommand::StageBackendChoice {
+            base: BaseRef { revision: 0 },
+            request: request.clone(),
+        };
+        let result = state
+            .call_writer(move |state| {
+                if fail_initial {
+                    journal::fail_write(1, true);
+                }
+                state.execute_backend_choice(
+                    OperationId(10),
+                    BaseRef { revision: 0 },
+                    request,
+                    None,
+                    Some(prepared),
+                )
+            })
+            .unwrap();
+        if fail_initial {
+            assert_eq!(result, Err(SubmitError::Unavailable));
+            state.shutdown();
+            let mut restored = journal::read(&path).unwrap();
+            restored.fence_unresolved();
+            assert_eq!(restored.zygisk_bootstrap, historical);
+            assert!(restored.bootstrap_uncertain());
+            assert!(restored.bootstrap_resolution.is_none());
+            assert_eq!(
+                restored.zygisk_withdrawal.as_ref().unwrap().outcome,
+                PhaseOutcome::FailedKnown
+            );
+            assert_eq!(
+                fs::read_to_string(root.path().join("data/adb/dispatch-count")).unwrap(),
+                "1"
+            );
+            journal::write_atomic(&path, &restored).unwrap();
+            journal::read(&path).unwrap();
+            continue;
+        }
+        result.unwrap();
+        let restored = journal::read(&path).unwrap();
+        if mode == "none" {
+            assert_eq!(restored.zygisk_bootstrap, historical);
+            assert!(
+                !restored.bootstrap_uncertain(),
+                "readback has its independent receipt"
+            );
+            assert!(
+                restored.has_unknown(),
+                "uncertain manager dispatch still holds runtime"
+            );
+            assert_eq!(
+                restored.zygisk_withdrawal.as_ref().unwrap().outcome,
+                PhaseOutcome::Unknown
+            );
+            assert!(!can_withdraw(
+                &restored,
+                &BackendChoiceRequest {
+                    expected_revision: 1,
+                    choice: BackendChoice::Auto,
+                    acknowledged_warning: None
+                }
+            ));
+            state.submit_command(OperationId(10), duplicate).unwrap();
+            assert_eq!(
+                fs::read_to_string(root.path().join("data/adb/dispatch-count")).unwrap(),
+                "2"
+            );
+            assert!(!paths.staged().exists());
+            state.shutdown();
+            continue;
+        }
+        assert_eq!(restored.zygisk_bootstrap, historical);
+        assert!(!restored.bootstrap_uncertain());
+        assert_eq!(
+            restored.zygisk_withdrawal.as_ref().unwrap().outcome,
+            PhaseOutcome::Confirmed
+        );
+        assert!(restored.zygisk_exposed_in(BOOT_B));
+        assert!(paths.active().join("zygisk/arm64-v8a.so").exists());
+        assert!(
+            paths
+                .staged()
+                .join(vpnhide_artifact_model::zygisk_projection::WITHDRAWAL_FILE_NAME)
+                .exists()
+        );
+        assert!(!paths.staged().join("zygisk").exists());
+        assert_eq!(
+            fs::read_to_string(root.path().join("data/adb/dispatch-count")).unwrap(),
+            "2"
+        );
+        state.shutdown();
+        fs::rename(paths.active(), root.path().join("retired-runtime")).unwrap();
+        fs::rename(paths.staged(), paths.active()).unwrap();
+        let boot = "44444444-4444-4444-4444-444444444444";
+        fs::write(root.path().join("proc/sys/kernel/random/boot_id"), boot).unwrap();
+        let running = File::open(paths.source().join("vpnhide-core")).unwrap();
+        let withdrawal = restored.zygisk_withdrawal.as_ref().unwrap();
+        let crate::maintenance::zygisk_projection::withdrawal::observation::WithdrawalObservation::Withdrawn(proof) = withdrawal.observe_owned(&paths, &running, uid).unwrap() else { panic!("new boot proof required") };
+        let intent = crate::native_boot::prepared::TransitionIntent {
+            selection_evidence: None,
+            boot_id: boot.into(),
+            filesystem_hiding: false,
+            action: crate::native_boot::prepared::TransitionAction::Adopt(NativeBackend::Builtin),
+            payload: None,
+            bundle: None,
+            retire_zygisk: None,
+            retire_directory_identity: None,
+        };
+        restored
+            .check_native_safety_with_withdrawal(&intent, Some(&proof))
+            .unwrap();
+        assert_eq!(restored.zygisk_bootstrap, historical);
+    }
+}
