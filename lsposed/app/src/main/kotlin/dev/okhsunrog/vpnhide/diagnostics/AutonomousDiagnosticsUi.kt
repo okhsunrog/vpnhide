@@ -77,6 +77,12 @@ internal fun AutonomousDiagnosticStatusCard(
 internal fun AutonomousDiagnosticRows(snapshot: AutonomousDiagnosticSnapshot) {
     val assessment = snapshot.assessment ?: return
     for (id in assessment.required) {
+        val deniedByAndroid =
+            when (id) {
+                "netlink_links" -> "netlink_link_request_denied" in assessment.nativeControls
+                "proc_routes" -> "proc_route_request_denied" in assessment.nativeControls
+                else -> false
+            }
         val status =
             when {
                 id in assessment.leaked -> {
@@ -87,8 +93,8 @@ internal fun AutonomousDiagnosticRows(snapshot: AutonomousDiagnosticSnapshot) {
                     R.string.autonomous_verified
                 }
 
-                id == "netlink_links" && "netlink_link_request_denied" in assessment.nativeControls -> {
-                    R.string.autonomous_netlink_link_request_denied
+                deniedByAndroid -> {
+                    R.string.autonomous_blocked_by_android
                 }
 
                 else -> {

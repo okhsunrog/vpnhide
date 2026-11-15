@@ -263,8 +263,21 @@ eight netlink route and rule vectors on the authentic worker. Explicit
 `bind` on route netlink had produced `EACCES`; the unicast collector now
 lets the kernel assign the local port at send time. Request authorization
 and sender validation still apply. The same Android app domain was denied
-reading `/proc/net/route` and `/proc/net/ipv6_route`, so those four
-vectors remained unverified. [Android SELinux network policy](https://android.googlesource.com/platform/system/sepolicy/+/android16-release/private/net.te)
+reading `/proc/net/route` and `/proc/net/ipv6_route`. The collector now
+records whether each permission error came from open or read. Core keeps the
+denial for each actor and family only when the same worker is denied in both
+RAW and protected phases and the root route controls qualify. The Dashboard
+shows the Android restriction when all four vectors qualify as denied. The
+assessment still records a leak if a failed read returned a fixture route before
+the error. Proc routes remain unverified as a hiding result. [Android SELinux proc labels](https://android.googlesource.com/platform/system/sepolicy/+/android16-qpr2-release/private/genfs_contexts)
+
+On Pixel 8 Pro, the RPC43 pair reported EACCES at open for both proc route
+files, both read actors and both worker phases in 20 consecutive Direct Boot
+runs. The same 17 groups remained confirmed, including the netlink route
+group. In five independent Builtin measurements, a process with the app UID,
+zero effective capabilities and the KernelSU SELinux domain could read both
+files. It saw the ordinary fixture routes with the VPN routes filtered out.
+Root saw both fixtures and verified their cleanup.
 
 With the independent controls and reordered fixtures, the same Pixel also
 confirmed interface flags, MTU, `getifaddrs`, the IPv4 address ioctl group

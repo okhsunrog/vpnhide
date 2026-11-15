@@ -274,6 +274,20 @@ impl DiagnosticRun {
                     leaked.insert(group);
                 }
             }
+            if !proven.contains(&ProcRoutes)
+                && !leaked.contains(&ProcRoutes)
+                && crate::RouteCheck::required()
+                    .into_iter()
+                    .filter(|check| check.surface.proc_route())
+                    .all(|check| {
+                        routes
+                            .access_denials
+                            .iter()
+                            .any(|denial| denial.check == check)
+                    })
+            {
+                native_controls.push(ControlFailure::ProcRouteRequestDenied);
+            }
             for control in &routes.controls {
                 if !native_controls.contains(control) {
                     native_controls.push(*control);
@@ -417,7 +431,7 @@ pub(crate) mod tests {
         let mut evidence = crate::ScopedRouteResult {
             proven: netlink[1..].to_vec(),
             leaked: vec![leak],
-            controls: vec![],
+            ..Default::default()
         };
         run.record_routes(evidence.clone());
         assert!(

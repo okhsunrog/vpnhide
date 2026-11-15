@@ -43,11 +43,26 @@ impl NativeReadActor {
     pub const ALL: [Self; 2] = [Self::Libc, Self::Syscall];
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcReadStage {
+    Open,
+    Read,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProcReadDenial {
+    pub stage: ProcReadStage,
+    pub errno: i32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProbeError {
     Errno(i32),
     GetlinkSendDenied(i32),
+    ProcPermissionDenied(ProcReadDenial),
     Timeout,
     Malformed,
     TooLarge,
@@ -260,6 +275,7 @@ pub enum ControlFailure {
     ProbeUnavailable,
     CleanupUnconfirmed,
     NetlinkLinkRequestDenied,
+    ProcRouteRequestDenied,
 }
 
 /// Later observations qualify proof, never erase an earlier qualified leak.

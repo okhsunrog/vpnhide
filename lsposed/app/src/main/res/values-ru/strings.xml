@@ -559,7 +559,7 @@
     <string name="autonomous_leaks">Проверка обнаружила утечки защиты</string>
     <string name="autonomous_unavailable">Проверка защиты недоступна</string>
     <string name="autonomous_history">Показан предыдущий результат</string>
-    <string name="autonomous_netlink_link_request_denied">Заблокировано Android</string>
+    <string name="autonomous_blocked_by_android">Заблокировано Android</string>
     <string name="autonomous_tally">%1$d подтверждено · %2$d с утечками · %3$d не проверено</string>
     <string name="autonomous_process_coverage">Покрытие уже запущенных процессов пока не подтверждено</string>
     <string name="autonomous_cleanup_unknown">Не удалось подтвердить очистку среды проверки</string>

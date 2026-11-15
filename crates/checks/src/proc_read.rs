@@ -5,20 +5,26 @@ use std::{
     os::fd::{AsRawFd, FromRawFd, OwnedFd},
     time::{Duration, Instant},
 };
-use vpnhide_diagnostic_model::{NativeReadActor, ProbeError};
+use vpnhide_diagnostic_model::{NativeReadActor, ProbeError, ProcReadDenial, ProcReadStage};
 pub(crate) enum ProcFile {
     InterfaceStats,
     Ipv6Addresses,
     RoutesIpv4,
     RoutesIpv6,
 }
-fn error() -> ProbeError {
-    ProbeError::Errno(
-        io::Error::last_os_error()
-            .raw_os_error()
-            .filter(|e| *e > 0)
-            .unwrap_or(libc::EIO),
-    )
+fn error(file: &ProcFile, stage: ProcReadStage, no_data: bool) -> ProbeError {
+    let errno = io::Error::last_os_error()
+        .raw_os_error()
+        .filter(|e| *e > 0)
+        .unwrap_or(libc::EIO);
+    if no_data
+        && matches!(file, ProcFile::RoutesIpv4 | ProcFile::RoutesIpv6)
+        && matches!(errno, libc::EACCES | libc::EPERM)
+    {
+        ProbeError::ProcPermissionDenied(ProcReadDenial { stage, errno })
+    } else {
+        ProbeError::Errno(errno)
+    }
 }
 pub(crate) struct ProcBytes {
     pub bytes: Vec<u8>,
@@ -68,7 +74,7 @@ fn read_into(
         }
     };
     if raw < 0 {
-        return Err(error());
+        return Err(error(&file, ProcReadStage::Open, true));
     }
     let fd = unsafe { OwnedFd::from_raw_fd(raw as libc::c_int) };
     let mut buffer = [0u8; 4096];
@@ -94,7 +100,7 @@ fn read_into(
             if io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
                 continue;
             }
-            return Err(error());
+            return Err(error(&file, ProcReadStage::Read, bytes.is_empty()));
         }
         if size == 0 {
             return Ok(());

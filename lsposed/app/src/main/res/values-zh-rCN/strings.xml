@@ -547,7 +547,7 @@
     <string name="autonomous_leaks">保护检查发现泄露</string>
     <string name="autonomous_unavailable">保护检查不可用</string>
     <string name="autonomous_history">显示之前的结果</string>
-    <string name="autonomous_netlink_link_request_denied">已被 Android 阻止</string>
+    <string name="autonomous_blocked_by_android">已被 Android 阻止</string>
     <string name="autonomous_tally">%1$d 已验证 · %2$d 泄露 · %3$d 未验证</string>
     <string name="autonomous_process_coverage">尚未确认对现有应用进程的覆盖</string>
     <string name="autonomous_cleanup_unknown">无法确认测试环境已清理</string>

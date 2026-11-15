@@ -1,6 +1,6 @@
 //! Literal route observations and evaluation with owned positive, ordinary and
 //! cleanup controls.
-use crate::{NativeReadActor, ObservedRule, ProbeError, RuleRole};
+use crate::{NativeReadActor, ObservedRule, ProbeError, ProcReadDenial, RuleRole};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -34,6 +34,9 @@ impl RouteSurface {
     }
     pub fn netlink(self) -> bool {
         matches!(self, Self::NetlinkIpv4 | Self::NetlinkIpv6)
+    }
+    pub fn proc_route(self) -> bool {
+        matches!(self, Self::ProcIpv4 | Self::ProcIpv6)
     }
     pub fn rule(self) -> bool {
         matches!(self, Self::RuleIpv4 | Self::RuleIpv6)
@@ -356,9 +359,19 @@ impl RouteFixtureSpec {
             }
     }
 }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProcRouteAccessDenial {
+    pub check: RouteCheck,
+    pub raw: ProcReadDenial,
+    pub protected: ProcReadDenial,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScopedRouteResult {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub access_denials: Vec<ProcRouteAccessDenial>,
     pub proven: Vec<RouteCheck>,
     pub leaked: Vec<RouteCheck>,
     pub controls: Vec<crate::ControlFailure>,
@@ -426,6 +439,30 @@ pub fn evaluate_route_fixture(
     measurements: [Option<&RouteMeasurement>; 5],
     interfaces_clean: bool,
 ) -> ScopedRouteResult {
+    evaluate_route_controls(spec, measurements, None, interfaces_clean)
+}
+
+fn permission_denial(value: Option<&RouteObservation>) -> Option<ProcReadDenial> {
+    let value = value?;
+    if !value.check.surface.proc_route() || !value.routes.is_empty() {
+        return None;
+    }
+    match value.error {
+        // Linux EPERM and EACCES. Rows retained from a partial read can still
+        // establish an exposure, so only a denied sample with no rows qualifies.
+        Some(ProbeError::ProcPermissionDenied(denial)) if matches!(denial.errno, 1 | 13) => {
+            Some(denial)
+        }
+        _ => None,
+    }
+}
+
+fn evaluate_route_controls(
+    spec: &RouteFixtureSpec,
+    measurements: [Option<&RouteMeasurement>; 5],
+    app_raw: Option<&RouteMeasurement>,
+    interfaces_clean: bool,
+) -> ScopedRouteResult {
     use crate::ControlFailure::*;
     let mut result = ScopedRouteResult::default();
     if !spec.valid() {
@@ -452,6 +489,20 @@ pub fn evaluate_route_fixture(
             }
             continue;
         }
+        let end_ok = end.is_some_and(root_positive);
+        let cleaned = interfaces_clean && cleanup.is_some_and(absent);
+        if end_ok
+            && cleaned
+            && let Some(raw) = permission_denial(observation(app_raw, check))
+            && let Some(protected) = permission_denial(worker)
+        {
+            result.access_denials.push(ProcRouteAccessDenial {
+                check,
+                raw,
+                protected,
+            });
+            continue;
+        }
         let leaked = worker.is_some_and(|v| exposes(spec, v, false));
         if leaked {
             result.leaked.push(check);
@@ -464,14 +515,12 @@ pub fn evaluate_route_fixture(
         if !ordinary_ok {
             result.problem(OrdinaryObjectsChanged);
         }
-        let end_ok = end.is_some_and(root_positive);
         if !end_ok {
             result.problem(FixtureChanged);
             if end.is_none_or(|v| v.error.is_some()) {
                 result.problem(ProbeUnavailable);
             }
         }
-        let cleaned = interfaces_clean && cleanup.is_some_and(absent);
         if !cleaned {
             result.problem(CleanupUnconfirmed);
             if cleanup.is_none_or(|v| v.error.is_some()) {
@@ -492,13 +541,13 @@ pub fn evaluate_paired_route_fixture(
     raw: Option<&RouteMeasurement>,
     interfaces_clean: bool,
 ) -> ScopedRouteResult {
-    let mut result = evaluate_route_fixture(spec, measurements, interfaces_clean);
+    let mut result = evaluate_route_controls(spec, measurements, raw, interfaces_clean);
     let qualified: Vec<_> = spec
         .checks()
         .filter(|check| observation(raw, *check).is_some_and(|v| paired_positive(spec, v)))
         .collect();
     result.proven.retain(|c| qualified.contains(c));
-    if qualified.len() != spec.checks().count() {
+    if qualified.len() + result.access_denials.len() != spec.checks().count() {
         result.problem(crate::ControlFailure::MissingPositiveControl);
     }
 
@@ -670,6 +719,89 @@ mod fixture_tests {
         assert!(result.proven.is_empty());
         assert!(!spec().positive_measurement(&worker));
     }
+    #[test]
+    fn proc_denial_needs_both_worker_phases_and_live_root_controls() {
+        use crate::ProcReadStage::*;
+        let root_absent = rows(0);
+        let root_visible = rows(1);
+        let denied = |stage| {
+            let mut sample = rows(2);
+            for entry in &mut sample.observations {
+                if entry.check.surface.proc_route() {
+                    entry.routes.clear();
+                    entry.error = Some(ProbeError::ProcPermissionDenied(ProcReadDenial {
+                        stage,
+                        errno: 13,
+                    }));
+                }
+            }
+            sample
+        };
+        let mut raw = denied(Open);
+        for entry in &mut raw.observations {
+            if entry.check.surface.netlink() {
+                entry.routes.clone_from(
+                    &observation(Some(&root_visible), entry.check)
+                        .unwrap()
+                        .routes,
+                );
+            }
+        }
+        let protected = denied(Read);
+        let samples = [
+            Some(&root_absent),
+            Some(&root_visible),
+            Some(&protected),
+            Some(&root_visible),
+            Some(&root_absent),
+        ];
+        let result = evaluate_paired_route_fixture(&spec(), samples, Some(&raw), true);
+        assert_eq!(result.access_denials.len(), 4);
+        assert!(
+            result
+                .access_denials
+                .iter()
+                .all(|v| v.raw.stage == Open && v.protected.stage == Read)
+        );
+        assert_eq!(result.proven.len(), 4);
+        assert!(result.leaked.is_empty() && result.controls.is_empty());
+        assert!(
+            evaluate_paired_route_fixture(&spec(), samples, None, true)
+                .access_denials
+                .is_empty()
+        );
+        assert!(
+            evaluate_paired_route_fixture(&spec(), samples, Some(&raw), false)
+                .access_denials
+                .is_empty()
+        );
+        let mut late_error = protected;
+        let leaking = late_error
+            .observations
+            .iter_mut()
+            .find(|v| v.check.surface.proc_route())
+            .unwrap();
+        leaking.routes = observation(Some(&root_visible), leaking.check)
+            .unwrap()
+            .routes
+            .clone();
+        let leaking_check = leaking.check;
+        let result = evaluate_paired_route_fixture(
+            &spec(),
+            [
+                Some(&root_absent),
+                Some(&root_visible),
+                Some(&late_error),
+                Some(&root_visible),
+                Some(&root_absent),
+            ],
+            Some(&raw),
+            true,
+        );
+        assert_eq!(result.access_denials.len(), 3);
+        assert_eq!(result.leaked, vec![leaking_check]);
+    }
+
     #[test]
     fn missing_positive_stimulus_never_qualifies_an_apparent_leak() {
         let (negative, start) = (rows(0), rows(1));

@@ -68,13 +68,16 @@ enum_map!(
     OrdinaryObjectsChanged,
     ProbeUnavailable,
     CleanupUnconfirmed,
-    NetlinkLinkRequestDenied
+    NetlinkLinkRequestDenied,
+    ProcRouteRequestDenied
 );
+enum_map!(CoreProcReadStage, ProcReadStage, Open, Read);
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum CoreProbeError {
     Errno { code: i32 },
     GetlinkSendDenied { code: i32 },
+    ProcPermissionDenied { stage: CoreProcReadStage, code: i32 },
     Timeout,
     Malformed,
     TooLarge,
@@ -85,6 +88,10 @@ impl From<model::ProbeError> for CoreProbeError {
         match v {
             model::ProbeError::Errno(code) => Self::Errno { code },
             model::ProbeError::GetlinkSendDenied(code) => Self::GetlinkSendDenied { code },
+            model::ProbeError::ProcPermissionDenied(denial) => Self::ProcPermissionDenied {
+                stage: denial.stage.into(),
+                code: denial.errno,
+            },
             model::ProbeError::Timeout => Self::Timeout,
             model::ProbeError::Malformed => Self::Malformed,
             model::ProbeError::TooLarge => Self::TooLarge,
@@ -97,6 +104,12 @@ impl From<CoreProbeError> for model::ProbeError {
         match v {
             CoreProbeError::Errno { code } => Self::Errno(code),
             CoreProbeError::GetlinkSendDenied { code } => Self::GetlinkSendDenied(code),
+            CoreProbeError::ProcPermissionDenied { stage, code } => {
+                Self::ProcPermissionDenied(model::ProcReadDenial {
+                    stage: stage.into(),
+                    errno: code,
+                })
+            }
             CoreProbeError::Timeout => Self::Timeout,
             CoreProbeError::Malformed => Self::Malformed,
             CoreProbeError::TooLarge => Self::TooLarge,
