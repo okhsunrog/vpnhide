@@ -21,6 +21,8 @@ pub enum Observation {
     IfconfigAll,
     IfconfigVpn,
     IfconfigOrdinary,
+    ProcDev,
+    ProcIfInet6,
     ProcRoute4,
     ProcRoute6,
     Route4,
@@ -146,12 +148,13 @@ fn counts(kind: Observation, needle: &str, starts_with: bool) -> Option<i64> {
     let text = std::str::from_utf8(&child.output.stdout).ok()?;
     Some(
         text.lines()
-            .filter(|line| {
-                if starts_with {
-                    line.starts_with(needle)
-                } else {
-                    line.contains(needle)
-                }
+            .filter(|line| match kind {
+                Observation::ProcDev => line
+                    .split_once(':')
+                    .is_some_and(|(name, _)| name.trim() == needle),
+                Observation::ProcIfInet6 => line.split_ascii_whitespace().last() == Some(needle),
+                _ if starts_with => line.starts_with(needle),
+                _ => line.contains(needle),
             })
             .count() as i64,
     )
@@ -240,16 +243,25 @@ pub fn observe(kind: Observation) -> io::Result<()> {
         print!("{}", path_observation(path, kind)?);
         return Ok(());
     }
-    if matches!(kind, Observation::ProcRoute4 | Observation::ProcRoute6) {
-        print!(
-            "{}",
-            fs::read_to_string(if matches!(kind, Observation::ProcRoute4) {
-                "/proc/net/route"
-            } else {
-                "/proc/net/ipv6_route"
-            })?
-        );
-        return Ok(());
+    let proc_path = match kind {
+        Observation::ProcDev => Some("/proc/net/dev"),
+        Observation::ProcIfInet6 => Some("/proc/net/if_inet6"),
+        Observation::ProcRoute4 => Some("/proc/net/route"),
+        Observation::ProcRoute6 => Some("/proc/net/ipv6_route"),
+        _ => None,
+    };
+    if let Some(path) = proc_path {
+        let bytes = read_pseudo(path, 128 * 1024)?;
+        if matches!(kind, Observation::ProcDev) {
+            let mut lines = bytes.split(|b| *b == b'\n');
+            if ![b"Inter-|".as_slice(), b" face |"]
+                .into_iter()
+                .all(|prefix| lines.next().is_some_and(|line| line.starts_with(prefix)))
+            {
+                return Err(io::Error::other("invalid /proc/net/dev header"));
+            }
+        }
+        return io::stdout().write_all(&bytes);
     }
     let (program, args): (&str, &[&str]) = match kind {
         Observation::IpAddr => ("ip", &["addr", "show"]),
@@ -284,6 +296,7 @@ pub fn observe(kind: Observation) -> io::Result<()> {
 fn setup() -> io::Result<()> {
     // Preserve the original iproute2 utility coverage. Host can provide an
     // already prepared rootfs; a failed package setup is never an empty PASS.
+    checked("ip", &["link", "set", "lo", "up"])?;
     checked("ip", &["link", "set", "eth0", "up"])?;
     checked("ip", &["addr", "add", "10.0.2.15/24", "dev", "eth0"])?;
     checked("ip", &["route", "add", "default", "via", "10.0.2.2"])?;
@@ -411,6 +424,8 @@ pub fn count_cases() -> Vec<(&'static str, Observation, &'static str, bool, Coun
         ("getifaddrs", Observation::IpAddr, "vpn0", false),
         ("siocgifconf", Observation::IfconfigAll, "vpn0", false),
         ("dev_ioctl", Observation::IfconfigVpn, "vpn0", false),
+        ("proc_dev", Observation::ProcDev, "vpn0", false),
+        ("proc_if_inet6", Observation::ProcIfInet6, "vpn0", false),
         ("proc_route_v4", Observation::ProcRoute4, "vpn0", false),
         ("proc_route_v6", Observation::ProcRoute6, "vpn0", false),
         ("netlink_route4", Observation::Route4, "vpn0", false),
@@ -429,6 +444,8 @@ pub fn count_cases() -> Vec<(&'static str, Observation, &'static str, bool, Coun
     .collect();
     cases.extend(
         [
+            ("keep_proc_dev", Observation::ProcDev, "lo", false),
+            ("keep_proc_if_inet6", Observation::ProcIfInet6, "lo", false),
             ("keep_proc_route_v4", Observation::ProcRoute4, "eth0", true),
             ("keep_getifaddrs", Observation::IpAddr, ": eth0:", false),
             ("keep_siocgifconf", Observation::IfconfigAll, "eth0", true),

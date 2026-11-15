@@ -46,6 +46,8 @@ Vectors exercised by the typed Rust guest (`init.sh` only mounts pseudo-filesyst
 | bionic getifaddrs | `/gai` static NDK probe | `rtnl_fill_ifinfo` + `inet*_fill_ifaddr` |
 | SIOCGIFCONF | `ifconfig -a` + `/ifconf` oversized-buffer probe | `sock_ioctl` |
 | dev ioctl by name | `ifconfig vpn0` | `dev_ioctl` |
+| /proc/net/dev | Read both headers, `vpn0` and the `lo` control | `dev_seq_show` |
+| /proc/net/if_inet6 | Read IPv6 rows for `vpn0` and `lo` | `if6_seq_show` |
 | /proc/net/route | `cat /proc/net/route` | `fib_route_seq_show` |
 | /proc/net/ipv6_route | `cat /proc/net/ipv6_route` | `ipv6_route_seq_show` |
 | netlink route dump v4 | `ip route show table all` | `fib_dump_info` |
@@ -109,7 +111,7 @@ size-query and stale-tail probe, and `VPNHIDE_BIND_BIN` /
 socket-bind probe.
 
 KPM full reports retain the independent fill/tail row and also require
-`ifconf_probe` for the complete NULL-size/fill/tail pair (36 rows). A clean filled
+`ifconf_probe` for the complete NULL-size/fill/tail pair (40 rows). A clean filled
 buffer with the original unfiltered size cannot pass the latter. CI requires the
 actual bionic probe. The [KPM qualification record](../../docs/archive/2026-11-03-kpm-ifconf-qualification.md)
 lists all reference profiles and distinguishes platform-covered/not-applicable

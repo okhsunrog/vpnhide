@@ -28,12 +28,13 @@
  * `iface_lists.h` (single source of truth: data/interfaces.toml). */
 typedef int (*vpnhide_match_fn)(const char *ifname);
 
-/* Which whitespace-delimited field carries the interface name. */
+/* Which field carries the interface name. */
 enum vpnhide_iface_field {
 	VPNHIDE_FIELD_FIRST =
 		0, /* /proc/net/route        — first tab field   */
 	VPNHIDE_FIELD_LAST =
 		1, /* /proc/net/ipv6_route    — last ws field      */
+	VPNHIDE_FIELD_BEFORE_COLON, /* /proc/net/dev */
 };
 
 /* ====================================================================== */
@@ -203,6 +204,22 @@ vpnhide_compact_seq_lines(char *buf, unsigned long start, unsigned long count,
 				j++;
 			}
 			ifname[j] = '\0';
+		} else if (field == VPNHIDE_FIELD_BEFORE_COLON) {
+			unsigned long first = src;
+			unsigned long colon;
+			unsigned long j;
+
+			while (first < nl && buf[first] == ' ')
+				first++;
+			for (colon = first; colon < nl && buf[colon] != ':';
+			     colon++)
+				;
+			ifname[0] = '\0';
+			if (colon < nl && colon - first < VPNHIDE_IFNAMSIZ) {
+				for (j = 0; first + j < colon; j++)
+					ifname[j] = buf[first + j];
+				ifname[j] = '\0';
+			}
 		} else {
 			/* Last whitespace-delimited field. Trim trailing
 			 * newline / CR / spaces / tabs, then walk back to the

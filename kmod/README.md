@@ -17,6 +17,8 @@ regions. Detection paths outside the hooks listed below remain out of scope.
 | `rtnl_fill_ifinfo` | Trims VPN entries from RTM_NEWLINK netlink dumps via `skb_trim` and returns 0 | `getifaddrs()` (which uses netlink internally), any netlink-based interface enumeration |
 | `inet6_fill_ifaddr` | Trims VPN entries from RTM_GETADDR IPv6 responses via `skb_trim` | IPv6 address enumeration over netlink |
 | `inet_fill_ifaddr` | Trims VPN entries from RTM_GETADDR IPv4 responses via `skb_trim` | IPv4 address enumeration over netlink |
+| `dev_seq_show` | Removes VPN interface rows and preserves the statistics header | `/proc/net/dev` reads |
+| `if6_seq_show` | Removes IPv6 address rows for VPN interfaces | `/proc/net/if_inet6` reads |
 | `fib_route_seq_show` | Forward-scans for VPN lines and compacts them out with `memmove` | `/proc/net/route` reads |
 | `ipv6_route_seq_show` | Forward-scans for VPN lines and compacts them out with `memmove` | `/proc/net/ipv6_route` reads |
 | `fib_dump_info` | Trims IPv4 VPN route entries and public physical-interface host-route hints from netlink route dumps via `skb_trim` | RTM_GETROUTE route table dumps |

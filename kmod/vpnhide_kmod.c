@@ -124,7 +124,7 @@ MODULE_PARM_DESC(filesystem_hiding,
 		 "install optional sysfs/proc-sys interface concealment hooks");
 
 #ifndef VPNHIDE_PROBE_MASK_DEFAULT
-#define VPNHIDE_PROBE_MASK_DEFAULT 0x1fffu
+#define VPNHIDE_PROBE_MASK_DEFAULT 0x7fffu
 #endif
 
 /*
@@ -137,9 +137,9 @@ MODULE_PARM_DESC(filesystem_hiding,
  * 11 gates the socket-bind kprobe hooks (register_socket_bind_hooks). Bit 12
  * gates the filesystem/VFS concealment kprobe hooks (register_filesystem_hooks) —
  * ANDed with the filesystem_hiding param, so filesystem hooks register only
- * when BOTH are set.
+ * when BOTH are set. Bits 13 and 14 gate the proc dev and IPv6 address probes.
  *
- * Default VPNHIDE_PROBE_MASK_DEFAULT (0x1fff) sets every bit = current
+ * Default VPNHIDE_PROBE_MASK_DEFAULT (0x7fff) sets every bit = current
  * shipped behaviour. Build a diagnostic variant with a reduced hook set
  * baked in by overriding the macro at compile time
  * (-DVPNHIDE_PROBE_MASK_DEFAULT=0x...); no source edits needed per variant.
@@ -2068,6 +2068,76 @@ static struct kretprobe ipv6_route_krp = {
 	.kp.symbol_name = "ipv6_route_seq_show",
 };
 
+/* The show callbacks are used by procfs regardless of how userspace reads it.
+ * Only inspect bytes appended by this call and leave seq_file overflow retries
+ * to the kernel. The /proc/net/dev header has no colon-delimited name. */
+struct proc_iface_data {
+	struct seq_file *seq;
+	size_t start_count;
+	enum vpnhide_hook_id hook;
+};
+
+static int proc_iface_entry(struct kretprobe_instance *ri, struct pt_regs *regs,
+			    enum vpnhide_hook_id hook)
+{
+	struct proc_iface_data *data = (void *)ri->data;
+	struct seq_file *seq = (struct seq_file *)regs->regs[0];
+
+	if (!seq || !hook_active(hook))
+		return 1;
+	data->seq = seq;
+	data->start_count = seq->count;
+	data->hook = hook;
+	return 0;
+}
+
+static int proc_dev_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+	return proc_iface_entry(ri, regs, VPNHIDE_HOOK_RTNL_FILL_IFINFO);
+}
+
+static int proc_if6_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+	return proc_iface_entry(ri, regs, VPNHIDE_HOOK_INET6_FILL_IFADDR);
+}
+
+static int proc_iface_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+	struct proc_iface_data *data = (void *)ri->data;
+	struct seq_file *seq = data->seq;
+	size_t count;
+
+	if ((int)regs_return_value(regs) || seq_has_overflowed(seq))
+		return 0;
+	count = vpnhide_compact_seq_lines(
+		seq->buf, data->start_count, seq->count,
+		data->hook == VPNHIDE_HOOK_RTNL_FILL_IFINFO ?
+			VPNHIDE_FIELD_BEFORE_COLON :
+			VPNHIDE_FIELD_LAST,
+		vpnhide_iface_is_vpn);
+	if (count != seq->count) {
+		seq->count = count;
+		record_hook_hit(data->hook);
+	}
+	return 0;
+}
+
+static struct kretprobe proc_dev_krp = {
+	.handler = proc_iface_ret,
+	.entry_handler = proc_dev_entry,
+	.data_size = sizeof(struct proc_iface_data),
+	.maxactive = VPNHIDE_KRETPROBE_MAXACTIVE,
+	.kp.symbol_name = "dev_seq_show",
+};
+
+static struct kretprobe proc_if6_krp = {
+	.handler = proc_iface_ret,
+	.entry_handler = proc_if6_entry,
+	.data_size = sizeof(struct proc_iface_data),
+	.maxactive = VPNHIDE_KRETPROBE_MAXACTIVE,
+	.kp.symbol_name = "if6_seq_show",
+};
+
 /* ================================================================== */
 /*  Route netlink helpers                                             */
 /* ================================================================== */
@@ -2465,23 +2535,26 @@ static struct kretprobe fib_rule_fill_krp = {
 struct kretprobe_reg {
 	struct kretprobe *krp;
 	enum vpnhide_hook_id hook_id;
+	unsigned int probe_bit;
 	bool registered;
 };
 
 static struct kretprobe_reg probes[] = {
-	{ &dev_ioctl_krp, VPNHIDE_HOOK_DEV_IOCTL, false },
-	{ &sock_ioctl_krp, VPNHIDE_HOOK_SOCK_IOCTL, false },
-	{ &rtnl_fill_krp, VPNHIDE_HOOK_RTNL_FILL_IFINFO, false },
-	{ &inet6_fill_krp, VPNHIDE_HOOK_INET6_FILL_IFADDR, false },
-	{ &inet_fill_krp, VPNHIDE_HOOK_INET_FILL_IFADDR, false },
-	{ &fib_route_krp, VPNHIDE_HOOK_FIB_ROUTE_SEQ_SHOW, false },
-	{ &ipv6_route_krp, VPNHIDE_HOOK_IPV6_ROUTE_SEQ_SHOW, false },
-	{ &fib_dump_krp, VPNHIDE_HOOK_FIB_DUMP_INFO, false },
-	{ &rt6_fill_krp, VPNHIDE_HOOK_RT6_FILL_NODE, false },
-	{ &fib_rule_fill_krp, VPNHIDE_HOOK_FIB_NL_FILL_RULE, false },
-	/* Appended at the end so existing probe_mask bit indices are unchanged.
-	 * Shares hook id DEV_IOCTL with dev_ioctl_krp (both by-name ioctls). */
-	{ &devinet_ioctl_krp, VPNHIDE_HOOK_DEV_IOCTL, false },
+	{ &dev_ioctl_krp, VPNHIDE_HOOK_DEV_IOCTL, 0 },
+	{ &sock_ioctl_krp, VPNHIDE_HOOK_SOCK_IOCTL, 1 },
+	{ &rtnl_fill_krp, VPNHIDE_HOOK_RTNL_FILL_IFINFO, 2 },
+	{ &inet6_fill_krp, VPNHIDE_HOOK_INET6_FILL_IFADDR, 3 },
+	{ &inet_fill_krp, VPNHIDE_HOOK_INET_FILL_IFADDR, 4 },
+	{ &fib_route_krp, VPNHIDE_HOOK_FIB_ROUTE_SEQ_SHOW, 5 },
+	{ &ipv6_route_krp, VPNHIDE_HOOK_IPV6_ROUTE_SEQ_SHOW, 6 },
+	{ &fib_dump_krp, VPNHIDE_HOOK_FIB_DUMP_INFO, 7 },
+	{ &rt6_fill_krp, VPNHIDE_HOOK_RT6_FILL_NODE, 8 },
+	{ &fib_rule_fill_krp, VPNHIDE_HOOK_FIB_NL_FILL_RULE, 9 },
+	{ &devinet_ioctl_krp, VPNHIDE_HOOK_DEV_IOCTL, 10 },
+	/* Report probe registration in vpnhide_diag. A proc probe alone cannot
+	 * establish that its matching netlink hook registered. */
+	{ &proc_dev_krp, VPNHIDE_HOOK_COUNT, 13 },
+	{ &proc_if6_krp, VPNHIDE_HOOK_COUNT, 14 },
 };
 
 /* Bitset of logical hooks that fully registered — the `status` hooks mask. */
@@ -2491,7 +2564,8 @@ static u32 installed_hook_mask(void)
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(probes); i++)
-		if (probes[i].registered)
+		if (probes[i].registered &&
+		    probes[i].hook_id != VPNHIDE_HOOK_COUNT)
 			mask |= vpnhide_hook_bit(probes[i].hook_id);
 	if (socket_bind_hooks_registered)
 		mask |= vpnhide_hook_bit(VPNHIDE_HOOK_SOCKET_BIND_INTERFACE);
@@ -2634,7 +2708,7 @@ static int __init vpnhide_init_impl(void)
 #endif
 
 	for (i = 0; i < ARRAY_SIZE(probes); i++) {
-		if (!(probe_mask & (1u << i))) {
+		if (!(probe_mask & (1u << probes[i].probe_bit))) {
 			pr_info(MODNAME
 				": kretprobe(%s) skipped (probe_mask=0x%x)\n",
 				probes[i].krp->kp.symbol_name, probe_mask);

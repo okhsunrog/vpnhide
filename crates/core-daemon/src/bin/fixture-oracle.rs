@@ -119,7 +119,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         [mode] if mode == "protected" => true,
         _ => return Err("expected raw or protected".into()),
     };
-    let backend = if protected {
+    if protected {
         let control = Path::new("/proc/vpnhide_ctl");
         let status = vpnhide_core_daemon::activation::read_status(control)?;
         let backend = match status.backend {
@@ -150,13 +150,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }],
         );
         vpnhide_core_daemon::activation::deliver_native(control, backend, &wire)?;
-        Some(backend)
-    } else {
-        if Path::new("/proc/vpnhide_ctl").exists() {
-            return Err("raw oracle cannot have a native backend".into());
-        }
-        None
-    };
+    } else if Path::new("/proc/vpnhide_ctl").exists() {
+        return Err("raw oracle cannot have a native backend".into());
+    }
     let before = routes()?;
     let fixture = TunFixture::create(0x0123_4567_89ab)?;
     println!("FIXTURE_SPEC={}", serde_json::to_string(&fixture.spec)?);
@@ -231,7 +227,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .iter()
                 .all(|c| done.filesystem.leaked.contains(c))
     };
-    let proc_expected = if backend == Some(vpnhide_core_rpc::NativeBackend::Builtin) {
+    let proc_expected = if protected {
         done.proc_interfaces.complete()
     } else {
         done.proc_interfaces.proven.is_empty()

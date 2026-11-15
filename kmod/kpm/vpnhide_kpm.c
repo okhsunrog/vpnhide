@@ -127,9 +127,9 @@ static uint32_t last_error;
  * compiler clone that install_hook resolved, and only after hook_wrap actually
  * succeeded; resolving names again during exit cannot guarantee either. */
 /* Upper bound on install_hook() calls in one init. The worst case is a 6.1+ GKI
- * tree: 11 enumeration hooks + 2 bind hooks (sock_setsockopt AND the LTO-inlined
+ * tree: 13 enumeration hooks + 2 bind hooks (sock_setsockopt AND the LTO-inlined
  * sk_setsockopt, which 5.10/5.15 don't both need) + the 4-hook optional
- * filesystem group = 17. The group installs last and rolls back atomically if it
+ * filesystem group = 19. The group installs last and rolls back atomically if it
  * can't fit, so the cap must clear the full total with headroom — 16 silently
  * dropped filesystem hiding on 6.1/6.6 once devinet_ioctl became the 13th
  * non-fs hook. Each entry is 3 pointers (24 B), so this array is well under the
@@ -596,7 +596,7 @@ static int kpm_is_public_host_route6(void *rt, void *dev)
 /*  newly-written region using the shared seq-line compactor.          */
 /* ================================================================== */
 
-static void fib_route_before(hook_fargs2_t *fargs, void *udata)
+static void seq_show_before(hook_fargs2_t *fargs, void *udata)
 {
 	/* Stash seq_file->count at entry so the after-callback only touches this
 	 * call's output, not entries already present in the buffer. */
@@ -630,7 +630,7 @@ static void fib_route_after(hook_fargs2_t *fargs, void *udata)
 }
 
 /* ipv6_route_seq_show — /proc/net/ipv6_route. Same as fib_route but the iface
- * name is the LAST field. Shares fib_route_before (stashes seq->count). */
+ * name is the LAST field. Shares seq_show_before (stashes seq->count). */
 static void ipv6_route_after(hook_fargs2_t *fargs, void *udata)
 {
 	void *seq = (void *)fargs->arg0;
@@ -652,6 +652,41 @@ static void ipv6_route_after(hook_fargs2_t *fargs, void *udata)
 		if (next != old)
 			record_hook_hit(VPNHIDE_HOOK_IPV6_ROUTE_SEQ_SHOW);
 	}
+}
+
+static void proc_iface_after(hook_fargs2_t *fargs, enum vpnhide_hook_id hook,
+			     enum vpnhide_iface_field field)
+{
+	char *seq = (char *)fargs->arg0;
+	unsigned long *count;
+	unsigned long next;
+
+	if (!seq || (int)fargs->ret || !hook_active(hook))
+		return;
+	count = (unsigned long *)(seq + off->seqfile_count);
+	/* A full buffer tells seq_file to retry. Preserve that signal and only
+	 * filter complete output belonging to this show call. */
+	if (*count >= *(unsigned long *)(seq + off->seqfile_size))
+		return;
+	next = vpnhide_compact_seq_lines(*(char **)(seq + off->seqfile_buf),
+					 fargs->local.data0, *count, field,
+					 iface_is_vpn);
+	if (next != *count) {
+		*count = next;
+		record_hook_hit(hook);
+	}
+}
+
+static void proc_dev_after(hook_fargs2_t *fargs, void *udata)
+{
+	proc_iface_after(fargs, VPNHIDE_HOOK_RTNL_FILL_IFINFO,
+			 VPNHIDE_FIELD_BEFORE_COLON);
+}
+
+static void proc_if6_after(hook_fargs2_t *fargs, void *udata)
+{
+	proc_iface_after(fargs, VPNHIDE_HOOK_INET6_FILL_IFADDR,
+			 VPNHIDE_FIELD_LAST);
 }
 
 /* ================================================================== */
@@ -1631,6 +1666,8 @@ static void iterate_dir_after(hook_fargs2_t *fargs, void *udata)
  *
  *   fib_route_seq_show     /proc/net/route        ✓ (seq compactor)
  *   ipv6_route_seq_show    /proc/net/ipv6_route   ✓ (seq compactor)
+ *   dev_seq_show           /proc/net/dev          ✓ (seq compactor)
+ *   if6_seq_show           /proc/net/if_inet6      ✓ (seq compactor)
  *   rtnl_fill_ifinfo       RTM_GETLINK            ✓ (skb.len)
  *   inet_fill_ifaddr       RTM_GETADDR v4         ✓ (in_ifaddr.ifa_dev->dev)
  *   inet6_fill_ifaddr      RTM_GETADDR v6         ✓ (inet6_ifaddr.idev->dev)
@@ -1883,7 +1920,8 @@ static int install_hook(const char *name, int argno, void *before, void *after,
 		registration->function = (void *)fn;
 		registration->before = before;
 		registration->after = after;
-		installed_hooks |= vpnhide_hook_bit(hook_id);
+		if (hook_id != VPNHIDE_HOOK_COUNT)
+			installed_hooks |= vpnhide_hook_bit(hook_id);
 		return 1;
 	}
 	return 0;
@@ -2000,12 +2038,27 @@ static long vpnhide_kpm_init(const char *args, const char *event,
 	 * records each successful registration in installed_hooks.
 	 */
 	if (off->seqfile_count) {
-		install_hook("fib_route_seq_show", 2, (void *)fib_route_before,
+		install_hook("fib_route_seq_show", 2, (void *)seq_show_before,
 			     (void *)fib_route_after,
 			     VPNHIDE_HOOK_FIB_ROUTE_SEQ_SHOW);
-		install_hook("ipv6_route_seq_show", 2, (void *)fib_route_before,
+		install_hook("ipv6_route_seq_show", 2, (void *)seq_show_before,
 			     (void *)ipv6_route_after,
 			     VPNHIDE_HOOK_IPV6_ROUTE_SEQ_SHOW);
+	}
+	if (off->seqfile_size && off->seqfile_count) {
+		/* Proc probes reuse the selection masks without advertising that
+		 * the corresponding netlink hooks are installed. */
+		int dev = install_hook("dev_seq_show", 2,
+				       (void *)seq_show_before,
+				       (void *)proc_dev_after,
+				       VPNHIDE_HOOK_COUNT);
+		int if6 = install_hook("if6_seq_show", 2,
+				       (void *)seq_show_before,
+				       (void *)proc_if6_after,
+				       VPNHIDE_HOOK_COUNT);
+
+		logki(MODNAME ": proc interface hooks dev=%d if_inet6=%d\n",
+		      dev, if6);
 	}
 	install_hook("dev_ioctl", 5, 0, (void *)dev_ioctl_after,
 		     VPNHIDE_HOOK_DEV_IOCTL);

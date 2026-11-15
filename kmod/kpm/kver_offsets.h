@@ -43,8 +43,9 @@ struct vpnhide_offsets {
 	unsigned int socket_sk;
 	unsigned int sock_net;
 
-	/* seq_file.{buf,count} — stable across the seq_file lifetime. */
+	/* seq_file.{buf,size,count} — size bounds output and marks overflow. */
 	unsigned int seqfile_buf;
+	unsigned int seqfile_size;
 	unsigned int seqfile_count;
 
 	/* in_ifaddr.ifa_dev (-> in_device.dev -> net_device). */
@@ -227,6 +228,7 @@ static const struct vpnhide_offsets vpnhide_off_6_1 = {
 	.socket_sk = 24,
 	.sock_net = 48,
 	.seqfile_buf = 0,
+	.seqfile_size = 8,
 	.seqfile_count = 24,
 	.in_ifaddr_ifa_dev = 24,
 	.in_device_dev = 0,
@@ -253,10 +255,9 @@ static const struct vpnhide_offsets vpnhide_off_6_1 = {
 	.fib_rule_uid_end = 124,
 };
 
-/* 6.12 (android16-6.12) — QEMU-validated. Identical to 6.1 EXCEPT struct
- * fib6_info inserted `struct hlist_node gc_link` (16 B) after `expires`,
- * shifting nh@176 and fib6_nh[]@192 (6.1 is 160/176). (fib_info also gained a
- * `pfsrc_removed` bool, but it fits the existing pad so nh stays @104.) */
+/* 6.12 (android16-6.12). fib6_info inserted `struct hlist_node gc_link`
+ * (16 B) after `expires`, shifting nh@176 and fib6_nh[]@192.
+ * fib_info gained a `pfsrc_removed` bool in existing padding, so nh stays @104. */
 static const struct vpnhide_offsets vpnhide_off_6_12 = {
 	.skb_len = 112,
 	/* 6.12 reorganised struct net_device into cacheline groups (TX/TXRX/RX
@@ -267,10 +268,12 @@ static const struct vpnhide_offsets vpnhide_off_6_12 = {
 	.socket_sk = 24,
 	.sock_net = 48,
 	.seqfile_buf = 0,
+	.seqfile_size = 8,
 	.seqfile_count = 24,
 	.in_ifaddr_ifa_dev = 24,
 	.in_device_dev = 0,
-	/* Confirmed by BTF on Cuttlefish 6.12.74 and by inet6_fill_ifaddr on the 6.12.89 reference Image. */
+	/* Confirmed by BTF on Cuttlefish 6.12.74 and by inet6_fill_ifaddr's
+	 * load instruction on the 6.12.89 QEMU reference Image. */
 	.inet6_ifaddr_idev = 184,
 	.inet6_dev_dev = 0,
 	.addr_fill_argno = 3,
@@ -301,6 +304,7 @@ static const struct vpnhide_offsets vpnhide_off_5_x = {
 	.socket_sk = 24,
 	.sock_net = 48,
 	.seqfile_buf = 0,
+	.seqfile_size = 8,
 	.seqfile_count = 24,
 	/* in_ifaddr: hash(16)+ifa_next(8) -> ifa_dev@24; in_device.dev@0. */
 	.in_ifaddr_ifa_dev = 24,
@@ -346,6 +350,7 @@ static const struct vpnhide_offsets vpnhide_off_5_15 = {
 	.socket_sk = 24,
 	.sock_net = 48,
 	.seqfile_buf = 0,
+	.seqfile_size = 8,
 	.seqfile_count = 24,
 	.in_ifaddr_ifa_dev = 24,
 	.in_device_dev = 0,
@@ -384,6 +389,7 @@ static const struct vpnhide_offsets vpnhide_off_5_4 = {
 	.socket_sk = 24,
 	.sock_net = 48,
 	.seqfile_buf = 0,
+	.seqfile_size = 8,
 	.seqfile_count = 24,
 	.in_ifaddr_ifa_dev = 24, /* hash(16)+ifa_next(8) — same as 5.10 */
 	.in_device_dev = 0,
@@ -429,6 +435,7 @@ static const struct vpnhide_offsets vpnhide_off_4_19 = {
 	.socket_sk = 32,
 	.sock_net = 48,
 	.seqfile_buf = 0,
+	.seqfile_size = 8,
 	.seqfile_count = 24,
 	.in_ifaddr_ifa_dev = 24,
 	.in_device_dev = 0,
@@ -473,6 +480,7 @@ static const struct vpnhide_offsets vpnhide_off_4_14 = {
 	.socket_sk = 32,
 	.sock_net = 48,
 	.seqfile_buf = 0,
+	.seqfile_size = 8,
 	.seqfile_count = 24,
 	.in_ifaddr_ifa_dev =
 		24, /* in_ifaddr: hash(16)+ifa_next(8) — same as 5.x */
@@ -526,6 +534,7 @@ static const struct vpnhide_offsets vpnhide_off_4_9 = {
 	.socket_sk = 32,
 	.sock_net = 48,
 	.seqfile_buf = 0,
+	.seqfile_size = 8,
 	.seqfile_count = 24,
 	.in_ifaddr_ifa_dev = 24,
 	.in_device_dev = 0,

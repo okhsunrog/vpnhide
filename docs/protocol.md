@@ -754,6 +754,7 @@ carries scoped IPv4 and IPv6 route and policy-rule evidence alongside optional
 sysfs/proc-sys directory and path-lookup evidence. Actual Android acceptance
 is separate from the Linux oracle.
 
-Builtin uses the existing RTNL_FILL_IFINFO and INET6_FILL_IFADDR mask bits
-for the matching proc interface records and includes those hits in the
-same counters.
+Builtin, `.ko` and KPM use the existing RTNL_FILL_IFINFO and
+INET6_FILL_IFADDR selection bits for `/proc/net/dev` and `/proc/net/if_inet6`,
+respectively, and count filtered rows under those same hooks. The `.ko` and
+KPM `hooks` status bits for netlink still describe netlink registration.

@@ -250,14 +250,14 @@ cheap and correct when such a route is present; see issue discussion.
 | `setsockopt(SO_BINDTODEVICE)` / `SO_BINDTOIFINDEX` | bind success and `getsockopt` state reveal or select a hidden iface | ✅ pre-mutation entry redirect | ✅ pre-mutation rejection | ⚠️ bionic `setsockopt` only | — | |
 | `/proc/net/tcp` | local addr hex per socket | — | — | ✅ `filter_tcp4_buf` (by VPN addr) | — | 🔒 often denied |
 | `/proc/net/tcp6` | 32-hex local addr | — | — | ✅ `filter_tcp6_buf` | — | 🔒 |
-| `/proc/net/dev` | Interface names and traffic counters | — | — | ✅ `filter_dev_buf` | — | 🔒 |
-| `/proc/net/if_inet6` | IPv6 addrs, iface last field | — | — | ✅ `filter_if_inet6_buf` | — | 🔒 |
+| `/proc/net/dev` | Interface names and traffic counters | ✅ `dev_seq_show` | ✅ `dev_seq_show` | ✅ `filter_dev_buf` | — | 🔒 |
+| `/proc/net/if_inet6` | IPv6 addrs, iface last field | ✅ `if6_seq_show` | ✅ `if6_seq_show` | ✅ `filter_if_inet6_buf` | — | 🔒 |
 
 The installed Pixel Builtin before the fix exposed both proc interface
 surfaces to readers allowed by SELinux. The current Builtin integration
 filters both proc sequences with its interface and IPv6 enumeration masks.
 The [diagnostics notes](diagnostics.md#implemented-scope-and-remaining-implementation)
-record the same-UID test, the ordinary Android app denial and the rebuild gate.
+record the same-UID test and the ordinary Android app denial.
 
 Since Linux 5.7, an unprivileged process can perform the first interface
 bind, so `curl --interface tun0 ...` or a raw `setsockopt` syscall is a real
@@ -319,11 +319,8 @@ This vector is deliberately tested by a raw `svc` probe. A second, non-target
 UID inspects the same inherited socket after the target call, so a backend that
 only rewrites errno while leaving the socket bound fails the test.
 
-The three procfs rows remain **Zygisk-only** today: kernel backends hide IPv6
-addresses on the netlink `RTM_GETADDR` path but do **not** hook `if_inet6_seq_show`,
-`tcp4_seq_show`, or `tcp6_seq_show`, so the procfs equivalents leak under a
-raw-syscall reader that SELinux happens to allow. Candidate kernel-backend work
-if a real detector uses them.
+The socket rows in `/proc/net/tcp` and `/proc/net/tcp6` remain Zygisk-only. A
+direct-syscall reader with SELinux access can still see those rows.
 
 ### 3D. Framework network APIs (Java) — lsposed territory
 
@@ -418,7 +415,7 @@ detectors actually probe:
   `recv`, `recvfrom`, `__recvfrom_chk`. A detector reading a netlink socket via
   plain `read()`/`readv()` or `recvmmsg` would slip past. Not seen in the wild
   yet; add hooks if it appears.
-- **Kernel-backend procfs gap:** no `if_inet6` / `tcp` / `tcp6` seq-file hooks
+- **Kernel-backend procfs gap:** no `tcp` / `tcp6` seq-file hooks
   in `.ko` or KPM (3C).
 - **Filesystem hiding is optional in both kernel backends.** It must be selected
   before reboot so the hot VFS probes are absent entirely on default boots.

@@ -182,8 +182,12 @@ was denied in both RAW and protected phases and verifies the root
 before/start/end/cleanup controls for each vector. The Dashboard shows the
 platform restriction when all four are denied. A complete positive read is
 required to prove hiding. Traffic counters can change while the interface
-identity stays fixed. The Kmod QEMU oracle has recorded all four leaks with
-the files readable, even though address ioctls and netlink hide successfully.
+identity stays fixed. The [earlier Kmod QEMU oracle](archive/2026-11-03-proc-interface-fixture-qualification.md)
+recorded all four leaks. With the new seq-file probes, the same oracle on
+`android14-6.1` confirmed all four vectors and cleanup. The unfiltered control
+still saw the fixture in all four vectors. The KPM harness uses separate RAW
+and protected boots. It checks both proc files for the fixture, verifies that
+`lo` is still present and checks the `/proc/net/dev` header in both boots.
 
 On the Pixel kernel tested before the Builtin fix, a process with the
 target app UID and zero effective capabilities could read both files from
@@ -198,8 +202,10 @@ both actors and both phases in all 24 runs. The final 20 consecutive current
 runs confirmed the same 17 protection groups. The Dashboard showed the
 Android restriction for Interfaces in procfs. The new Builtin integration
 adds filtering at both proc show callbacks and reuses the native link and
-IPv6 enumeration mask bits. The rebuilt kernel still needs Pixel runtime
-verification.
+IPv6 enumeration mask bits. On the rebuilt Pixel kernel `6.1.172`, all five
+controlled same-UID runs filtered the TUN in both files through libc and direct
+syscalls while keeping `lo`. Twenty consecutive ordinary app runs on that
+kernel still received EACCES in both phases.
 
 The optional `SysInterfaces` group independently enumerates `/sys/class/net`,
 `/proc/sys/net/ipv4/conf` and `/proc/sys/net/ipv6/conf` through libc

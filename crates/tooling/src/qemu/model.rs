@@ -62,10 +62,12 @@ pub struct Plan {
     #[serde(default)]
     pub kpm_phase: Option<Phase>,
 }
-pub const HIDE: [&str; 15] = [
+pub const HIDE: [&str; 17] = [
     "getifaddrs",
     "siocgifconf",
     "dev_ioctl",
+    "proc_dev",
+    "proc_if_inet6",
     "proc_route_v4",
     "proc_route_v6",
     "netlink_route4",
@@ -79,7 +81,9 @@ pub const HIDE: [&str; 15] = [
     "proc_sys_stat",
     "proc_sys_readdir",
 ];
-pub const KEEP: [&str; 8] = [
+pub const KEEP: [&str; 10] = [
+    "keep_proc_dev",
+    "keep_proc_if_inet6",
     "keep_proc_route_v4",
     "keep_getifaddrs",
     "keep_siocgifconf",
@@ -630,10 +634,10 @@ mod tests {
     #[test]
     fn complete_plan_has_all_identities_and_missing_native_probes_remain_explicit() {
         let p = plan();
-        assert_eq!(p.expected().unwrap().len(), 38);
+        assert_eq!(p.expected().unwrap().len(), 42);
         let mut k = p.clone();
         k.backend = Backend::Kpm;
-        assert_eq!(k.expected().unwrap().len(), 36);
+        assert_eq!(k.expected().unwrap().len(), 40);
         let mut required = p.clone();
         required.probes.gai.required = true;
         assert!(required.expected().is_err());
@@ -997,7 +1001,7 @@ mod phase_tests {
     #[test]
     fn kpm_needs_distinct_complete_immutable_boots_and_positive_baselines() {
         let (plan, raw, target) = fixture();
-        assert_eq!(compare_kpm(&plan, &raw, &target).unwrap().rows.len(), 36);
+        assert_eq!(compare_kpm(&plan, &raw, &target).unwrap().rows.len(), 40);
         let mut bad = target.clone();
         bad.boot = raw.boot.clone();
         assert!(compare_kpm(&plan, &raw, &bad).is_err());
@@ -1043,7 +1047,7 @@ mod phase_tests {
         raw.fields = vec![("ifconf".into(), fields(3, 3, 1))];
         target.fields = vec![("ifconf".into(), fields(2, 2, 0))];
         let report = compare_kpm(&plan, &raw, &target).unwrap();
-        assert_eq!(report.rows.len(), 36);
+        assert_eq!(report.rows.len(), 40);
         assert!(
             report
                 .rows

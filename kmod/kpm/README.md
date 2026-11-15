@@ -47,6 +47,11 @@ kmod/
 | Filtering algorithms | ✅ `shared/vpnhide_logic.h` | seq-buffer compaction, UID parse — freestanding, included by both backends |
 | Hook glue / struct access / control | ❌ per-backend | incompatible include worlds (`<linux/*.h>` vs KernelPatch `-nostdinc`) |
 
+`dev_seq_show` and `if6_seq_show` filter `/proc/net/dev` and
+`/proc/net/if_inet6` with the interface and IPv6-address selection masks.
+The QEMU comparisons verify both files and ordinary loopback rows across
+separate RAW and protected boots.
+
 Native ARM64 SIOCGIFCONF NULL queries use `ifconf_count.h`: a bounded RTNL walk
 of the **socket's** namespace through no-fault reads. The walker checks linked-list
 backlinks, address/device ownership, terminated labels and equality with the

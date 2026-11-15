@@ -62,6 +62,21 @@ static void test_ipv6_route_last_field(void)
 		   "00000000000000000000000000000000 00 ... rmnet_data0\n");
 }
 
+static void test_proc_net_dev(void)
+{
+	char buf[256] = "Inter-|   Receive\n face |bytes\n"
+			"    lo: 100 2\n  tun0: 200 3\n"
+			"tun123456789012: 300 4\n"
+			"eth123456789012: 400 5\n";
+	unsigned long n = vpnhide_compact_seq_lines(
+		buf, 0, strlen(buf), VPNHIDE_FIELD_BEFORE_COLON, match_vpn);
+
+	buf[n] = '\0';
+	expect_str("proc dev: preserve headers and ordinary interfaces", buf,
+		   "Inter-|   Receive\n face |bytes\n"
+		   "    lo: 100 2\neth123456789012: 400 5\n");
+}
+
 static void test_start_offset_preserved(void)
 {
 	/* Bytes before `start` belong to earlier show() calls — never touched,
@@ -215,6 +230,7 @@ int main(void)
 {
 	test_route_first_field();
 	test_ipv6_route_last_field();
+	test_proc_net_dev();
 	test_start_offset_preserved();
 	test_is_public_ipv4();
 	test_is_public_ipv6();
