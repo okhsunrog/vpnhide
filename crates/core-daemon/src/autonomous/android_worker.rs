@@ -46,11 +46,12 @@ const COMPONENT: &str = "dev.okhsunrog.vpnhide/.diagnostics.LoaderProbeService";
 fn run(args: &[&str]) -> Result<(), String> {
     let mut command = std::process::Command::new("/system/bin/cmd");
     command.args(args);
+    let name = args[..2].join(" ");
     let output = vpnhide_activator::output_with_timeout(&mut command, Duration::from_secs(2))
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| format!("Android worker {name}: {error}"))?;
     if !output.status.success() {
         return Err(format!(
-            "Android worker command refused: {}",
+            "Android worker {name} refused: {}",
             String::from_utf8_lossy(&output.stderr)
                 .chars()
                 .take(256)

@@ -5,6 +5,7 @@ package dev.okhsunrog.vpnhide.diagnostics
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Process
+import android.os.Trace
 import uniffi.vpnhide_core_ffi.CoreFrameworkPhase
 import uniffi.vpnhide_core_ffi.CoreFrameworkTask
 import uniffi.vpnhide_core_ffi.CorePackageObservation
@@ -14,6 +15,7 @@ import java.security.MessageDigest
 internal fun observeFrameworkPackages(
     context: Context,
     task: CoreFrameworkTask,
+    stage: String,
 ): List<CorePackageObservation> {
     val target = task.packageVisibility ?: return emptyList()
     val pm = context.packageManager
@@ -32,27 +34,29 @@ internal fun observeFrameworkPackages(
         runCatching {
             when (query) {
                 CorePackageQuery.PACKAGE_INFO -> {
-                    lookup(query, target, ownPackage) { name ->
-                        val info = pm.getPackageInfo(name, flags)
+                    lookup(query, target, ownPackage) { name, role ->
+                        val info = packageCallTiming("$stage-getPackageInfo-$role") { pm.getPackageInfo(name, flags) }
                         require(info.packageName == name)
                         requireNotNull(info.applicationInfo).uid
                     }
                 }
 
                 CorePackageQuery.APPLICATION_INFO -> {
-                    lookup(query, target, ownPackage) { name ->
-                        val info = pm.getApplicationInfo(name, flags)
+                    lookup(query, target, ownPackage) { name, role ->
+                        val info = packageCallTiming("$stage-getApplicationInfo-$role") { pm.getApplicationInfo(name, flags) }
                         require(info.packageName == name)
                         info.uid
                     }
                 }
 
                 CorePackageQuery.INSTALLED_PACKAGES -> {
-                    enumerate(query, target, ownPackage, pm.getInstalledPackages(0).map { it.packageName })
+                    val packages = packageCallTiming("$stage-getInstalledPackages") { pm.getInstalledPackages(0) }
+                    enumerate(query, target, ownPackage, packages.map { it.packageName })
                 }
 
                 CorePackageQuery.INSTALLED_APPLICATIONS -> {
-                    enumerate(query, target, ownPackage, pm.getInstalledApplications(0).map { it.packageName })
+                    val applications = packageCallTiming("$stage-getInstalledApplications") { pm.getInstalledApplications(0) }
+                    enumerate(query, target, ownPackage, applications.map { it.packageName })
                 }
             }
         }.getOrNull()
@@ -63,18 +67,31 @@ private inline fun lookup(
     query: CorePackageQuery,
     target: String,
     ownPackage: String,
-    uid: (String) -> Int,
+    uid: (String, String) -> Int,
 ): CorePackageObservation {
     val present =
         try {
-            require(uid(target) >= 0)
+            require(uid(target, "target") >= 0)
             true
         } catch (_: PackageManager.NameNotFoundException) {
             false
         }
-    val ordinary = runCatching { uid(ownPackage) == Process.myUid() }.getOrDefault(false)
+    val ordinary = runCatching { uid(ownPackage, "ordinary") == Process.myUid() }.getOrDefault(false)
     return CorePackageObservation(query, present, ordinary, null)
 }
+
+private inline fun <T> packageCallTiming(
+    stage: String,
+    action: () -> T,
+): T =
+    workerStage(stage) {
+        Trace.beginSection("vpnhide:$stage")
+        try {
+            action()
+        } finally {
+            Trace.endSection()
+        }
+    }
 
 private fun enumerate(
     query: CorePackageQuery,
@@ -84,6 +101,6 @@ private fun enumerate(
 ): CorePackageObservation {
     val remaining = packages.filterNot { it == target }.sorted().joinToString("\u0000")
     val sha256 =
-        MessageDigest.getInstance("SHA-256").digest(remaining.toByteArray()).joinToString("") { "%02x".format(it) }
+        MessageDigest.getInstance("SHA-256").digest(remaining.toByteArray()).toHexString()
     return CorePackageObservation(query, target in packages, ownPackage in packages, sha256)
 }

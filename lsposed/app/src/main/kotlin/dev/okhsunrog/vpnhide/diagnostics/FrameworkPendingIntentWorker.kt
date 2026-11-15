@@ -9,10 +9,15 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Build
+import android.os.Handler
 import androidx.core.content.IntentCompat
 import dev.okhsunrog.vpnhide.networkBroadcastIntent
 import dev.okhsunrog.vpnhide.registerPrivateNetworkReceiver
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import uniffi.vpnhide_core_ffi.CorePendingObservation
@@ -22,10 +27,17 @@ import java.util.UUID
 internal suspend fun observeFrameworkPendingIntents(
     context: Context,
     manager: ConnectivityManager,
+    handler: Handler,
 ): List<CorePendingObservation> {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return emptyList()
     val request = NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build()
-    return CorePendingRegistration.entries.mapNotNull { kind -> observePendingIntent(context, manager, request, kind) }
+    return coroutineScope {
+        CorePendingRegistration.entries
+            .map { kind ->
+                async(start = CoroutineStart.UNDISPATCHED) { observePendingIntent(context, manager, request, kind, handler) }
+            }.awaitAll()
+            .filterNotNull()
+    }
 }
 
 private suspend fun observePendingIntent(
@@ -33,12 +45,16 @@ private suspend fun observePendingIntent(
     manager: ConnectivityManager,
     request: NetworkRequest,
     kind: CorePendingRegistration,
+    handler: Handler,
 ): CorePendingObservation? {
     val action = "${context.packageName}.diagnostic.network.${UUID.randomUUID()}"
     val receiver = PendingNetworkObservation(action, kind)
-    if (runCatching { registerPrivateNetworkReceiver(context, receiver, IntentFilter(action)) }.isFailure) return null
+    if (runCatching { registerPrivateNetworkReceiver(context, receiver, IntentFilter(action), handler) }.isFailure) return null
     try {
-        val pending = runCatching { networkBroadcastIntent(context, action, 0) }.getOrNull() ?: return null
+        val pending =
+            runCatching {
+                networkBroadcastIntent(context, action, 0, Intent.FLAG_RECEIVER_FOREGROUND)
+            }.getOrNull() ?: return null
         try {
             val registered =
                 runCatching {

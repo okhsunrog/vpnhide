@@ -354,10 +354,17 @@ internal class FrameworkFixtureHooks {
             return null
         }
         return FixturePackageCall(target, authority.phase == FixturePhase.PROTECTED) { filtered ->
+            val start = if (HookLog.enabled) SystemClock.elapsedRealtime() else null
             synchronized(guard) {
                 if (state === active && channel.read() == authority && active.evidence.recordPackageSource(query, filtered)) {
                     runCatching { acknowledge(active) }
                 }
+            }
+            if (start != null) {
+                HookLog.i(
+                    "diagnostics package ACK session=${authority.session} phase=${authority.phase} query=$query " +
+                        "worker=${worker.pid} boot_ms=$start duration_ms=${SystemClock.elapsedRealtime() - start}",
+                )
             }
         }
     }

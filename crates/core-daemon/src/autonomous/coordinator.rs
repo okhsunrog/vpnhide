@@ -20,7 +20,21 @@ use vpnhide_diagnostic_model::framework::{FrameworkWorkerRequest, FrameworkWorke
 mod native_worker;
 
 const WORKER: &str = vpnhide_loader_ipc::WORKER_PROCESS;
-const DEADLINE: Duration = Duration::from_secs(20);
+const START_BUDGET: Duration = Duration::from_secs(30);
+const NATIVE_BUDGET: Duration = Duration::from_secs(10);
+const FRAMEWORK_BUDGET: Duration =
+    Duration::from_millis(vpnhide_diagnostic_model::framework::FRAMEWORK_LEASE_MS);
+const RUN_BUDGET: Duration = START_BUDGET
+    .saturating_add(NATIVE_BUDGET)
+    .saturating_add(FRAMEWORK_BUDGET);
+
+fn trace(debug: bool, session: u64, stage: &str) {
+    if debug && let Ok(now) = BootInstant::now().and_then(BootInstant::millis) {
+        crate::alog::info(&format!(
+            "diagnostics timing session={session} stage={stage} boot_ms={now}"
+        ));
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct WorkerIdentity {
@@ -32,6 +46,7 @@ struct WorkerIdentity {
 struct Active {
     session: u64,
     deadline: BootDeadline,
+    run_deadline: BootDeadline,
     task: Option<DiagnosticWorkerTask>,
     worker: Option<WorkerIdentity>,
     report: Option<NativeMeasurement>,
@@ -314,7 +329,13 @@ impl Coordinator {
         {
             inner.attempts = 0;
         }
-        let deadline = BootDeadline::from_now(DEADLINE).map_err(|_| DiagnosticError::Disabled)?;
+        let now = BootInstant::now().map_err(|_| DiagnosticError::Disabled)?;
+        let deadline = now
+            .after(START_BUDGET)
+            .map_err(|_| DiagnosticError::Disabled)?;
+        let run_deadline = now
+            .after(RUN_BUDGET)
+            .map_err(|_| DiagnosticError::Disabled)?;
         inner.attempts = inner.attempts.saturating_add(1);
         inner.retry_at = None;
         inner.next = inner.next.checked_add(1).ok_or(DiagnosticError::Expired)?;
@@ -336,6 +357,7 @@ impl Coordinator {
         inner.active = Some(Active {
             session: run.session,
             deadline,
+            run_deadline,
             task: None,
             worker: None,
             report: None,
@@ -369,6 +391,8 @@ impl Coordinator {
         Ok(run)
     }
     fn execute(&self, state: Arc<CoreState>, session: u64) {
+        let debug = state.snapshot().config.is_some_and(|config| config.debug);
+        trace(debug, session, "run_start");
         // Keep the physical worker lease through BOTH fixture cleanup paths.
         let worker_lease = super::android_worker::lease();
         let result = match &worker_lease {
@@ -394,6 +418,7 @@ impl Coordinator {
             .and_then(|a| a.framework.clone());
         let pending_framework = framework.clone();
         let framework = framework.map(|run| run.lock().expect("framework run").cleanup());
+        trace(debug, session, "framework_cleanup_done");
         if framework.as_ref().is_some_and(|(_, clean)| !clean) {
             self.inner
                 .lock()
@@ -463,6 +488,7 @@ impl Coordinator {
             .publisher
             .update(|s| s.autonomous_diagnostics = Some(run));
         self.changed.notify_all();
+        trace(debug, session, "run_done");
     }
     fn measure(
         &self,
@@ -470,6 +496,7 @@ impl Coordinator {
         session: u64,
     ) -> Result<NativeEvidence, Box<MeasurementFailure>> {
         let debug = state.snapshot().config.is_some_and(|config| config.debug);
+        trace(debug, session, "fixtures_start");
         // Keep both route interfaces present throughout the primary fixture's
         // negative, start, end and cleanup samples of the interface population.
         let mut routes = self.prepare_route_fixture(session, debug);
@@ -519,7 +546,9 @@ impl Coordinator {
                     "diagnostics: rule fixture session={session} setup failed: {error}"
                 ));
             }
+            trace(debug, session, "worker_prepare_start");
             super::android_worker::prepare_fresh(&app_dir)?;
+            trace(debug, session, "worker_prepare_done");
             let minimum_birth_ticks = boot_ticks()?
                 .checked_add(1)
                 .ok_or("worker birth clock overflow")?;
@@ -543,7 +572,7 @@ impl Coordinator {
                     .expired(BootInstant::now().map_err(|e| e.to_string())?)
                 {
                     return Err(
-                        "Android diagnostic worker deadline exceeded before dispatch".into(),
+                        "Android diagnostic worker start deadline exceeded before dispatch".into(),
                     );
                 }
                 active.minimum_birth_ticks = Some(minimum_birth_ticks);
@@ -554,7 +583,9 @@ impl Coordinator {
                     routes: routes.as_ref().ok().map(|fixture| fixture.spec.clone()),
                 });
             }
+            trace(debug, session, "worker_launch_start");
             super::android_worker::launch()?;
+            trace(debug, session, "worker_launch_done");
             let mut inner = self.inner.lock().expect("diagnostic coordinator");
             loop {
                 if inner.cancelled {
@@ -575,7 +606,10 @@ impl Coordinator {
                     .deadline
                     .wait_slice(BootInstant::now().map_err(|e| e.to_string())?)
                 else {
-                    return Err("Android diagnostic worker deadline exceeded".into());
+                    return Err(format!(
+                        "Android diagnostic {} deadline exceeded",
+                        active.stage()
+                    ));
                 };
                 inner = self
                     .changed
@@ -584,6 +618,7 @@ impl Coordinator {
                     .0;
             }
         })();
+        trace(debug, session, "worker_wait_done");
         let unavailable = NativeMeasurement::unavailable(ProbeError::Timeout);
         // All paths close AND read back cleanup before releasing the run slot.
         // Synthetic unavailable samples cannot establish hiding success.
@@ -839,10 +874,14 @@ impl Coordinator {
         let Some(active) = inner.active.as_mut() else {
             return Ok(None);
         };
-        active.claim(
+        let task = active.claim(
             identity,
             BootInstant::now().map_err(|_| DiagnosticError::Expired)?,
-        )
+        )?;
+        if task.is_some() {
+            self.changed.notify_all();
+        }
+        Ok(task)
     }
 
     pub fn framework_step(
@@ -951,6 +990,29 @@ impl Coordinator {
 }
 
 impl Active {
+    fn stage(&self) -> &'static str {
+        if self.report.is_some() {
+            "framework"
+        } else if self.worker.is_some() {
+            "native measurement"
+        } else {
+            "worker start"
+        }
+    }
+
+    fn next_deadline(
+        &self,
+        now: BootInstant,
+        budget: Duration,
+    ) -> Result<BootDeadline, DiagnosticError> {
+        let remaining = self
+            .run_deadline
+            .remaining(now)
+            .ok_or(DiagnosticError::Expired)?;
+        now.after(remaining.min(budget))
+            .map_err(|_| DiagnosticError::Expired)
+    }
+
     fn finish(
         &mut self,
         worker: WorkerIdentity,
@@ -1008,7 +1070,8 @@ impl Active {
         {
             return Err(DiagnosticError::WrongProcess);
         }
-        if self.task.is_some() {
+        if self.task.is_some() && self.worker.is_none() {
+            self.deadline = self.next_deadline(now, NATIVE_BUDGET)?;
             self.worker = Some(identity);
         }
         Ok(self.task.clone())
@@ -1041,6 +1104,7 @@ impl Active {
         }
         // Delivery is intentionally separate from worker completion. A later
         // Java failure/death must retain this already accepted measurement.
+        self.deadline = self.next_deadline(now, FRAMEWORK_BUDGET)?;
         self.report = Some(report.native);
         Ok(())
     }
@@ -1102,7 +1166,8 @@ mod tests {
         let now = BootInstant::at(100);
         let mut active = Active {
             session: 7,
-            deadline: now.after(DEADLINE).unwrap(),
+            deadline: now.after(START_BUDGET).unwrap(),
+            run_deadline: now.after(RUN_BUDGET).unwrap(),
             task: None,
             worker: None,
             report: None,
@@ -1123,6 +1188,13 @@ mod tests {
             Err(DiagnosticError::WrongProcess)
         );
         assert_eq!(active.claim(identity(30), now), Ok(Some(task())));
+        let native_deadline = active.deadline.expires_millis().unwrap();
+        assert_eq!(native_deadline, 110_000);
+        assert_eq!(
+            active.claim(identity(30), BootInstant::at(109)),
+            Ok(Some(task()))
+        );
+        assert_eq!(active.deadline.expires_millis().unwrap(), native_deadline);
         assert_eq!(
             active.claim(identity(31), now),
             Err(DiagnosticError::WrongProcess)
@@ -1183,7 +1255,8 @@ mod tests {
         };
         let mut active = Active {
             session: 7,
-            deadline: now.after(DEADLINE).unwrap(),
+            deadline: now.after(NATIVE_BUDGET).unwrap(),
+            run_deadline: now.after(RUN_BUDGET).unwrap(),
             task: Some(task()),
             worker: Some(identity(30)),
             report: None,
@@ -1202,6 +1275,7 @@ mod tests {
         let observation = report();
         let expected = observation.native.clone();
         active.accept(identity(30), 9, observation, now).unwrap();
+        assert_eq!(active.deadline.expires_millis().unwrap(), 125_000);
         assert!(!active.finished);
         assert_eq!(active.report, Some(expected.clone()));
         // Java collection may still be running or the process may have died.
@@ -1213,7 +1287,7 @@ mod tests {
         );
         assert!(!active.finished);
         assert_eq!(
-            active.finish(identity(30), 7, 9, BootInstant::at(120), |_| Ok(())),
+            active.finish(identity(30), 7, 9, BootInstant::at(125), |_| Ok(())),
             Err(DiagnosticError::Expired)
         );
         assert_eq!(active.report, Some(expected.clone()));

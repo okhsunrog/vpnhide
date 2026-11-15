@@ -45,9 +45,18 @@ completion use CLOCK_BOOTTIME, including time spent suspended. Active Condvar
 waits recheck this clock at most every 250 ms of awake time so resuming does not
 restart a full monotonic timeout. An expired run cleans its owned fixtures and
 retains accepted observations; no timer claims cleanup can execute while the CPU
-is asleep. Clock failures deny further worker authority. Framework envelopes inherit the original run expiration; beginning Java collection never renews it. Framework fixtures exercise actual public APIs,
+is asleep. Clock failures deny further worker authority. The run allows up to
+30 seconds to prepare and authenticate a fresh worker. The first accepted
+worker claim starts a 10-second native measurement budget. Acceptance of that
+report starts a 25-second framework budget. Each stage remains within 65
+seconds of admission. Replayed requests cannot renew a deadline. The framework
+envelope inherits the fixed framework deadline, and the native RAW grant keeps
+its independent five-second limit. Framework fixtures exercise actual public APIs,
 Binder, source transformations and production normalization. Framework RAW grants
 are scoped to the exact test process and never turn off protection for the whole UID.
+With Debug logging enabled, Core logs boot-clock timestamps for preparation,
+launch, framework RPCs and cleanup. Debug APKs also time the worker's connection,
+native measurement and each Java probe group.
 Native collection uses one dedicated Android collector thread. Core authenticates
 its genuine Zygote process and revalidates thread membership, both birth identities
 and the shared network namespace at each phase. PID and user namespaces are also
@@ -326,7 +335,10 @@ the first ordinary AVAILABLE enters the real PendingIntent dispatcher with a
 detached VPN fixture before the original event. RAW must deliver the fixture
 network. Protected LISTEN must suppress the fixture event and deliver the
 original ordinary event. Protected REQUEST must deliver the ordinary cover in
-`EXTRA_NETWORK`. The worker verifies that the broadcast includes a request with
+`EXTRA_NETWORK`. The worker overlaps the two independent broadcast waits with
+the PackageManager probes in the same phase. Android delivers the diagnostic
+broadcasts on the worker's callback handler at foreground priority. The worker
+verifies that the broadcast includes a request with
 the expected INTERNET capability and unregisters both registrations and receivers.
 Core requires one delivery per registration, ordinary controls before and after
 the protected phase, and fixture cleanup. Both dispatch paths must qualify the
@@ -350,7 +362,11 @@ the same production filters. Core requires evidence that each filter saw the
 real package and removed it, the worker still sees its own package, and both
 lists preserve the same remaining package names. Each direct probe uses a
 distinct phase-specific cache key and requires a system_server receipt to exclude
-cache-only results. The test leaves the installed packages and saved policy
+cache-only results. For its authenticated diagnostic worker, the hook filters
+real PackageManager entries and sends the complete resulting name list in the
+platform's original parcel wrapper. It omits metadata that the enumeration
+probe does not measure. Direct lookups and other callers use the full platform
+objects. The test leaves the installed packages and saved policy
 unchanged. Paired RPC40 uses framework channel version6. Intent resolution, UID
 mapping and other profiles are outside these four probes.
 
@@ -360,6 +376,15 @@ One worker launch command timed out, and one run failed to read the revoked
 framework acknowledgement. Three earlier post-unlock attempts expired on the
 overall worker deadline. No run reported a qualified leak. After the series
 both framework files were absent, with no descriptors open on either file.
+
+In a later cold-boot Perfetto comparison on the same Pixel, a 2.43-second
+installed-package query spent 2.02 seconds runnable and waiting for CPU.
+With the name projection, the median of 24 calls per enumeration API fell
+from 288 to 90 ms for packages and from 229 to 107 ms for applications.
+Binder transactions fell from 10 to 2–3 and from 15 to 4, respectively. The
+first automatic run after unlocking confirmed 16 groups in 13 seconds.
+All 20 subsequent steady-state runs confirmed the same groups with no leaks
+or infrastructure failures.
 
 Ports still lacks controlled results when enabled. See the
 [framework fixture requirements](rfcs/0002-autonomous-diagnostics.md#74-почему-callback--главный-технический-риск).

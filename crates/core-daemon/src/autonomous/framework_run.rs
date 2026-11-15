@@ -20,6 +20,7 @@ pub(super) struct FrameworkRun {
     finished: bool,
     closed: bool,
     failure_context: &'static str,
+    failure_io: Option<io::Error>,
     failure_logged: bool,
 }
 fn failed(_: impl std::fmt::Display) -> DiagnosticError {
@@ -105,6 +106,7 @@ impl FrameworkRun {
             finished: false,
             closed: false,
             failure_context: "worker request",
+            failure_io: None,
             failure_logged: false,
         })
     }
@@ -124,7 +126,13 @@ impl FrameworkRun {
                 return Err(DiagnosticError::StaleSession);
             }
             self.failure_context = "read system_server acknowledgement";
-            if let Some(ack) = store.poll_acknowledgement(&self.envelope).map_err(failed)? {
+            let ack = store
+                .poll_acknowledgement(&self.envelope)
+                .map_err(|error| {
+                    self.failure_io = Some(error);
+                    DiagnosticError::Disabled
+                })?;
+            if let Some(ack) = ack {
                 self.failure_context = "verify system_server identity";
                 if !validate(&ack) {
                     return Err(DiagnosticError::WrongProcess);
@@ -158,6 +166,8 @@ impl FrameworkRun {
     ) -> Result<Option<FrameworkWorkerTask>, DiagnosticError> {
         let requested_phase = request.phase;
         self.failure_context = "open framework fixture store";
+        self.failure_io = None;
+        let started = if debug { boot_ms().ok() } else { None };
         let result = FrameworkStore::production()
             .map_err(failed)
             .and_then(|store| self.step_with(request, &store, system_server));
@@ -167,11 +177,20 @@ impl FrameworkRun {
         {
             self.failure_logged = true;
             crate::alog::info(&format!(
-                "diagnostics: framework session={} requested={requested_phase:?} phase={:?} samples={} failure={error:?} detail={}",
+                "diagnostics: framework session={} requested={requested_phase:?} phase={:?} samples={} failure={error:?} detail={} io={:?}",
                 self.envelope.session,
                 self.envelope.phase,
                 self.phases.len(),
                 self.failure_context,
+                self.failure_io,
+            ));
+        }
+        if let (Some(start), Ok(end)) = (started, boot_ms()) {
+            crate::alog::info(&format!(
+                "diagnostics timing session={} stage=framework_{requested_phase:?}_rpc boot_ms={end} duration_ms={} ok={}",
+                self.envelope.session,
+                end.saturating_sub(start),
+                result.is_ok()
             ));
         }
         if debug && requested_phase == FrameworkWorkerPhase::Finished && result.is_ok() {
@@ -359,6 +378,7 @@ mod tests {
             finished: false,
             closed: false,
             failure_context: "worker request",
+            failure_io: None,
             failure_logged: false,
         }
     }

@@ -219,14 +219,16 @@ internal object PackageVisibilityHooks {
                         p == null || !caller.shouldHidePackage(p)
                     }
                 val removed = original.mapNotNull { pkgOf(it)?.takeIf { pkg -> caller.shouldHidePackage(pkg) } }
-                if (removed.isEmpty()) {
-                    source?.record?.invoke(false)
-                    return
-                }
+                if (removed.isEmpty() && source == null) return
 
-                val replacement = newListResultLike(result, filtered)
+                // Diagnostics measure the complete name list. Parcel just
+                // those names for the authenticated observer, after applying
+                // the ordinary filter to the real PackageManager entries.
+                val delivered = if (source == null) filtered else namesOnly(filtered)
+                val replacement = newListResultLike(result, delivered)
                 source?.let { it.record(replacement != null && it.packageName in removed) }
                 param.result = replacement ?: return
+                if (removed.isEmpty()) return
                 LsposedStats.record(caller.uid, HookIds.Hook.LSPOSED_PACKAGE_VISIBILITY)
                 HookLog.i(
                     "VpnHide/PV: $methodName uid=${caller.uid} filtered ${removed.size}/${original.size} " +
@@ -235,6 +237,15 @@ internal object PackageVisibilityHooks {
             }
         }
     }
+
+    private fun namesOnly(entries: List<*>): List<*> =
+        entries.map { entry ->
+            when (entry) {
+                is PackageInfo -> PackageInfo().apply { packageName = entry.packageName }
+                is ApplicationInfo -> ApplicationInfo().apply { packageName = entry.packageName }
+                else -> entry
+            }
+        }
 
     /**
      * ResolveInfo list: packageName is on the inner ComponentInfo

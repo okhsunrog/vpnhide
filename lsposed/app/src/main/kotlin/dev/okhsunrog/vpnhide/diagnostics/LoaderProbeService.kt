@@ -49,11 +49,11 @@ class LoaderProbeService : Service() {
             stopSelf()
             return
         }
-        handler.postDelayed(finish, DEADLINE_MS)
+        handler.postDelayed(finish, SERVICE_WATCHDOG_MS)
         scope.launch {
             try {
-                CoreSession(CorePaths.socket(this@LoaderProbeService)).use { core ->
-                    val task = core.joinDiagnosticWorker()
+                workerStage("connect") { CoreSession(CorePaths.socket(this@LoaderProbeService)) }.use { core ->
+                    val task = workerStage("join") { core.joinDiagnosticWorker() }
                     if (task != null) {
                         runDiagnostic(core, task)
                     } else {
@@ -78,21 +78,23 @@ class LoaderProbeService : Service() {
         val power = getSystemService(PowerManager::class.java)
         val wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VPNHide:Diagnostics")
         try {
-            wakeLock.acquire(DEADLINE_MS)
+            wakeLock.acquire(MEASUREMENT_WATCHDOG_MS)
             val tid = Process.myTid().toUInt()
             val observations =
-                measureNativeFixture(
-                    step = { phase -> core.nativeWorkerStep(task, tid, phase) },
-                    register = ::registerDiagnosticRaw,
-                    observe = { observeDiagnosticFixture(task) },
-                )
+                workerStage("native-${task.session}") {
+                    measureNativeFixture(
+                        step = { phase -> core.nativeWorkerStep(task, tid, phase) },
+                        register = ::registerDiagnosticRaw,
+                        observe = { observeDiagnosticFixture(task) },
+                    )
+                }
             try {
                 // Retain native evidence BEFORE Java work: process death during
                 // framework observations must not erase an already measured leak.
-                core.reportDiagnosticWorker(task, observations)
+                workerStage("native-report-${task.session}") { core.reportDiagnosticWorker(task, observations) }
                 measureFrameworkFixture(this, core, task)
             } finally {
-                core.finishDiagnosticWorker(task)
+                workerStage("finish-${task.session}") { core.finishDiagnosticWorker(task) }
             }
         } finally {
             if (wakeLock.isHeld) wakeLock.release()
@@ -123,6 +125,10 @@ class LoaderProbeService : Service() {
     private companion object {
         const val WORKER_PROCESS = "dev.okhsunrog.vpnhide:diagnostics"
         const val LOADER_LIFETIME_MS = 6_000L
-        const val DEADLINE_MS = 25_000L
+
+        // The Rust coordinator owns phase deadlines. These are Android-side
+        // bounds on process lifetime and the wake lock if Core stops responding.
+        const val SERVICE_WATCHDOG_MS = 65_000L
+        const val MEASUREMENT_WATCHDOG_MS = 35_000L
     }
 }

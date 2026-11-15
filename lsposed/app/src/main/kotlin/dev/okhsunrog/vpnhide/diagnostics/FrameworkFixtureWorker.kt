@@ -13,6 +13,9 @@ import android.os.SystemClock
 import dev.okhsunrog.vpnhide.BuildConfig
 import dev.okhsunrog.vpnhide.legacyInfoFields
 import dev.okhsunrog.vpnhide.legacyOrdinaryInfo
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import uniffi.vpnhide_core_ffi.CoreActiveNetworkObservation
 import uniffi.vpnhide_core_ffi.CoreBooleanSample
 import uniffi.vpnhide_core_ffi.CoreDiagnosticWorkerTask
@@ -50,15 +53,28 @@ internal suspend fun measureFrameworkFixture(
             CoreFrameworkPhase.PROTECTED,
             CoreFrameworkPhase.REVOKED,
         )) {
-            val next = requireNotNull(core.frameworkWorkerStep(task, BuildConfig.HOOK_SOURCE_SHA256, phase, previous))
+            val stage = "${task.session}-${phase.name.lowercase()}"
+            val next =
+                workerStage("$stage-advance") {
+                    requireNotNull(core.frameworkWorkerStep(task, BuildConfig.HOOK_SOURCE_SHA256, phase, previous))
+                }
+            val network = workerStage("$stage-queries") { observeFramework(manager, next) }
+            val callbacks = workerStage("$stage-callbacks") { observeFrameworkCallbacks(manager, next, handler) }
             previous =
-                observeFramework(manager, next).copy(
-                    callbacks = observeFrameworkCallbacks(manager, next, handler),
-                    pendingIntents = observeFrameworkPendingIntents(context, manager),
-                    packageVisibility = observeFrameworkPackages(context, next),
-                )
+                coroutineScope {
+                    // Broadcasts arrive on the handler while the collector
+                    // runs the independent PackageManager probes in this phase.
+                    val pending =
+                        async(start = CoroutineStart.UNDISPATCHED) {
+                            workerStage("$stage-pending-intents") { observeFrameworkPendingIntents(context, manager, handler) }
+                        }
+                    val packages = workerStage("$stage-packages") { observeFrameworkPackages(context, next, stage) }
+                    network.copy(callbacks = callbacks, pendingIntents = pending.await(), packageVisibility = packages)
+                }
         }
-        core.frameworkWorkerStep(task, BuildConfig.HOOK_SOURCE_SHA256, CoreFrameworkPhase.FINISHED, previous)
+        workerStage("${task.session}-framework-finished") {
+            core.frameworkWorkerStep(task, BuildConfig.HOOK_SOURCE_SHA256, CoreFrameworkPhase.FINISHED, previous)
+        }
     } finally {
         callbackThread.quitSafely()
     }
