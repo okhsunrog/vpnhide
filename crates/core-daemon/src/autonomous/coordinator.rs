@@ -861,6 +861,13 @@ impl Coordinator {
             if inner.cancelled {
                 return Err(DiagnosticError::Expired);
             }
+            let package_visibility = inner.last.as_ref().is_some_and(|run| {
+                run.session == request.session
+                    && run
+                        .plan
+                        .required
+                        .contains(&vpnhide_diagnostic_model::RequiredCheck::PackageVisibility)
+            });
             let active = inner.active.as_mut().ok_or(DiagnosticError::StaleSession)?;
             let task = active.task.as_ref().ok_or(DiagnosticError::StaleSession)?;
             if active
@@ -894,6 +901,7 @@ impl Coordinator {
                     ),
                     request.hook_sha256.clone(),
                     active.deadline,
+                    package_visibility,
                 )?)));
             }
             active

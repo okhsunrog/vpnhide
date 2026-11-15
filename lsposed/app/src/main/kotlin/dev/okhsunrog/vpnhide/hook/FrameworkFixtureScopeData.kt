@@ -2,6 +2,7 @@ package dev.okhsunrog.vpnhide.hook
 
 import dev.okhsunrog.vpnhide.LegacyOrdinaryInfo
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -20,7 +21,7 @@ internal enum class FixtureTransaction {
     OTHER,
 }
 
-internal const val FRAMEWORK_FIXTURE_PROTOCOL = 5
+internal const val FRAMEWORK_FIXTURE_PROTOCOL = 6
 
 internal data class FixtureWorker(
     val uid: Int,
@@ -35,6 +36,7 @@ internal data class FixtureObjects(
     val mtu: Int,
     val ordinaryInterfaceName: String,
     val ordinaryMtu: Int,
+    val packageVisibility: String?,
 )
 
 internal data class FixtureAuthority(
@@ -83,7 +85,7 @@ internal fun parseFixtureAuthority(bytes: String): FixtureAuthority? =
         val phase = FixturePhase.valueOf(root.text("phase").uppercase())
         require(root.number("generation") == phase.ordinal.toLong())
         val fixture = root.getValue("fixture").jsonObject
-        fixture.exact("vpn_net_id ordinary_net_id interface_name mtu ordinary_interface_name ordinary_mtu")
+        fixture.exact("vpn_net_id ordinary_net_id interface_name mtu ordinary_interface_name ordinary_mtu package_visibility")
         val objects =
             FixtureObjects(
                 fixture.positiveInt("vpn_net_id"),
@@ -92,6 +94,11 @@ internal fun parseFixtureAuthority(bytes: String): FixtureAuthority? =
                 fixture.positiveInt("mtu"),
                 fixture.text("ordinary_interface_name"),
                 fixture.positiveInt("ordinary_mtu"),
+                fixture.getValue("package_visibility").takeUnless { it == JsonNull }?.let {
+                    fixture.text("package_visibility").also { name ->
+                        require(name.length in 3..128 && Regex("[a-zA-Z0-9_]+(\\.[a-zA-Z0-9_]+)+").matches(name))
+                    }
+                },
             )
         require(objects.vpnNetId > 65535 && objects.ordinaryNetId > 65535 && objects.vpnNetId != objects.ordinaryNetId)
         require(
@@ -161,11 +168,27 @@ internal data class FixtureEvidenceSnapshot(
     val activeNetwork: FixtureActiveNetworkEvidence,
     val callbacks: Map<FixtureCallbackRegistration, FixtureCallbackEvidence>,
     val pendingIntents: Map<FixturePendingRegistration, FixturePendingEvidence>,
+    val packageVisibility: Map<FixturePackageQuery, Boolean>,
 )
 
 internal enum class FixtureCallbackRegistration { LISTEN, DEFAULT, REQUEST }
 
 internal enum class FixturePendingRegistration { LISTEN, REQUEST }
+
+internal enum class FixturePackageQuery(
+    val methodName: String,
+) {
+    PACKAGE_INFO("getPackageInfo"),
+    APPLICATION_INFO("getApplicationInfo"),
+    INSTALLED_PACKAGES("getInstalledPackages"),
+    INSTALLED_APPLICATIONS("getInstalledApplications"),
+}
+
+internal data class FixturePackageCall(
+    val packageName: String,
+    val protect: Boolean,
+    val record: (filtered: Boolean) -> Unit,
+)
 
 internal data class FixturePendingEvidence(
     val ordinaryHandle: Long,
@@ -202,6 +225,7 @@ internal class FixtureEvidenceLedger {
         private set
     private val callbacks = mutableMapOf<FixtureCallbackRegistration, FixtureCallbackEvidence>()
     private val pendingIntents = mutableMapOf<FixturePendingRegistration, FixturePendingEvidence>()
+    private val packageVisibility = mutableMapOf<FixturePackageQuery, Boolean>()
 
     fun snapshot() =
         FixtureEvidenceSnapshot(
@@ -214,6 +238,7 @@ internal class FixtureEvidenceLedger {
             activeNetwork,
             callbacks.toMap(),
             pendingIntents.toMap(),
+            packageVisibility.toMap(),
         )
 
     fun begin(
@@ -272,6 +297,11 @@ internal class FixtureEvidenceLedger {
         val evidence = pendingIntents[registration] ?: return
         pendingIntents[registration] = evidence.copy(suppressed = coverHandle == null, coverHandle = coverHandle)
     }
+
+    fun recordPackageSource(
+        query: FixturePackageQuery,
+        filtered: Boolean,
+    ): Boolean = packageVisibility.put(query, filtered) != filtered
 
     fun recordCallback(
         registration: FixtureCallbackRegistration,

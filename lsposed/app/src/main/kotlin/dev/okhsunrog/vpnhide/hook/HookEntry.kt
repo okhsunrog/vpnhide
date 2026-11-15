@@ -140,7 +140,7 @@ class HookEntry : IXposedHookLoadPackage {
             val hookInstall = installSystemServerHooks()
             var installedMask = hookInstall.installedHookMask
             val installFailures = hookInstall.installFailures.toMutableList()
-            if (tryHook("PackageVisibility", installFailures) { PackageVisibilityHooks.install(lpparam.classLoader) }) {
+            if (tryHook("PackageVisibility", installFailures) { PackageVisibilityHooks.install(lpparam.classLoader, frameworkFixture) }) {
                 installedMask = installedMask or HookIds.Hook.LSPOSED_PACKAGE_VISIBILITY.bit
             }
             // ConnectivityService hooks attach asynchronously (the reliable path

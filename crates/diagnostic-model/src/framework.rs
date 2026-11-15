@@ -5,10 +5,11 @@ use crate::{
     framework_callbacks::{CallbackObservation, CallbackSource},
     framework_default::{ActiveNetworkObservation, ActiveNetworkSource},
     framework_legacy::{LegacyObservation, LegacySourceEvidence},
+    framework_packages::{PACKAGE_VISIBILITY_TARGET, PackageObservation, PackageSource},
     framework_pending::{PendingObservation, PendingSource},
 };
 use serde::{Deserialize, Serialize};
-pub const FRAMEWORK_PROTOCOL: u32 = 5;
+pub const FRAMEWORK_PROTOCOL: u32 = 6;
 pub const FRAMEWORK_LEASE_MS: u64 = 25_000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -27,6 +28,7 @@ pub struct FrameworkFixtureSpec {
     pub mtu: u32,
     pub ordinary_interface_name: String,
     pub ordinary_mtu: u32,
+    pub package_visibility: Option<String>,
 }
 impl FrameworkFixtureSpec {
     pub fn valid(&self) -> bool {
@@ -49,6 +51,10 @@ impl FrameworkFixtureSpec {
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric())
             && (1..=65_535).contains(&self.ordinary_mtu)
+            && self
+                .package_visibility
+                .as_deref()
+                .is_none_or(|name| name == PACKAGE_VISIBILITY_TARGET)
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -154,6 +160,7 @@ pub struct FrameworkAcknowledgement {
     pub active_network: ActiveNetworkSource,
     pub callbacks: Vec<CallbackSource>,
     pub pending_intents: Vec<PendingSource>,
+    pub package_visibility: Vec<PackageSource>,
     pub legacy: LegacySourceEvidence,
 }
 impl FrameworkAcknowledgement {
@@ -163,6 +170,8 @@ impl FrameworkAcknowledgement {
             && self.active_network.bounded()
             && crate::framework_callbacks::sources_bounded(&self.callbacks)
             && crate::framework_pending::sources_bounded(&self.pending_intents)
+            && crate::framework_packages::sources_bounded(&self.package_visibility)
+            && (envelope.fixture.package_visibility.is_some() || self.package_visibility.is_empty())
             && self.version == FRAMEWORK_PROTOCOL
             && self.session == envelope.session
             && self.core_epoch == envelope.core_epoch
@@ -200,6 +209,7 @@ pub struct FrameworkObservation {
     pub active_network: ActiveNetworkObservation,
     pub callbacks: Vec<CallbackObservation>,
     pub pending_intents: Vec<PendingObservation>,
+    pub package_visibility: Vec<PackageObservation>,
     pub legacy: LegacyObservation,
 }
 impl FrameworkObservation {
@@ -208,6 +218,7 @@ impl FrameworkObservation {
             && self.active_network.bounded()
             && crate::framework_callbacks::observations_bounded(&self.callbacks)
             && crate::framework_pending::observations_bounded(&self.pending_intents)
+            && crate::framework_packages::observations_bounded(&self.package_visibility)
             && self.networks.value().is_none_or(|v| {
                 v.len() <= 256
                     && v.iter().all(|&h| h != 0)
@@ -239,6 +250,7 @@ impl FrameworkObservation {
             active_network: ActiveNetworkObservation::unavailable(),
             callbacks: vec![],
             pending_intents: vec![],
+            package_visibility: vec![],
             legacy: LegacyObservation::unavailable(),
         }
     }
@@ -255,6 +267,7 @@ pub enum FrameworkCheck {
     DefaultNetwork,
     Callbacks,
     PendingIntent,
+    PackageVisibility,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -382,6 +395,9 @@ fn observed_leaks(phases: &[FrameworkPhaseEvidence]) -> Vec<FrameworkCheck> {
     }
     if crate::framework_pending::leaked(raw, protected) {
         leaked.push(FrameworkCheck::PendingIntent);
+    }
+    if crate::framework_packages::leaked(raw, protected) {
+        leaked.push(FrameworkCheck::PackageVisibility);
     }
     leaked
 }
@@ -566,6 +582,13 @@ pub fn evaluate_framework(
         Ok(()) => {}
         Err(failure) => result.controls.push(failure),
     }
+    if prepared.envelope.fixture.package_visibility.is_some() {
+        match crate::framework_packages::evaluate([prepared, raw, protected, revoked]) {
+            Ok(()) if cleanup => result.proven.push(V::PackageVisibility),
+            Ok(()) => {}
+            Err(failure) => result.controls.push(failure),
+        }
+    }
     result.leaked.sort();
     result.leaked.dedup();
     result.controls.sort();
@@ -597,6 +620,7 @@ mod tests {
                 mtu: 1543,
                 ordinary_interface_name: "ipsec0000000009".into(),
                 ordinary_mtu: 1519,
+                package_visibility: None,
             },
         }
     }
@@ -644,6 +668,7 @@ mod tests {
                     active_network: ActiveNetworkSource::default(),
                     callbacks: vec![],
                     pending_intents: vec![],
+                    package_visibility: vec![],
                     legacy: LegacySourceEvidence::default(),
                 },
                 observation: FrameworkObservation {
@@ -663,6 +688,7 @@ mod tests {
                     active_network: ActiveNetworkObservation::unavailable(),
                     callbacks: vec![],
                     pending_intents: vec![],
+                    package_visibility: vec![],
                     legacy: LegacyObservation::unavailable(),
                 },
             }
@@ -895,6 +921,71 @@ mod tests {
         assert!(leak.leaked.contains(&check));
         assert!(!leak.proven.contains(&check));
     }
+    #[test]
+    fn package_visibility_requires_real_lookups_and_stable_unrelated_packages() {
+        use crate::framework_packages::PackageQuery::*;
+        let mut evidence = legacy_phases();
+        for (index, phase) in evidence.iter_mut().enumerate() {
+            phase.envelope.fixture.package_visibility = Some(PACKAGE_VISIBILITY_TARGET.into());
+            phase.acknowledgement.fixture = phase.envelope.fixture.clone();
+            let protected = index == 2;
+            for query in [
+                PackageInfo,
+                ApplicationInfo,
+                InstalledPackages,
+                InstalledApplications,
+            ] {
+                phase
+                    .acknowledgement
+                    .package_visibility
+                    .push(PackageSource {
+                        query,
+                        filtered: protected,
+                    });
+                phase
+                    .observation
+                    .package_visibility
+                    .push(PackageObservation {
+                        query,
+                        target_present: !protected,
+                        ordinary_present: true,
+                        remaining_sha256: matches!(
+                            query,
+                            InstalledPackages | InstalledApplications
+                        )
+                        .then(|| "4".repeat(64)),
+                    });
+            }
+        }
+        let check = FrameworkCheck::PackageVisibility;
+        let result = evaluate_framework(&evidence, true);
+        assert!(result.proven.contains(&check));
+        assert!(
+            crate::assessment::framework_checks(&result.proven, true)
+                .contains(&crate::RequiredCheck::PackageVisibility)
+        );
+        for change in 0..5 {
+            let mut invalid = evidence.clone();
+            match change {
+                0 => invalid[1].acknowledgement.package_visibility.clear(),
+                1 => invalid[2].acknowledgement.package_visibility[0].filtered = false,
+                2 => invalid[2].observation.package_visibility[0].ordinary_present = false,
+                3 => {
+                    invalid[2].observation.package_visibility[2].remaining_sha256 =
+                        Some("5".repeat(64))
+                }
+                _ => invalid[3].observation.package_visibility[0].target_present = false,
+            }
+            let result = evaluate_framework(&invalid, true);
+            assert!(!result.proven.contains(&check), "case {change}");
+            assert!(result.proven.contains(&FrameworkCheck::Networks));
+        }
+        evidence[2].observation.package_visibility[3].target_present = true;
+        let leak = evaluate_framework(&evidence[..3], false);
+        assert!(leak.leaked.contains(&check));
+        assert!(!leak.proven.contains(&check));
+    }
+
     #[test]
     fn legacy_apis_require_both_production_paths_and_per_invocation_preservation() {
         use FrameworkCheck as V;
@@ -1261,4 +1352,5 @@ pub struct FrameworkWorkerTask {
     pub ordinary_handle: u64,
     pub vpn_marker: String,
     pub ordinary_marker: String,
+    pub package_visibility: Option<String>,
 }

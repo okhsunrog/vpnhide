@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "session": 9,
   "core_epoch": 7,
   "boot_id": "12345678-1234-1234-1234-123456789abc",
@@ -17,6 +17,7 @@
     "interface_name": "tun000000000009",
     "mtu": 1543,
     "ordinary_interface_name": "ipsec0000000009",
-    "ordinary_mtu": 1519
+    "ordinary_mtu": 1519,
+    "package_visibility": "com.android.settings"
   }
 }

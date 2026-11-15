@@ -339,6 +339,29 @@ internal class FrameworkFixtureHooks {
         }
     }
 
+    fun packageCall(
+        query: FixturePackageQuery,
+        requestedPackage: String?,
+    ): FixturePackageCall? {
+        val active = state ?: return null
+        val authority = active.authority
+        val target = authority.objects.packageVisibility ?: return null
+        if (requestedPackage != null && requestedPackage != target) return null
+        val worker = authority.worker
+        if (Binder.getCallingUid() != worker.uid || Binder.getCallingPid() != worker.pid ||
+            fixtureStartTicks(worker.pid) != worker.startTicks || channel.read() != authority
+        ) {
+            return null
+        }
+        return FixturePackageCall(target, authority.phase == FixturePhase.PROTECTED) { filtered ->
+            synchronized(guard) {
+                if (state === active && channel.read() == authority && active.evidence.recordPackageSource(query, filtered)) {
+                    runCatching { acknowledge(active) }
+                }
+            }
+        }
+    }
+
     fun callbackHandled(
         network: Network,
         lost: Boolean,

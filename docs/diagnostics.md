@@ -340,8 +340,28 @@ but did not receive the RAW broadcasts within the worker's observation window.
 No run reported a qualified leak. The framework files and registrations were
 gone after the series, and system_server's open descriptor count was unchanged.
 
-Package Visibility and Ports are required only when enabled and still lack
-controlled results. See the
+When Apps hiding is configured, Core gives the worker a short-lived authority
+for the installed Android Settings package in its own profile. The worker calls
+`getPackageInfo`, `getApplicationInfo`, `getInstalledPackages` and
+`getInstalledApplications` through Android PackageManager. The package must be
+visible in the prepared, RAW and revoked phases. For the protected phase,
+system_server adds only the fixture package to the worker's policy and applies
+the same production filters. Core requires evidence that each filter saw the
+real package and removed it, the worker still sees its own package, and both
+lists preserve the same remaining package names. Each direct probe uses a
+distinct phase-specific cache key and requires a system_server receipt to exclude
+cache-only results. The test leaves the installed packages and saved policy
+unchanged. Paired RPC40 uses framework channel version6. Intent resolution, UID
+mapping and other profiles are outside these four probes.
+
+On Pixel 8 Pro with Android 17 and Builtin, all four package queries qualified
+in 18 of 20 repeated runs. Those 18 runs confirmed 16 of 20 required groups.
+One worker launch command timed out, and one run failed to read the revoked
+framework acknowledgement. Three earlier post-unlock attempts expired on the
+overall worker deadline. No run reported a qualified leak. After the series
+both framework files were absent, with no descriptors open on either file.
+
+Ports still lacks controlled results when enabled. See the
 [framework fixture requirements](rfcs/0002-autonomous-diagnostics.md#74-почему-callback--главный-технический-риск).
 Android bionic, SELinux, Java callback isolation and old game-process coverage need
 real device acceptance. QEMU/static libc evidence does not replace those gates.

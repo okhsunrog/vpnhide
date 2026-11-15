@@ -55,6 +55,7 @@ internal suspend fun measureFrameworkFixture(
                 observeFramework(manager, next).copy(
                     callbacks = observeFrameworkCallbacks(manager, next, handler),
                     pendingIntents = observeFrameworkPendingIntents(context, manager),
+                    packageVisibility = observeFrameworkPackages(context, next),
                 )
         }
         core.frameworkWorkerStep(task, BuildConfig.HOOK_SOURCE_SHA256, CoreFrameworkPhase.FINISHED, previous)
@@ -93,6 +94,7 @@ private fun observeFramework(
         legacy.type,
         legacy.enumeration,
         legacy.ordinary,
+        emptyList(),
         emptyList(),
         emptyList(),
     )

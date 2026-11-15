@@ -55,6 +55,9 @@ class FrameworkFixtureScopeDataTest {
     @Test fun `shared envelope binds exact process code boot and lease`() {
         val env = requireNotNull(parseFixtureAuthority(golden))
         assertEquals(FixturePhase.PREPARED, env.phase)
+        assertEquals("com.android.settings", env.objects.packageVisibility)
+        val withoutPackages = requireNotNull(parseFixtureAuthority(golden.replace("\"com.android.settings\"", "null")))
+        assertNull(withoutPackages.objects.packageVisibility)
         assertTrue(env.permits(env.worker, env.boot, env.hookHash, 1))
         assertFalse(env.permits(env.worker.copy(pid = 445), env.boot, env.hookHash, 1))
         assertFalse(env.permits(env.worker.copy(startTicks = 1235), env.boot, env.hookHash, 1))
@@ -84,7 +87,8 @@ class FrameworkFixtureScopeDataTest {
             golden.replace("10123", "\"10123\""),
             golden.replace("\"prepared\"", "\"raw\""),
             golden.replace("1610612737", "2147483648"),
-            golden.replace("\"version\": 5", "\"extra\": true, \"version\": 5"),
+            golden.replace("\"version\": 6", "\"extra\": true, \"version\": 6"),
+            golden.replace("com.android.settings", "com/android/settings"),
         )) {
             assertNull(parseFixtureAuthority(bad))
         }

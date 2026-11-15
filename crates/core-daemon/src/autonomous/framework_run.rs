@@ -52,6 +52,7 @@ impl FrameworkRun {
         worker: (u32, u32, u64),
         hash: String,
         deadline: BootDeadline,
+        package_visibility: bool,
     ) -> Result<Self, DiagnosticError> {
         if deadline.expired(BootInstant::now().map_err(failed)?) {
             return Err(DiagnosticError::Expired);
@@ -86,6 +87,9 @@ impl FrameworkRun {
                 mtu: task.fixture.mtu,
                 ordinary_interface_name: format!("ipsec{:010x}", task.session & 0xff_ffff_ffff),
                 ordinary_mtu: 1519,
+                package_visibility: package_visibility.then(|| {
+                    vpnhide_diagnostic_model::framework_packages::PACKAGE_VISIBILITY_TARGET.into()
+                }),
             },
         };
         if !envelope.valid() {
@@ -171,12 +175,12 @@ impl FrameworkRun {
             ));
         }
         if debug && requested_phase == FrameworkWorkerPhase::Finished && result.is_ok() {
-            self.log_unverified_delivery();
+            self.log_unverified_framework();
         }
         result
     }
 
-    fn log_unverified_delivery(&self) {
+    fn log_unverified_framework(&self) {
         let proof = evaluate_framework(&self.phases, true).proven;
         for phase in &self.phases {
             if !proof.contains(&FrameworkCheck::Callbacks) {
@@ -195,6 +199,17 @@ impl FrameworkRun {
                     phase.envelope.phase,
                     phase.acknowledgement.pending_intents,
                     phase.observation.pending_intents,
+                ));
+            }
+            if self.envelope.fixture.package_visibility.is_some()
+                && !proof.contains(&FrameworkCheck::PackageVisibility)
+            {
+                crate::alog::info(&format!(
+                    "diagnostics: package visibility session={} phase={:?} sources={:?} observations={:?}",
+                    self.envelope.session,
+                    phase.envelope.phase,
+                    phase.acknowledgement.package_visibility,
+                    phase.observation.package_visibility,
                 ));
             }
         }
@@ -242,6 +257,7 @@ impl FrameworkRun {
             ordinary_handle: ack.sources.ordinary_handle,
             vpn_marker: self.envelope.fixture.interface_name.clone(),
             ordinary_marker: self.envelope.fixture.ordinary_interface_name.clone(),
+            package_visibility: self.envelope.fixture.package_visibility.clone(),
         }))
     }
     fn advance(
@@ -385,6 +401,7 @@ mod tests {
             active_network: Default::default(),
             callbacks: vec![],
             pending_intents: vec![],
+            package_visibility: vec![],
             legacy: Default::default(),
         }
     }
@@ -415,14 +432,15 @@ mod tests {
             },
         };
         let deadline = BootDeadline::from_now(Duration::from_secs(5)).unwrap();
-        let mut run = FrameworkRun::new(&task, (10123, 456, 30), "a".repeat(64), deadline).unwrap();
+        let mut run =
+            FrameworkRun::new(&task, (10123, 456, 30), "a".repeat(64), deadline, false).unwrap();
         assert_eq!(
             run.envelope.expires_boot_ms,
             deadline.expires_millis().unwrap()
         );
         let expired = BootInstant::at(0).after(Duration::ZERO).unwrap();
         assert!(matches!(
-            FrameworkRun::new(&task, (10123, 456, 30), "a".repeat(64), expired),
+            FrameworkRun::new(&task, (10123, 456, 30), "a".repeat(64), expired, false),
             Err(DiagnosticError::Expired)
         ));
         run.envelope.expires_boot_ms = boot_ms().unwrap().saturating_sub(1);

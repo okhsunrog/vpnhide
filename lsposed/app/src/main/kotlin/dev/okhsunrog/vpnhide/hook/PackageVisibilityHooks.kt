@@ -45,13 +45,17 @@ internal object PackageVisibilityHooks {
         val uid: Int,
         val appId: Int,
         val config: SystemServerConfig,
+        val fixture: FixturePackageCall?,
     )
 
     @Volatile private var parceledListSliceClass: Class<*>? = null
 
     @Volatile private var fileObserver: FileObserver? = null
 
-    fun install(classLoader: ClassLoader) {
+    fun install(
+        classLoader: ClassLoader,
+        fixture: FrameworkFixtureHooks,
+    ) {
         val ipmClass =
             try {
                 classLoader.loadClass(IPM_BASE)
@@ -78,20 +82,20 @@ internal object PackageVisibilityHooks {
         hook(
             ipmClass,
             "getInstalledPackages",
-            listFilter<PackageInfo>("getInstalledPackages") { it.packageName },
+            listFilter<PackageInfo>("getInstalledPackages", fixture) { it.packageName },
         )
         hook(
             ipmClass,
             "getInstalledApplications",
-            listFilter<ApplicationInfo>("getInstalledApplications") { it.packageName },
+            listFilter<ApplicationInfo>("getInstalledApplications", fixture) { it.packageName },
         )
         hook(ipmClass, "queryIntentActivities", resolveInfoListFilter("queryIntentActivities"))
         hook(ipmClass, "queryIntentServices", resolveInfoListFilter("queryIntentServices"))
         hook(ipmClass, "queryIntentReceivers", resolveInfoListFilter("queryIntentReceivers"))
         hook(ipmClass, "queryIntentContentProviders", resolveInfoListFilter("queryIntentContentProviders"))
 
-        hook(ipmClass, "getPackageInfo", singleHideByFirstStringArg("getPackageInfo"))
-        hook(ipmClass, "getApplicationInfo", singleHideByFirstStringArg("getApplicationInfo"))
+        hook(ipmClass, "getPackageInfo", singleHideByFirstStringArg("getPackageInfo", fixture))
+        hook(ipmClass, "getApplicationInfo", singleHideByFirstStringArg("getApplicationInfo", fixture))
         hook(ipmClass, "getInstallerPackageName", singleHideByFirstStringArg("getInstallerPackageName"))
         hook(
             ipmClass,
@@ -113,7 +117,7 @@ internal object PackageVisibilityHooks {
     //  Caller classification
     // ------------------------------------------------------------------
 
-    private fun observerCaller(): ObserverCaller? {
+    private fun observerCaller(fixture: FixturePackageCall? = null): ObserverCaller? {
         val uid = Binder.getCallingUid()
         // Exempt system callers: installd, shell, system_server itself,
         // LauncherApps, StatusBar, etc. all run under UID < 10000.
@@ -121,7 +125,12 @@ internal object PackageVisibilityHooks {
         if (uid == Process.myUid()) return null
         val appId = SystemServerConfigCache.appId(uid)
         val config = SystemServerConfigCache.load()
-        return if (config.observerAppIds.contains(appId)) ObserverCaller(uid, appId, config) else null
+        val observer = appId in config.observerAppIds
+        val scoped = fixture?.takeUnless { it.packageName in config.hiddenPackages }
+        if (scoped == null) return if (observer) ObserverCaller(uid, appId, config, null) else null
+        val hidden = if (observer) config.hiddenPackages else emptySet()
+        val observed = if (scoped.protect) hidden + scoped.packageName else hidden
+        return ObserverCaller(uid, appId, config.copy(hiddenPackages = observed), scoped)
     }
 
     private fun ObserverCaller.shouldHidePackage(packageName: String): Boolean = config.shouldHidePackageForCallerAppId(packageName, appId)
@@ -182,13 +191,15 @@ internal object PackageVisibilityHooks {
      */
     private inline fun <reified T> listFilter(
         methodName: String,
+        fixture: FrameworkFixtureHooks? = null,
         crossinline pkgOf: (T) -> String?,
-    ): XC_MethodHook =
-        object : XC_MethodHook() {
+    ): XC_MethodHook {
+        val query = FixturePackageQuery.entries.firstOrNull { it.methodName == methodName }
+        return object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 if (param.hasThrowable()) return
-                val caller = observerCaller() ?: return
-                if (caller.config.hiddenPackages.isEmpty()) return
+                val caller = observerCaller(query?.let { fixture?.packageCall(it, null) }) ?: return
+                if (caller.config.hiddenPackages.isEmpty() && caller.fixture == null) return
 
                 val result = param.result ?: return
                 val pls = parceledListSliceClass ?: return
@@ -201,15 +212,21 @@ internal object PackageVisibilityHooks {
                 // only thing that touches an element, and it is null-tolerant.
                 @Suppress("UNCHECKED_CAST")
                 val original = XposedHelpers.callMethod(result, "getList") as? List<T> ?: return
+                val source = caller.fixture?.takeIf { call -> original.any { pkgOf(it) == call.packageName } }
                 val filtered =
                     original.filter {
                         val p = pkgOf(it)
                         p == null || !caller.shouldHidePackage(p)
                     }
                 val removed = original.mapNotNull { pkgOf(it)?.takeIf { pkg -> caller.shouldHidePackage(pkg) } }
-                if (removed.isEmpty()) return
+                if (removed.isEmpty()) {
+                    source?.record?.invoke(false)
+                    return
+                }
 
-                param.result = newListResultLike(result, filtered) ?: return
+                val replacement = newListResultLike(result, filtered)
+                source?.let { it.record(replacement != null && it.packageName in removed) }
+                param.result = replacement ?: return
                 LsposedStats.record(caller.uid, HookIds.Hook.LSPOSED_PACKAGE_VISIBILITY)
                 HookLog.i(
                     "VpnHide/PV: $methodName uid=${caller.uid} filtered ${removed.size}/${original.size} " +
@@ -217,6 +234,7 @@ internal object PackageVisibilityHooks {
                 )
             }
         }
+    }
 
     /**
      * ResolveInfo list: packageName is on the inner ComponentInfo
@@ -254,19 +272,34 @@ internal object PackageVisibilityHooks {
      * Signature starts with `String packageName`. If that package is hidden and caller is an
      * observer, set result=null. Caller-side API converts null to NameNotFoundException.
      */
-    private fun singleHideByFirstStringArg(methodName: String): XC_MethodHook =
-        object : XC_MethodHook() {
+    private fun singleHideByFirstStringArg(
+        methodName: String,
+        fixture: FrameworkFixtureHooks? = null,
+    ): XC_MethodHook {
+        val query = FixturePackageQuery.entries.firstOrNull { it.methodName == methodName }
+        return object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 if (param.hasThrowable()) return
-                if (param.result == null) return
+                val result = param.result ?: return
                 val pkg = param.args.firstOrNull() as? String ?: return
-                val caller = observerCaller() ?: return
-                if (caller.shouldHidePackage(pkg)) {
+                val call = query?.takeIf { resultPackageName(result) == pkg }?.let { fixture?.packageCall(it, pkg) }
+                val caller = observerCaller(call) ?: return
+                val hide = caller.shouldHidePackage(pkg)
+                if (hide) {
                     param.result = null
                     LsposedStats.record(caller.uid, HookIds.Hook.LSPOSED_PACKAGE_VISIBILITY)
                     HookLog.i("VpnHide/PV: $methodName uid=${caller.uid} hid $pkg")
                 }
+                caller.fixture?.record?.invoke(hide)
             }
+        }
+    }
+
+    private fun resultPackageName(result: Any): String? =
+        when (result) {
+            is PackageInfo -> result.packageName
+            is ApplicationInfo -> result.packageName
+            else -> null
         }
 
     /** getPackageUid(String, long/int, int): returns -1 if hidden. */

@@ -173,6 +173,18 @@ internal class FrameworkFixtureChannel {
             }
         }
 
+    private fun encodePackageVisibility(evidence: FixtureEvidenceSnapshot) =
+        buildJsonArray {
+            for ((query, filtered) in evidence.packageVisibility) {
+                add(
+                    buildJsonObject {
+                        put("query", query.name.lowercase())
+                        put("filtered", filtered)
+                    },
+                )
+            }
+        }
+
     private fun encode(
         authority: FixtureAuthority,
         objects: FrameworkFixtureObjects,
@@ -210,12 +222,14 @@ internal class FrameworkFixtureChannel {
                     put("mtu", spec.mtu)
                     put("ordinary_interface_name", spec.ordinaryInterfaceName)
                     put("ordinary_mtu", spec.ordinaryMtu)
+                    put("package_visibility", spec.packageVisibility)
                 },
             )
             put("legacy", encodeLegacy(evidence))
             put("active_network", encodeActiveNetwork(evidence.activeNetwork))
             put("callbacks", encodeCallbacks(evidence))
             put("pending_intents", encodePendingIntents(evidence))
+            put("package_visibility", encodePackageVisibility(evidence))
             for (name in listOf(
                 "networks_source",
                 "capabilities_source",
