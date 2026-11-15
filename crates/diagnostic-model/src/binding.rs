@@ -239,6 +239,7 @@ mod tests {
             interfaces.push(spec.interface.clone().into());
         }
         NativeMeasurement {
+            routes: None,
             filesystem: None,
             sys_interfaces: None,
             proc_interfaces: None,

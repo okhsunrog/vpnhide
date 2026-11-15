@@ -48,6 +48,7 @@ class AutonomousDiagnosticSnapshotTest {
 
     private fun run(epoch: Long) =
         CoreDiagnosticRun(
+            routes = null,
             nativeRaw = null,
             session = 1uL,
             coreEpoch = epoch.toULong(),

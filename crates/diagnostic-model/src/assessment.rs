@@ -239,6 +239,29 @@ impl DiagnosticRun {
                 }
             }
         }
+        if let Some(routes) = &self.routes {
+            for (group, netlink) in [(NetlinkRoutes, true), (ProcRoutes, false)] {
+                if crate::RouteCheck::required()
+                    .iter()
+                    .filter(|check| check.surface.netlink() == netlink)
+                    .all(|check| routes.proven.contains(check))
+                {
+                    proven.insert(group);
+                }
+                if routes
+                    .leaked
+                    .iter()
+                    .any(|check| check.surface.netlink() == netlink)
+                {
+                    leaked.insert(group);
+                }
+            }
+            for control in &routes.controls {
+                if !native_controls.contains(control) {
+                    native_controls.push(*control);
+                }
+            }
+        }
         // Root-only controls cannot establish the admitted app's RAW visibility.
         // Native results are paired with that sample by Core's shared evaluators;
         // retain qualified root-controlled leaks even if the RAW scope is absent.
@@ -311,6 +334,7 @@ pub(crate) mod tests {
     fn run(native: ScopedNativeResult) -> DiagnosticRun {
         DiagnosticRun {
             native_raw: Some(paired_receipt()),
+            routes: None,
             filesystem: None,
             sys_interfaces: None,
             proc_interfaces: None,
@@ -335,6 +359,53 @@ pub(crate) mod tests {
             },
         }
     }
+    #[test]
+    fn routes_require_each_actor_and_family_and_keep_leaks_without_a_raw_pair() {
+        let checks = crate::RouteCheck::required();
+        let mut run = run(ScopedNativeResult::Proven { checks: vec![] });
+        let netlink: Vec<_> = checks
+            .iter()
+            .copied()
+            .filter(|check| check.surface.netlink())
+            .collect();
+        let leak = checks
+            .iter()
+            .copied()
+            .find(|check| !check.surface.netlink())
+            .unwrap();
+        let mut evidence = crate::ScopedRouteResult {
+            proven: netlink[1..].to_vec(),
+            leaked: vec![leak],
+            controls: vec![],
+        };
+        run.record_routes(evidence.clone());
+        assert!(
+            run.assessment()
+                .unverified
+                .contains(&RequiredCheck::NetlinkRoutes)
+        );
+        evidence.proven = netlink;
+        run.record_routes(evidence);
+        assert!(
+            run.assessment()
+                .proven
+                .contains(&RequiredCheck::NetlinkRoutes)
+        );
+        assert!(run.assessment().leaked.contains(&RequiredCheck::ProcRoutes));
+        assert!(
+            run.assessment()
+                .unverified
+                .contains(&RequiredCheck::NetlinkRules)
+        );
+        run.native_raw = None;
+        assert!(
+            run.assessment()
+                .unverified
+                .contains(&RequiredCheck::NetlinkRoutes)
+        );
+        assert!(run.assessment().leaked.contains(&RequiredCheck::ProcRoutes));
+    }
+
     #[test]
     fn directory_evidence_requires_enabled_feature_and_cannot_complete_stat_access_open() {
         let mut run = run(ScopedNativeResult::Proven { checks: vec![] });

@@ -198,6 +198,7 @@ pub(crate) mod tests {
             ifaddrs: None,
         };
         let negative = NativeMeasurement {
+            routes: None,
             filesystem: None,
             sys_interfaces: None,
             proc_interfaces: None,

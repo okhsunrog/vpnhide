@@ -22,6 +22,8 @@ mod sys_interfaces;
 pub use sys_interfaces::*;
 mod filesystem;
 pub use filesystem::*;
+mod routes;
+pub use routes::*;
 enum_map!(
     CoreRequiredCheck,
     RequiredCheck,
@@ -267,6 +269,7 @@ impl From<model::ScopedBindResult> for CoreScopedBindResult {
 }
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreNativeMeasurement {
+    pub routes: Option<CoreRouteMeasurement>,
     pub filesystem: Option<CoreFilesystemMeasurement>,
     pub sys_interfaces: Option<CoreSysInterfaceMeasurement>,
     pub proc_interfaces: Option<CoreProcInterfaceMeasurement>,
@@ -282,6 +285,7 @@ pub struct CoreNativeMeasurement {
 impl From<model::NativeMeasurement> for CoreNativeMeasurement {
     fn from(v: model::NativeMeasurement) -> Self {
         Self {
+            routes: v.routes.map(Into::into),
             filesystem: v.filesystem.map(Into::into),
             sys_interfaces: v.sys_interfaces.map(Into::into),
             proc_interfaces: v.proc_interfaces.map(Into::into),
@@ -299,6 +303,7 @@ impl From<model::NativeMeasurement> for CoreNativeMeasurement {
 impl From<CoreNativeMeasurement> for model::NativeMeasurement {
     fn from(v: CoreNativeMeasurement) -> Self {
         Self {
+            routes: v.routes.map(Into::into),
             filesystem: v.filesystem.map(Into::into),
             sys_interfaces: v.sys_interfaces.map(Into::into),
             proc_interfaces: v.proc_interfaces.map(Into::into),
@@ -318,6 +323,7 @@ pub struct CoreDiagnosticWorkerTask {
     pub session: u64,
     pub core_epoch: u64,
     pub interface_name: String,
+    pub routes: Option<CoreRouteFixtureSpec>,
 }
 impl From<model::DiagnosticWorkerTask> for CoreDiagnosticWorkerTask {
     fn from(v: model::DiagnosticWorkerTask) -> Self {
@@ -325,6 +331,7 @@ impl From<model::DiagnosticWorkerTask> for CoreDiagnosticWorkerTask {
             session: v.session,
             core_epoch: v.core_epoch,
             interface_name: v.fixture.interface.name,
+            routes: v.routes.map(Into::into),
         }
     }
 }
@@ -424,6 +431,7 @@ impl From<model::DiagnosticAssessment> for CoreDiagnosticAssessment {
 }
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreDiagnosticRun {
+    pub routes: Option<CoreScopedRouteResult>,
     pub filesystem: Option<CoreScopedFilesystemResult>,
     pub sys_interfaces: Option<CoreScopedSysInterfaceResult>,
     pub native_raw: Option<CoreNativeRawReceipt>,
@@ -466,6 +474,7 @@ impl From<model::DiagnosticRun> for CoreDiagnosticRun {
         };
         Self {
             native_raw: v.native_raw.map(Into::into),
+            routes: v.routes.map(Into::into),
             filesystem: v.filesystem.map(Into::into),
             sys_interfaces: v.sys_interfaces.map(Into::into),
             proc_interfaces: v.proc_interfaces.map(Into::into),
@@ -533,7 +542,40 @@ pub fn observe_diagnostic_fixture(
             detail: "invalid diagnostic worker task".into(),
         });
     }
-    Ok(vpnhide_checks::fixture::observe(&task.interface_name).into())
+    let routes = task.routes.map(model::RouteFixtureSpec::from);
+    if routes
+        .as_ref()
+        .is_some_and(|spec| spec.session != task.session || !spec.valid())
+    {
+        return Err(CoreError::InvalidInput {
+            detail: "invalid route fixture in worker task".into(),
+        });
+    }
+    let route_observation = routes
+        .as_ref()
+        .map(|spec| vpnhide_checks::route::observe().scoped(spec));
+    let mut observation = vpnhide_checks::fixture::observe(&task.interface_name);
+    observation.routes = route_observation;
+    Ok(bound_route_worker_report(observation).into())
+}
+
+fn bound_route_worker_report(
+    mut observation: model::NativeMeasurement,
+) -> model::NativeMeasurement {
+    // The largest report travels in either the protected-worker RPC or its
+    // RAW phase envelope. Leave room for tarpc framing and RPC metadata.
+    const BUDGET: usize = vpnhide_core_rpc::MAX_FRAME_BYTES - 4096;
+    if observation.routes.is_some()
+        && serde_json::to_vec(&observation).is_ok_and(|bytes| bytes.len() > BUDGET)
+    {
+        // Preserve the scoped route rows. The other measurements were too
+        // large to transport together and cannot qualify as empty samples.
+        return model::NativeMeasurement {
+            routes: observation.routes.take(),
+            ..model::NativeMeasurement::unavailable(model::ProbeError::TooLarge)
+        };
+    }
+    observation
 }
 #[uniffi::export(async_runtime = "tokio")]
 impl CoreSession {
@@ -576,6 +618,48 @@ impl CoreSession {
 mod tests {
     use super::*;
     #[test]
+    fn issued_route_task_survives_the_typed_worker_boundary() {
+        let spec = model::RouteFixtureSpec {
+            session: 1,
+            vpn: model::InterfaceId {
+                name: "tun000000004001".into(),
+                index: 86_001,
+            },
+            ordinary: model::InterfaceId {
+                name: "vhr000000008001".into(),
+                index: 86_002,
+            },
+        };
+        let task = CoreDiagnosticWorkerTask {
+            session: 1,
+            core_epoch: 2,
+            interface_name: "tun000000000001".into(),
+            routes: Some(spec.clone().into()),
+        };
+        let measured =
+            model::NativeMeasurement::from(observe_diagnostic_fixture(task.clone()).unwrap());
+        assert!(measured.bounded_for_routes(Some(&spec)));
+        assert!(measured.routes.is_some());
+        assert!(!measured.bounded_for_routes(None));
+        let mut wrong = task;
+        wrong.routes.as_mut().unwrap().session = 2;
+        assert!(observe_diagnostic_fixture(wrong).is_err());
+
+        let mut oversized = measured.clone();
+        oversized.links = model::Sample::Value(vec![model::ObservedInterface {
+            name: "x".repeat(vpnhide_core_rpc::MAX_FRAME_BYTES),
+            index: None,
+            ifaddrs: None,
+        }]);
+        let compact = bound_route_worker_report(oversized);
+        assert_eq!(compact.routes, measured.routes);
+        assert_eq!(
+            compact.flags,
+            model::Sample::Error(model::ProbeError::TooLarge)
+        );
+        assert!(compact.bounded_for_routes(Some(&spec)));
+    }
+    #[test]
     fn typed_boundary_preserves_real_observations_and_rejects_unbound_tasks() {
         let measurement = vpnhide_checks::fixture::observe("tun000000000001");
         assert!(measurement.bounded());
@@ -589,6 +673,7 @@ mod tests {
         ] {
             assert!(
                 observe_diagnostic_fixture(CoreDiagnosticWorkerTask {
+                    routes: None,
                     session,
                     core_epoch: epoch,
                     interface_name: name.into()

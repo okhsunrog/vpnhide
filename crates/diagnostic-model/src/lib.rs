@@ -145,6 +145,8 @@ impl NativeFixtureSpec {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NativeMeasurement {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routes: Option<RouteMeasurement>,
     #[serde(default)]
     pub filesystem: Option<FilesystemMeasurement>,
     #[serde(default)]
@@ -166,6 +168,7 @@ pub struct NativeMeasurement {
 impl NativeMeasurement {
     pub fn unavailable(error: ProbeError) -> Self {
         Self {
+            routes: None,
             filesystem: None,
             sys_interfaces: None,
             proc_interfaces: None,
@@ -179,10 +182,23 @@ impl NativeMeasurement {
             ordinary_mtu: Sample::Error(error),
         }
     }
+    /// Validate the worker report against the route fixture Core actually issued.
+    pub fn bounded_for_routes(&self, spec: Option<&RouteFixtureSpec>) -> bool {
+        self.bounded()
+            && self
+                .routes
+                .as_ref()
+                .is_none_or(|routes| spec.is_some_and(|spec| routes.scoped_for(spec)))
+    }
+
     pub fn bounded(&self) -> bool {
-        self.filesystem
+        self.routes
             .as_ref()
-            .is_none_or(FilesystemMeasurement::bounded)
+            .is_none_or(RouteMeasurement::bounded_scoped)
+            && self
+                .filesystem
+                .as_ref()
+                .is_none_or(FilesystemMeasurement::bounded)
             && self
                 .sys_interfaces
                 .as_ref()
@@ -478,6 +494,7 @@ mod tests {
             entries.push(spec.interface.into());
         }
         NativeMeasurement {
+            routes: None,
             filesystem: None,
             sys_interfaces: None,
             proc_interfaces: None,

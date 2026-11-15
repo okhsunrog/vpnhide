@@ -775,6 +775,7 @@ mod tests {
         fn autonomous_arguments_results_and_refusals() {
             use vpnhide_diagnostic_model::*;
             let measurement = NativeMeasurement {
+                routes: None,
                 filesystem: None,
                 sys_interfaces: None,
                 proc_interfaces: None,
@@ -796,6 +797,7 @@ mod tests {
                 ordinary_mtu: Sample::Value(65536),
             };
             let task = DiagnosticWorkerTask {
+                routes: None,
                 session: 7,
                 core_epoch: 9,
                 fixture: NativeFixtureSpec {
@@ -871,6 +873,7 @@ mod tests {
             ] {
                 let run = DiagnosticRun {
                     native_raw: None,
+                    routes: None,
                     filesystem: None,
                     sys_interfaces: None,
                     proc_interfaces: None,

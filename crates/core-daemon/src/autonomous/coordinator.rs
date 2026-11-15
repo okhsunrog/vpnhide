@@ -13,6 +13,7 @@ use vpnhide_loader_ipc::image::{self, ProcessIdentity};
 
 use super::framework_run::FrameworkRun;
 use super::native_fixture::TunFixture;
+use super::route_fixture::{RouteCleanupPlan, RouteFixture};
 use crate::{CoreState, auth::PeerCred};
 use vpnhide_diagnostic_model::framework::{FrameworkWorkerRequest, FrameworkWorkerTask};
 
@@ -50,6 +51,7 @@ struct Inner {
     attempts: u8,
     retry_at: Option<BootDeadline>,
     pending_cleanup: Option<NativeFixtureSpec>,
+    pending_route_cleanup: Option<RouteCleanupPlan>,
     unidentified_cleanup: bool,
     pending_framework: Option<Arc<Mutex<FrameworkRun>>>,
 }
@@ -211,6 +213,7 @@ fn worker_identity(
     })
 }
 struct NativeEvidence {
+    routes: ScopedRouteResult,
     filesystem: vpnhide_diagnostic_model::ScopedFilesystemResult,
     sys_interfaces: vpnhide_diagnostic_model::ScopedSysInterfaceResult,
     proc_interfaces: ScopedProcInterfaceResult,
@@ -219,11 +222,12 @@ struct NativeEvidence {
     binding: ScopedBindResult,
 }
 struct MeasurementFailure {
-    filesystem: Option<Box<vpnhide_diagnostic_model::ScopedFilesystemResult>>,
-    sys_interfaces: Option<Box<vpnhide_diagnostic_model::ScopedSysInterfaceResult>>,
-    proc_interfaces: Option<Box<ScopedProcInterfaceResult>>,
-    addresses: Option<Box<ScopedAddressResult>>,
-    binding: Option<Box<ScopedBindResult>>,
+    routes: Option<ScopedRouteResult>,
+    filesystem: Option<vpnhide_diagnostic_model::ScopedFilesystemResult>,
+    sys_interfaces: Option<vpnhide_diagnostic_model::ScopedSysInterfaceResult>,
+    proc_interfaces: Option<ScopedProcInterfaceResult>,
+    addresses: Option<ScopedAddressResult>,
+    binding: Option<ScopedBindResult>,
     detail: String,
     native: Option<ScopedNativeResult>,
     cleanup_confirmed: Option<bool>,
@@ -311,6 +315,7 @@ impl Coordinator {
         inner.next = inner.next.checked_add(1).ok_or(DiagnosticError::Expired)?;
         let run = DiagnosticRun {
             native_raw: None,
+            routes: None,
             filesystem: None,
             sys_interfaces: None,
             proc_interfaces: None,
@@ -363,7 +368,8 @@ impl Coordinator {
         let worker_lease = super::android_worker::lease();
         let result = match &worker_lease {
             Ok(_) => self.measure(&state, session),
-            Err(detail) => Err(MeasurementFailure {
+            Err(detail) => Err(Box::new(MeasurementFailure {
+                routes: None,
                 filesystem: None,
                 sys_interfaces: None,
                 proc_interfaces: None,
@@ -372,7 +378,7 @@ impl Coordinator {
                 detail: detail.clone(),
                 native: None,
                 cleanup_confirmed: Some(true),
-            }),
+            })),
         };
         let framework = self
             .inner
@@ -414,6 +420,7 @@ impl Coordinator {
         run.native_raw = raw_receipt;
         match result {
             Ok(evidence) => {
+                run.record_routes(evidence.routes);
                 run.record_filesystem(evidence.filesystem);
                 run.record_sys_interfaces(evidence.sys_interfaces);
                 run.record_proc_interfaces(evidence.proc_interfaces);
@@ -422,11 +429,12 @@ impl Coordinator {
                 run.record_binding(evidence.binding);
             }
             Err(failure) => {
-                run.filesystem = failure.filesystem.map(|v| *v);
-                run.sys_interfaces = failure.sys_interfaces.map(|v| *v);
-                run.proc_interfaces = failure.proc_interfaces.map(|v| *v);
-                run.addresses = failure.addresses.map(|v| *v);
-                run.binding = failure.binding.map(|v| *v);
+                run.routes = failure.routes;
+                run.filesystem = failure.filesystem;
+                run.sys_interfaces = failure.sys_interfaces;
+                run.proc_interfaces = failure.proc_interfaces;
+                run.addresses = failure.addresses;
+                run.binding = failure.binding;
                 run.outcome = DiagnosticOutcome::Infrastructure {
                     detail: failure.detail,
                     native: failure.native,
@@ -455,7 +463,7 @@ impl Coordinator {
         &self,
         state: &CoreState,
         session: u64,
-    ) -> Result<NativeEvidence, MeasurementFailure> {
+    ) -> Result<NativeEvidence, Box<MeasurementFailure>> {
         let fixture = TunFixture::create_detailed(session).map_err(|failure| {
             let cleaned = failure.cleanup.as_ref().map(|(_, cleaned)| *cleaned);
             let mut inner = self.inner.lock().expect("diagnostic coordinator");
@@ -466,7 +474,8 @@ impl Coordinator {
                     inner.unidentified_cleanup = true;
                 }
             }
-            MeasurementFailure {
+            Box::new(MeasurementFailure {
+                routes: None,
                 filesystem: None,
                 sys_interfaces: None,
                 proc_interfaces: None,
@@ -475,8 +484,10 @@ impl Coordinator {
                 detail: format!("native fixture unavailable: {}", failure.error),
                 native: None,
                 cleanup_confirmed: cleaned,
-            }
+            })
         })?;
+        let debug = state.snapshot().config.is_some_and(|config| config.debug);
+        let routes = self.prepare_route_fixture(session, debug);
         let report = (|| -> Result<NativeMeasurement, String> {
             let app_dir = self
                 .inner
@@ -517,6 +528,7 @@ impl Coordinator {
                     session,
                     core_epoch: state.publisher.epoch(),
                     fixture: fixture.spec.clone(),
+                    routes: routes.as_ref().ok().map(|fixture| fixture.spec.clone()),
                 });
             }
             super::android_worker::launch()?;
@@ -577,15 +589,18 @@ impl Coordinator {
             .or(early_report.as_ref())
             .unwrap_or(&unavailable);
         let completion = fixture.finish_paired(protected, app_raw);
-        let cleaned = cleanup_confirmed(&spec, &completion.cleanup);
-        if !cleaned {
+        let native_clean = cleanup_confirmed(&spec, &completion.cleanup);
+        if !native_clean {
             self.inner
                 .lock()
                 .expect("diagnostic coordinator")
                 .pending_cleanup = Some(spec.clone());
         }
+        let (routes, route_clean) = self.finish_route_fixture(routes, protected, app_raw);
+        let cleaned = native_clean && route_clean;
         match report {
             Ok(_) if cleaned => Ok(NativeEvidence {
+                routes,
                 filesystem: completion.filesystem,
                 sys_interfaces: completion.sys_interfaces,
                 proc_interfaces: completion.proc_interfaces,
@@ -593,28 +608,97 @@ impl Coordinator {
                 native: completion.result,
                 binding: completion.binding,
             }),
-            Ok(_) => Err(MeasurementFailure {
-                filesystem: Some(Box::new(completion.filesystem)),
-                sys_interfaces: Some(Box::new(completion.sys_interfaces)),
-                proc_interfaces: Some(Box::new(completion.proc_interfaces)),
-                addresses: Some(Box::new(completion.addresses)),
-                binding: Some(Box::new(completion.binding)),
-                detail: "native fixture cleanup unconfirmed; diagnostic admission held".into(),
+            Ok(_) => Err(Box::new(MeasurementFailure {
+                routes: Some(routes),
+                filesystem: Some(completion.filesystem),
+                sys_interfaces: Some(completion.sys_interfaces),
+                proc_interfaces: Some(completion.proc_interfaces),
+                addresses: Some(completion.addresses),
+                binding: Some(completion.binding),
+                detail: if native_clean {
+                    "route fixture cleanup unconfirmed; diagnostic admission held"
+                } else {
+                    "native fixture cleanup unconfirmed; diagnostic admission held"
+                }
+                .into(),
                 native: Some(completion.result),
                 cleanup_confirmed: Some(false),
-            }),
-            Err(detail) => Err(MeasurementFailure {
-                filesystem: Some(Box::new(completion.filesystem)),
-                sys_interfaces: Some(Box::new(completion.sys_interfaces)),
-                proc_interfaces: Some(Box::new(completion.proc_interfaces)),
-                addresses: Some(Box::new(completion.addresses)),
-                binding: Some(Box::new(completion.binding)),
+            })),
+            Err(detail) => Err(Box::new(MeasurementFailure {
+                routes: Some(routes),
+                filesystem: Some(completion.filesystem),
+                sys_interfaces: Some(completion.sys_interfaces),
+                proc_interfaces: Some(completion.proc_interfaces),
+                addresses: Some(completion.addresses),
+                binding: Some(completion.binding),
                 detail,
                 native: Some(completion.result),
                 cleanup_confirmed: Some(cleaned),
-            }),
+            })),
         }
     }
+
+    // Route setup is independent of the DOWN interface fixture. A missing
+    // route stimulus with clean setup still allows the other checks to run.
+    fn prepare_route_fixture(&self, session: u64, debug: bool) -> Result<RouteFixture, bool> {
+        RouteFixture::create_detailed(session).map_err(|failure| {
+            if debug {
+                crate::alog::info(&format!(
+                    "diagnostics: route fixture session={session} cleanup_confirmed={} setup failed: {}",
+                    failure.cleanup_confirmed, failure.error
+                ));
+            }
+            if !failure.cleanup_confirmed {
+                let mut inner = self.inner.lock().expect("diagnostic coordinator");
+                if let Some(plan) = failure.cleanup_plan {
+                    inner.pending_route_cleanup = Some(*plan);
+                } else {
+                    inner.unidentified_cleanup = true;
+                }
+            }
+            failure.cleanup_confirmed
+        })
+    }
+
+    fn finish_route_fixture(
+        &self,
+        fixture: Result<RouteFixture, bool>,
+        protected: &NativeMeasurement,
+        app_raw: Option<&NativeMeasurement>,
+    ) -> (ScopedRouteResult, bool) {
+        let fixture = match fixture {
+            Ok(fixture) => fixture,
+            Err(cleaned) => {
+                let failure = if cleaned {
+                    ControlFailure::ProbeUnavailable
+                } else {
+                    ControlFailure::CleanupUnconfirmed
+                };
+                return (
+                    ScopedRouteResult {
+                        controls: vec![failure],
+                        ..Default::default()
+                    },
+                    cleaned,
+                );
+            }
+        };
+        let plan = fixture.cleanup_plan();
+        let unavailable = RouteMeasurement::unavailable(ProbeError::Unsupported);
+        let result = fixture.finish(
+            protected.routes.as_ref().unwrap_or(&unavailable),
+            app_raw.and_then(|sample| sample.routes.as_ref()),
+            true,
+        );
+        if !result.interfaces_clean {
+            self.inner
+                .lock()
+                .expect("diagnostic coordinator")
+                .pending_route_cleanup = Some(plan);
+        }
+        (result.result, result.interfaces_clean)
+    }
+
     fn reconcile_cleanup(&self) -> Result<(), DiagnosticError> {
         let pending = self
             .inner
@@ -636,12 +720,15 @@ impl Coordinator {
                 inner.pending_framework = None;
             }
         }
-        let pending = {
+        let (pending, route) = {
             let inner = self.inner.lock().expect("diagnostic coordinator");
             if inner.unidentified_cleanup {
                 return Err(DiagnosticError::Busy);
             }
-            inner.pending_cleanup.clone()
+            (
+                inner.pending_cleanup.clone(),
+                inner.pending_route_cleanup.clone(),
+            )
         };
         if let Some(spec) = pending {
             if !cleanup_confirmed(
@@ -653,6 +740,15 @@ impl Coordinator {
             let mut inner = self.inner.lock().expect("diagnostic coordinator");
             if inner.pending_cleanup.as_ref() == Some(&spec) {
                 inner.pending_cleanup = None;
+            }
+        }
+        if let Some(plan) = route {
+            if !plan.observe_cleanup().1 {
+                return Err(DiagnosticError::Busy);
+            }
+            let mut inner = self.inner.lock().expect("diagnostic coordinator");
+            if inner.pending_route_cleanup.as_ref() == Some(&plan) {
+                inner.pending_route_cleanup = None;
             }
         }
         Ok(())
@@ -885,7 +981,8 @@ impl Active {
         if !self.native.as_ref().is_some_and(|n| n.protected_ready()) {
             return Err(DiagnosticError::StaleSession);
         }
-        if !report.native.bounded() {
+        let routes = self.task.as_ref().and_then(|task| task.routes.as_ref());
+        if !report.native.bounded_for_routes(routes) {
             return Err(DiagnosticError::Malformed);
         }
         // Delivery is intentionally separate from worker completion. A later
@@ -903,6 +1000,7 @@ mod tests {
 
     fn task() -> DiagnosticWorkerTask {
         DiagnosticWorkerTask {
+            routes: None,
             session: 7,
             core_epoch: 9,
             fixture: NativeFixtureSpec {
@@ -1133,6 +1231,7 @@ mod tests {
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
             native_raw: None,
+            routes: None,
             filesystem: None,
             sys_interfaces: None,
             proc_interfaces: None,
@@ -1165,6 +1264,7 @@ mod tests {
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
             native_raw: None,
+            routes: None,
             filesystem: None,
             sys_interfaces: None,
             proc_interfaces: None,
@@ -1203,6 +1303,7 @@ mod tests {
         let snapshot = state.snapshot();
         let run = DiagnosticRun {
             native_raw: None,
+            routes: None,
             filesystem: None,
             sys_interfaces: None,
             proc_interfaces: None,

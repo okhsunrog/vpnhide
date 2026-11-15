@@ -5,7 +5,7 @@ use super::native_raw::RawLease;
 use std::io::{self, Read};
 use vpnhide_diagnostic_model::{
     DiagnosticError, DiagnosticThreadIdentity, NativeRawReceipt, NativeRawStage,
-    NativeWorkerInstruction, NativeWorkerPhase,
+    NativeWorkerInstruction, NativeWorkerPhase, RouteFixtureSpec,
 };
 
 pub(super) trait Grant: Send {
@@ -115,6 +115,7 @@ impl NativeExchange {
         &mut self,
         identity: DiagnosticThreadIdentity,
         phase: NativeWorkerPhase,
+        routes: Option<&RouteFixtureSpec>,
     ) -> Result<NativeWorkerInstruction, DiagnosticError> {
         if identity != self.identity {
             return Err(DiagnosticError::WrongProcess);
@@ -142,7 +143,7 @@ impl NativeExchange {
             }
             (Phase::Raw, NativeWorkerPhase::RawMeasured { native }) => {
                 let native = *native;
-                if !native.bounded() {
+                if !native.bounded_for_routes(routes) {
                     self.phase = Phase::Failed;
                     self.receipt = NativeRawReceipt::Failed {
                         identity,
@@ -252,10 +253,10 @@ mod tests {
     fn a_lost_activation_or_revocation_never_authorizes_protected_measurement() {
         for (activate, released) in [(false, true), (true, false)] {
             let (mut owner, calls) = exchange(activate, released, true);
-            let first = owner.step(identity(), NativeWorkerPhase::Registered);
+            let first = owner.step(identity(), NativeWorkerPhase::Registered, None);
             if activate {
                 assert_eq!(first, Ok(NativeWorkerInstruction::ObserveRaw));
-                assert!(owner.step(identity(), measured()).is_err());
+                assert!(owner.step(identity(), measured(), None).is_err());
                 assert!(matches!(
                     owner.receipt(),
                     NativeRawReceipt::Failed {
@@ -270,7 +271,7 @@ mod tests {
             assert!(!owner.protected_ready());
             assert!(
                 owner
-                    .step(identity(), NativeWorkerPhase::Registered)
+                    .step(identity(), NativeWorkerPhase::Registered, None)
                     .is_err()
             );
             assert_eq!(
@@ -288,10 +289,10 @@ mod tests {
     fn expiry_retains_raw_observation_but_only_confirmed_release_permits_protected() {
         let (mut owner, _) = exchange(true, true, false);
         owner
-            .step(identity(), NativeWorkerPhase::Registered)
+            .step(identity(), NativeWorkerPhase::Registered, None)
             .unwrap();
         assert_eq!(
-            owner.step(identity(), measured()),
+            owner.step(identity(), measured(), None),
             Ok(NativeWorkerInstruction::ObserveProtected)
         );
         assert!(owner.protected_ready());
@@ -311,21 +312,21 @@ mod tests {
         let mut reused = identity();
         reused.thread_start_ticks += 1;
         assert_eq!(
-            owner.step(reused, NativeWorkerPhase::Registered),
+            owner.step(reused, NativeWorkerPhase::Registered, None),
             Err(DiagnosticError::WrongProcess)
         );
         assert!(calls.lock().unwrap().is_empty());
-        assert!(owner.step(identity(), measured()).is_err());
+        assert!(owner.step(identity(), measured(), None).is_err());
         owner
-            .step(identity(), NativeWorkerPhase::Registered)
+            .step(identity(), NativeWorkerPhase::Registered, None)
             .unwrap();
         assert!(
             owner
-                .step(identity(), NativeWorkerPhase::Registered)
+                .step(identity(), NativeWorkerPhase::Registered, None)
                 .is_err()
         );
-        owner.step(identity(), measured()).unwrap();
-        assert!(owner.step(identity(), measured()).is_err());
+        owner.step(identity(), measured(), None).unwrap();
+        assert!(owner.step(identity(), measured(), None).is_err());
         assert_eq!(*calls.lock().unwrap(), ["activate", "finish"]);
         assert!(matches!(owner.receipt(), NativeRawReceipt::Paired { .. }));
     }

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{NativeFixtureSpec, NativeMeasurement, ScopedNativeResult};
 
-pub const DIAGNOSTIC_CONTRACT: u32 = 9;
+pub const DIAGNOSTIC_CONTRACT: u32 = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -118,6 +118,8 @@ pub struct DiagnosticWorkerTask {
     pub session: u64,
     pub core_epoch: u64,
     pub fixture: NativeFixtureSpec,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routes: Option<crate::RouteFixtureSpec>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiagnosticWorkerReport {
@@ -152,6 +154,8 @@ pub enum DiagnosticOutcome {
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiagnosticRun {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routes: Option<crate::ScopedRouteResult>,
     #[serde(default)]
     pub filesystem: Option<crate::ScopedFilesystemResult>,
     #[serde(default)]
@@ -172,6 +176,11 @@ pub struct DiagnosticRun {
     pub stale: bool,
 }
 impl DiagnosticRun {
+    pub fn record_routes(&mut self, routes: crate::ScopedRouteResult) {
+        self.routes = Some(routes);
+        self.refresh_missing();
+    }
+
     pub fn record_filesystem(&mut self, result: crate::ScopedFilesystemResult) {
         self.filesystem = Some(result);
         self.refresh_missing();
@@ -253,6 +262,7 @@ mod tests {
     fn four_native_successes_never_replace_the_supported_contract() {
         let mut run = DiagnosticRun {
             native_raw: Some(crate::assessment::tests::paired_receipt()),
+            routes: None,
             filesystem: None,
             sys_interfaces: None,
             proc_interfaces: None,

@@ -1,10 +1,9 @@
-//! Engineering-only owned route prototype. Not admitted by the production run
-//! coordinator yet; required route/rule checks remain unverified there.
+//! Core-owned route fixture with independent setup and cleanup readback.
 //! Existing DOWN fixtures are consumed into a distinct UP owner, never assessed
 //! through the old DOWN contract. Nonpersistent TUN descriptor lifetime owns all
 //! addresses/routes; no default route, global rule, packet IO or delete-by-name.
 mod identity;
-use super::native_fixture::{OracleUpTun, TunFixture};
+use super::native_fixture::{TunFixture, UpTun};
 pub use identity::RouteCleanupPlan;
 use std::{
     io,
@@ -108,7 +107,7 @@ pub struct RouteFixture {
     pub spec: RouteFixtureSpec,
     pub negative: RouteMeasurement,
     pub start: RouteMeasurement,
-    owners: Option<[OracleUpTun; 2]>,
+    owners: Option<[UpTun; 2]>,
     cleanup_plan: RouteCleanupPlan,
 }
 pub struct RouteCleanup {
@@ -141,6 +140,7 @@ pub struct RouteCompletion {
     pub result: ScopedRouteResult,
 }
 impl RouteFixture {
+    #[cfg(feature = "fixture-oracle")]
     pub fn create(session: u64) -> io::Result<Self> {
         Self::create_detailed(session).map_err(|f| f.error)
     }
@@ -183,6 +183,7 @@ impl RouteFixture {
             }
         })
     }
+    #[cfg(feature = "fixture-oracle")]
     pub fn failed_setup_for_oracle(session: u64) -> io::Result<RouteCleanupPlan> {
         match Self::create_tracked(session, true) {
             Err(failure)
@@ -200,7 +201,7 @@ impl RouteFixture {
             Ok(_) => Err(invalid("setup fault did not fire")),
         }
     }
-    fn allocate_role(plan: &mut RouteCleanupPlan, ordinary: bool) -> io::Result<OracleUpTun> {
+    fn allocate_role(plan: &mut RouteCleanupPlan, ordinary: bool) -> io::Result<UpTun> {
         if !plan.current() {
             return Err(invalid("route creation namespace/boot changed"));
         }
@@ -217,7 +218,7 @@ impl RouteFixture {
             }
         };
         plan.record(down.spec.interface.clone(), ordinary);
-        let up = down.into_up_for_oracle(ordinary)?;
+        let up = down.into_up(ordinary)?;
         plan.record(up.interface.clone(), ordinary);
         Ok(up)
     }
@@ -244,9 +245,7 @@ impl RouteFixture {
         }
         let negative = vpnhide_checks::route::observe();
         if !spec.negative(&negative) {
-            return Err(invalid(format!(
-                "route negative control unavailable/collision: {negative:?}"
-            )));
+            return Err(invalid("route negative control unavailable or conflicting"));
         }
         let vpn = Self::allocate_role(plan, false)?;
         let ordinary = Self::allocate_role(plan, true)?;
@@ -264,9 +263,7 @@ impl RouteFixture {
         }
         let start = vpnhide_checks::route::observe();
         if !spec.positive_measurement(&start) {
-            return Err(invalid(format!(
-                "route positive control missing: {start:?}"
-            )));
+            return Err(invalid("route positive control missing"));
         }
         Ok(Self {
             spec: spec.clone(),
@@ -279,6 +276,7 @@ impl RouteFixture {
     pub fn cleanup_plan(&self) -> RouteCleanupPlan {
         self.cleanup_plan.clone()
     }
+    #[cfg(feature = "fixture-oracle")]
     pub fn duplicate_for_oracle(&self, ordinary: bool) -> io::Result<std::fs::File> {
         self.owners
             .as_ref()
@@ -299,6 +297,7 @@ impl RouteFixture {
             interfaces_clean,
         }
     }
+    #[cfg(feature = "fixture-oracle")]
     pub fn close_for_oracle(mut self) -> RouteCleanup {
         self.measure_cleanup()
     }

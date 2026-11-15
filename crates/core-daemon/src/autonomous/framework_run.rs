@@ -363,6 +363,7 @@ mod tests {
         use vpnhide_diagnostic_model::{InterfaceId, NativeFixtureSpec, OrdinaryControl};
         let template = run().envelope;
         let task = DiagnosticWorkerTask {
+            routes: None,
             session: template.session,
             core_epoch: template.core_epoch,
             fixture: NativeFixtureSpec {

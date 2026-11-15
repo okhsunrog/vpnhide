@@ -107,15 +107,14 @@ pub struct TunFixture {
     pub root_start: NativeMeasurement,
 }
 
-/// Engineering-only consuming transition: a DOWN fixture cannot be assessed
+/// A DOWN fixture cannot be assessed
 /// through TunFixture after its descriptor moves into this distinct UP owner.
-#[cfg(feature = "fixture-oracle")]
-pub struct OracleUpTun {
+pub(super) struct UpTun {
     _file: File,
     pub interface: InterfaceId,
 }
 #[cfg(feature = "fixture-oracle")]
-impl OracleUpTun {
+impl UpTun {
     pub fn duplicate_for_oracle(&self) -> io::Result<File> {
         self._file.try_clone()
     }
@@ -385,8 +384,7 @@ impl TunFixture {
         }
     }
 
-    #[cfg(feature = "fixture-oracle")]
-    pub fn into_up_for_oracle(mut self, ordinary: bool) -> io::Result<OracleUpTun> {
+    pub(super) fn into_up(mut self, ordinary: bool) -> io::Result<UpTun> {
         let file = self
             .tun
             .take()
@@ -432,7 +430,7 @@ impl TunFixture {
         {
             return Err(invalid("UP fixture readback failed"));
         }
-        Ok(OracleUpTun {
+        Ok(UpTun {
             _file: file,
             interface,
         })

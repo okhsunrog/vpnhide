@@ -32,15 +32,26 @@ pub(crate) fn read(file: ProcFile, actor: NativeReadActor) -> Result<Vec<u8>, Pr
     }
 }
 pub(crate) fn read_partial(file: ProcFile, actor: NativeReadActor) -> ProcBytes {
+    read_partial_before(file, actor, Instant::now() + Duration::from_secs(1))
+}
+pub(crate) fn read_partial_before(
+    file: ProcFile,
+    actor: NativeReadActor,
+    deadline: Instant,
+) -> ProcBytes {
     let mut bytes = Vec::new();
-    let error = read_into(file, actor, &mut bytes).err();
+    let error = read_into(file, actor, &mut bytes, deadline).err();
     ProcBytes { bytes, error }
 }
 fn read_into(
     file: ProcFile,
     actor: NativeReadActor,
     bytes: &mut Vec<u8>,
+    deadline: Instant,
 ) -> Result<(), ProbeError> {
+    if Instant::now() >= deadline {
+        return Err(ProbeError::Timeout);
+    }
     let path = match file {
         ProcFile::InterfaceStats => c"/proc/net/dev",
         ProcFile::Ipv6Addresses => c"/proc/net/if_inet6",
@@ -60,7 +71,6 @@ fn read_into(
         return Err(error());
     }
     let fd = unsafe { OwnedFd::from_raw_fd(raw as libc::c_int) };
-    let deadline = Instant::now() + Duration::from_secs(1);
     let mut buffer = [0u8; 4096];
     for _ in 0..128 {
         if Instant::now() >= deadline {

@@ -1,9 +1,7 @@
 //! Root-owned cleanup identity. No caller supplies these observations.
 use serde::{Deserialize, Serialize};
 use std::{io, os::unix::fs::MetadataExt, path::Path};
-use vpnhide_diagnostic_model::{
-    InterfaceId, ProbeError, RouteCheck, RouteFixtureSpec, RouteMeasurement, RouteObservation,
-};
+use vpnhide_diagnostic_model::{InterfaceId, ProbeError, RouteFixtureSpec, RouteMeasurement};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -97,16 +95,7 @@ impl RouteCleanupPlan {
     }
 }
 pub(super) fn unavailable() -> RouteMeasurement {
-    RouteMeasurement {
-        observations: RouteCheck::required()
-            .into_iter()
-            .map(|check| RouteObservation {
-                check,
-                routes: Vec::new(),
-                error: Some(ProbeError::Unsupported),
-            })
-            .collect(),
-    }
+    RouteMeasurement::unavailable(ProbeError::Unsupported)
 }
 
 #[cfg(test)]

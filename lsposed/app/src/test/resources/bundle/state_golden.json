@@ -1,5 +1,5 @@
 {
-    "schema": 11,
+    "schema": 12,
     "generatedAt": "2026-08-22T12:00:00+0300",
     "captureKind": "debug",
     "app": {
@@ -144,7 +144,18 @@
             "procInterfaces": null,
             "nativeRaw": null,
             "sysInterfaces": null,
-            "filesystem": null
+            "filesystem": null,
+            "routes": {
+                "provenChecks": [
+                    "libc.netlink_ipv4"
+                ],
+                "leakedChecks": [
+                    "syscall.proc_ipv6"
+                ],
+                "controls": [
+                    "probe_unavailable"
+                ]
+            }
         },
         "assessment": {
             "phase": "incomplete",
@@ -344,7 +355,18 @@
                     "procInterfaces": null,
                     "nativeRaw": null,
                     "sysInterfaces": null,
-                    "filesystem": null
+                    "filesystem": null,
+                    "routes": {
+                        "provenChecks": [
+                            "libc.netlink_ipv4"
+                        ],
+                        "leakedChecks": [
+                            "syscall.proc_ipv6"
+                        ],
+                        "controls": [
+                            "probe_unavailable"
+                        ]
+                    }
                 },
                 "assessment": {
                     "phase": "incomplete",
@@ -468,7 +490,18 @@
                 "procInterfaces": null,
                 "nativeRaw": null,
                 "sysInterfaces": null,
-                "filesystem": null
+                "filesystem": null,
+                "routes": {
+                    "provenChecks": [
+                        "libc.netlink_ipv4"
+                    ],
+                    "leakedChecks": [
+                        "syscall.proc_ipv6"
+                    ],
+                    "controls": [
+                        "probe_unavailable"
+                    ]
+                }
             },
             "assessment": {
                 "phase": "incomplete",

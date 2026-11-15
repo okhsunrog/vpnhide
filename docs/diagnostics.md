@@ -23,7 +23,7 @@ controls remain. An obsolete CLI request is refused before daemon/socket setup.
 ## Evidence and ownership
 
 The required plan comes from the supported contract and enabled features, not
-from the installed hook mask. Diagnostic contract9 requires SysInterfaces and
+from the installed hook mask. Diagnostic contract10 requires SysInterfaces and
 Filesystem only when the desired `filesystem_iface_paths` feature is enabled,
 matching RFC0002's optional-filesystem scope. Default route/proc-interface and
 framework requirements remain. Previous or truncated plans cannot be reused as
@@ -175,13 +175,35 @@ remain unverified. Actual bionic, SELinux and secondary32-bit Android worker
 execution remain separate gates; both compiled ABIs alone establish neither.
 See [the scoped Linux qualification](archive/2026-11-03-native-filesystem-fixture-qualification.md).
 
-An [engineering owned-UP route prototype](archive/2026-11-03-native-route-prototype.md)
-now positively qualifies eight libc/syscall netlink/proc IPv4/IPv6 vectors on the
-reference Linux6.1 with RAW/protected, ordinary and lifecycle controls. It preserves
-the primary DOWN fixture and is gated out of Core/APK production builds. Its
-resource admission/recovery, genuine-worker report and FFI/export wiring remain
-code work; current production route checks remain unverified. No required check
-was removed or inferred from installed hooks.
+Core admits an independent pair of UP interfaces for the eight libc/direct
+netlink and proc IPv4/IPv6 route vectors. The [Linux prototype and qualification
+history](archive/2026-11-03-native-route-prototype.md) documents the fixtures.
+The primary interface fixture stays DOWN. The route pair uses exclusive host
+routes and closes both nonpersistent TUN descriptors before independent route
+and interface cleanup readback. Unconfirmed cleanup blocks subsequent run
+admission until verified. A failed setup with confirmed cleanup leaves its
+route groups unverified and permits the other vectors to run.
+
+The worker measures routes on the existing RAW/protected collector thread
+under one second of read budget per route observation. Its report contains
+original rows attributable to the issued fixture, with at most sixteen rows
+per vector. Core rejects route rows outside the issued fixture and evaluates
+netlink and proc groups separately, each requiring both actors and both
+families for proof. Errors and late cleanup failures retain qualified route
+leaks. An oversized combined worker report retains the scoped route sample
+with unavailable results for the other vectors. APK/Core RPC35 carries the
+new route task, observations and assessment, and export schema12 retains
+per-vector outcomes. Actual Android/Builtin acceptance remains open.
+
+On Linux with user/network namespaces and `/dev/net/tun`, run the fixture test
+from the repository root. It checks coexistence with the DOWN fixture, the
+combined worker report, eight visible route vectors on an unfiltered kernel
+and return to the original route table.
+
+```sh
+export VPNHIDE_HOST_NETNS="$(readlink /proc/self/ns/net)"
+unshare -Urn sh -ec 'ip link set lo up; cargo test --offline -p vpnhide_core_daemon --test route_fixture -- --ignored'
+```
 
 Rules, remaining route forms, proc/socket stimuli and framework active/
 default/callback/PendingIntent controls still need implementation or expansion.

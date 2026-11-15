@@ -5,6 +5,7 @@ use crate::{
     netlink_wire as wire,
     proc_read::{self, ProcFile},
 };
+use std::time::{Duration, Instant};
 use vpnhide_diagnostic_model::{
     MAX_ROUTES, ObservedRoute, ProbeError, RouteCheck, RouteMeasurement, RouteObservation,
     RouteSurface,
@@ -237,6 +238,7 @@ fn proc_rows(
     Ok(())
 }
 pub fn observe() -> RouteMeasurement {
+    let deadline = Instant::now() + Duration::from_secs(1);
     RouteMeasurement {
         observations: RouteCheck::required()
             .into_iter()
@@ -250,8 +252,10 @@ pub fn observe() -> RouteMeasurement {
                             DumpKind::RoutesIpv6
                         };
                         let error =
-                            netlink_read::dump(kind, check.actor, |bytes| dump.consume(bytes))
-                                .err();
+                            netlink_read::dump_before(kind, check.actor, deadline, |bytes| {
+                                dump.consume(bytes)
+                            })
+                            .err();
                         (dump.rows, error)
                     }
                     RouteSurface::ProcIpv4 | RouteSurface::ProcIpv6 => {
@@ -260,7 +264,7 @@ pub fn observe() -> RouteMeasurement {
                         } else {
                             ProcFile::RoutesIpv6
                         };
-                        let read = proc_read::read_partial(file, check.actor);
+                        let read = proc_read::read_partial_before(file, check.actor, deadline);
                         let mut rows = Vec::new();
                         let error = proc_rows(&read.bytes, check.surface, &mut rows).err();
                         (rows, read.error.or(error))

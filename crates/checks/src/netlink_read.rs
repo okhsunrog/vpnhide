@@ -135,8 +135,25 @@ pub enum DumpKind {
 pub fn dump(
     kind: DumpKind,
     actor: NativeReadActor,
+    consume: impl FnMut(&[u8]) -> Result<bool, ProbeError>,
+) -> Result<(), ProbeError> {
+    dump_before(
+        kind,
+        actor,
+        Instant::now() + Duration::from_secs(1),
+        consume,
+    )
+}
+
+pub(crate) fn dump_before(
+    kind: DumpKind,
+    actor: NativeReadActor,
+    deadline: Instant,
     mut consume: impl FnMut(&[u8]) -> Result<bool, ProbeError>,
 ) -> Result<(), ProbeError> {
+    if Instant::now() >= deadline {
+        return Err(ProbeError::Timeout);
+    }
     let fd = bound_socket(actor)?;
     let mut address: libc::sockaddr_nl = unsafe { zeroed() };
     address.nl_family = libc::AF_NETLINK as _;
@@ -178,7 +195,6 @@ pub fn dump(
     if sent != length as libc::c_long {
         return Err(error());
     }
-    let deadline = Instant::now() + Duration::from_secs(1);
     let mut total = 0usize;
     for _ in 0..128 {
         let bytes = receive(&fd, actor, deadline)?;

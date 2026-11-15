@@ -309,6 +309,12 @@ private fun sampleAutonomousRun() =
         stale = false,
         frameworkAttribution =
             sampleFrameworkAttribution(),
+        routes =
+            dev.okhsunrog.vpnhide.diagnostics.AutonomousNativeReadInfo(
+                provenChecks = listOf("libc.netlink_ipv4"),
+                leakedChecks = listOf("syscall.proc_ipv6"),
+                controls = listOf("probe_unavailable"),
+            ),
     )
 
 private fun sampleBoot() =

@@ -1,6 +1,5 @@
-//! Literal route observations. These types alone do not qualify a fixture or
-//! complete NetlinkRoutes/ProcRoutes; production retained-run integration follows
-//! positive owned stimuli and independent cleanup/ordinary controls.
+//! Literal route observations and evaluation with owned positive, ordinary and
+//! cleanup controls.
 use crate::{NativeReadActor, ProbeError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -108,21 +107,25 @@ pub struct RouteMeasurement {
     pub observations: Vec<RouteObservation>,
 }
 impl RouteMeasurement {
+    pub fn unavailable(error: ProbeError) -> Self {
+        Self {
+            observations: RouteCheck::required()
+                .into_iter()
+                .map(|check| RouteObservation {
+                    check,
+                    routes: Vec::new(),
+                    error: Some(error.clone()),
+                })
+                .collect(),
+        }
+    }
+
     /// Local transport projection, never a cleaned network API response or
     /// verdict. Every exposure tag is retained; failures and overflow remain
-    /// explicit. Production worker wiring must opt into the Core-issued spec.
+    /// explicit. Only Core-issued fixture rows enter the worker report.
     pub fn scoped(&self, spec: &RouteFixtureSpec) -> Self {
         if !spec.valid() || !self.bounded() {
-            return Self {
-                observations: RouteCheck::required()
-                    .into_iter()
-                    .map(|check| RouteObservation {
-                        check,
-                        routes: Vec::new(),
-                        error: Some(ProbeError::Malformed),
-                    })
-                    .collect(),
-            };
+            return Self::unavailable(ProbeError::Malformed);
         }
         Self {
             observations: self
@@ -154,6 +157,25 @@ impl RouteMeasurement {
                 seen.insert(v.check)
                     && v.routes.len() <= MAX_ROUTES
                     && v.routes.iter().all(|r| r.valid(v.check.surface))
+            })
+    }
+
+    pub fn bounded_scoped(&self) -> bool {
+        self.bounded()
+            && self
+                .observations
+                .iter()
+                .all(|v| v.routes.len() <= MAX_SCOPED_ROUTES)
+    }
+
+    pub fn scoped_for(&self, spec: &RouteFixtureSpec) -> bool {
+        spec.valid()
+            && self.bounded_scoped()
+            && self.observations.iter().all(|value| {
+                value.routes.iter().all(|row| {
+                    spec.exposes(row, false, value.check.surface)
+                        || spec.exposes(row, true, value.check.surface)
+                })
             })
     }
 }
@@ -671,8 +693,9 @@ mod fixture_tests {
             value.routes = vec![row; MAX_SCOPED_ROUTES + 1];
         }
         assert!(source.bounded());
+        assert!(!source.scoped_for(&spec));
         let bounded = source.scoped(&spec);
-        assert!(bounded.bounded());
+        assert!(bounded.scoped_for(&spec));
         assert!(
             bounded
                 .observations

@@ -19,6 +19,7 @@ import java.util.concurrent.Executors
 class NativeFixtureWorkerTest {
     private fun observation(value: UInt) =
         CoreNativeMeasurement(
+            routes = null,
             flags = CoreNumberSample.Value(value),
             mtu = CoreNumberSample.Value(value),
             ifaddrs = CoreInterfacesSample.Value(emptyList()),
