@@ -175,15 +175,28 @@ proof cannot establish IPv4/IPv6 coverage. Core requires all eighteen address
 subchecks before reporting complete scoped address coverage; this is not a full
 suite PASS. Cleanup and ordinary loopback controls remain mandatory.
 
-The `ProcInterfaces` group has four required subchecks: `/proc/net/dev` and
-`/proc/net/if_inet6`, each through libc and direct openat/read syscalls. Readers
-parse bounded real records; missing or denied files do not prove hiding. Exact
-owned names/IPv6 addresses are attributed through negative/start/worker/end/
-cleanup observations and loopback controls. Traffic counters are not identity
-and need not remain constant. The current `.ko` QEMU test positively observes
-all four leaks, even though address ioctls/netlink hide successfully. These are
-retained leaks, not a missing-stimulus result or an automatic fallback trigger.
-This group does not qualify proc routes, sysfs/proc-sys, TCP sockets or Ports.
+The `ProcInterfaces` group has four required subchecks. It reads `/proc/net/dev`
+and `/proc/net/if_inet6` through libc and direct openat/read syscalls. Before
+reporting a paired access denial, Core checks whether the same app worker
+was denied in both RAW and protected phases and verifies the root
+before/start/end/cleanup controls for each vector. The Dashboard shows the
+platform restriction when all four are denied. A complete positive read is
+required to prove hiding. Traffic counters can change while the interface
+identity stays fixed. The Kmod QEMU oracle has recorded all four leaks with
+the files readable, even though address ioctls and netlink hide successfully.
+
+On the installed Pixel kernel, a process with the
+target app UID and zero effective capabilities could read both files from
+the KernelSU SELinux domain.
+All four vectors exposed the owned TUN in five consecutive controlled runs.
+The ordinary `lo` entries stayed visible and root confirmed fixture cleanup.
+In an additional run the same process received ENODEV from SIOCGIFFLAGS for
+the active TUN and still saw the TUN in both proc interface files.
+
+On the ordinary Pixel worker, RPC44 reported EACCES at open for both files,
+both actors and both phases in all 24 runs. The final 20 consecutive current
+runs confirmed the same 17 protection groups. The Dashboard showed the
+Android restriction for Interfaces in procfs.
 
 The optional `SysInterfaces` group independently enumerates `/sys/class/net`,
 `/proc/sys/net/ipv4/conf` and `/proc/sys/net/ipv6/conf` through libc

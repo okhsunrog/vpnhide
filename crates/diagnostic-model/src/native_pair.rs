@@ -82,16 +82,18 @@ pub fn evaluate_paired_native_fixture(
         &app_addresses.leaked,
         &app_addresses.controls,
     );
-    let mut proc_interfaces = evaluate_native_proc_interface_fixture(spec, samples);
-    let app_proc = evaluate_native_proc_interface_fixture(spec, app_samples);
-    merge(
-        &mut proc_interfaces.proven,
-        &mut proc_interfaces.leaked,
-        &mut proc_interfaces.controls,
-        &app_proc.proven,
-        &app_proc.leaked,
-        &app_proc.controls,
-    );
+    let mut proc_interfaces = evaluate_native_proc_interface_controls(spec, samples, app_raw);
+    if !proc_interfaces.all_access_denied() {
+        let app_proc = evaluate_native_proc_interface_fixture(spec, app_samples);
+        merge(
+            &mut proc_interfaces.proven,
+            &mut proc_interfaces.leaked,
+            &mut proc_interfaces.controls,
+            &app_proc.proven,
+            &app_proc.leaked,
+            &app_proc.controls,
+        );
+    }
     let mut sys_interfaces =
         evaluate_sys_interface_fixture(spec, samples.map(|m| m.sys_interfaces.as_ref()));
     let app_sys =

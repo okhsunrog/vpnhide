@@ -200,6 +200,8 @@ impl DiagnosticRun {
             }
             if !proc_interfaces.leaked.is_empty() {
                 leaked.insert(ProcInterfaces);
+            } else if proc_interfaces.all_access_denied() {
+                native_controls.push(ControlFailure::ProcInterfaceRequestDenied);
             }
             for control in &proc_interfaces.controls {
                 if !native_controls.contains(control) {

@@ -749,7 +749,7 @@ CLOCK_BOOTTIME lease is at most 5000ms; idempotent requests never extend it.
 Revoke/released readback precedes protected observation. This capability does not
 alter the frozen control2/telemetry1 or the persistent journal schema. KPM/Zygisk
 adapters remain code work. The Android thread handshake and paired assessment
-use paired RPC43 and diagnostic contract11. The same RAW/protected exchange
-carries scoped IPv4 and IPv6 route and policy-rule evidence alongside optional sysfs/proc-sys
-directory and path-lookup evidence. Actual Android acceptance is separate from
-the Linux oracle.
+use paired RPC44 and diagnostic contract11. The same RAW/protected exchange
+carries scoped IPv4 and IPv6 route and policy-rule evidence alongside optional
+sysfs/proc-sys directory and path-lookup evidence. Actual Android acceptance
+is separate from the Linux oracle.

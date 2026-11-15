@@ -69,6 +69,16 @@ pub enum ProbeError {
     Unsupported,
 }
 
+impl ProbeError {
+    fn proc_read_denial(&self) -> Option<ProcReadDenial> {
+        match self {
+            // Linux EPERM and EACCES.
+            Self::ProcPermissionDenied(denial) if matches!(denial.errno, 1 | 13) => Some(*denial),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "state",
@@ -276,6 +286,7 @@ pub enum ControlFailure {
     CleanupUnconfirmed,
     NetlinkLinkRequestDenied,
     ProcRouteRequestDenied,
+    ProcInterfaceRequestDenied,
 }
 
 /// Later observations qualify proof, never erase an earlier qualified leak.

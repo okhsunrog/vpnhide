@@ -1,7 +1,7 @@
 # Reading a VPN Hide debug bundle
 
 Start with `state.json` inside the exported ZIP. This guide describes the current
-schema13, paired APK/Core RPC43 and diagnostic contract11. Historical captures use
+schema13, paired APK/Core RPC44 and diagnostic contract11. Historical captures use
 [the versioned reference](archive/2026-11-03-debug-bundle-legacy-reference.md).
 Current exports do not require a foreign VPN or split-tunnel membership, and
 collecting a file does not admit a diagnostic run.
@@ -178,6 +178,7 @@ These reads do not run a suite or prove protection.
 | Ports | `ports_state`, `ports_chain`, typed Core per-family apply evidence |
 | Link enumeration | `netlink_link_request_denied` in autonomous assessment controls identifies a paired worker send denial with successful root controls. It does not count as hiding proof. |
 | Proc routes | `proc_route_request_denied` identifies paired open/read denials for both actors and IP families with successful root controls. |
+| Proc interfaces | `proc_interface_request_denied` identifies paired access denials on both proc interface files through libc and direct syscalls, with successful root controls. |
 | Java layer | `lsposed_state`, `lsposed_framework`, `lsposed_files`, boot logcat and hook report |
 | Configuration | `canonical_config` and scoped legacy inventory. Migration preserves original sources; old files alone do not prove a pending import. |
 | Network forensics | `network_addr`, `network_routes`, `network_rules`, `network_operstate`, `connectivity_dump`, `proc_net_*` |

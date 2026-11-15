@@ -81,6 +81,7 @@ internal fun AutonomousDiagnosticRows(snapshot: AutonomousDiagnosticSnapshot) {
             when (id) {
                 "netlink_links" -> "netlink_link_request_denied" in assessment.nativeControls
                 "proc_routes" -> "proc_route_request_denied" in assessment.nativeControls
+                "proc_interfaces" -> "proc_interface_request_denied" in assessment.nativeControls
                 else -> false
             }
         val status =

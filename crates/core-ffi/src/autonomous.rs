@@ -69,7 +69,8 @@ enum_map!(
     ProbeUnavailable,
     CleanupUnconfirmed,
     NetlinkLinkRequestDenied,
-    ProcRouteRequestDenied
+    ProcRouteRequestDenied,
+    ProcInterfaceRequestDenied
 );
 enum_map!(CoreProcReadStage, ProcReadStage, Open, Read);
 

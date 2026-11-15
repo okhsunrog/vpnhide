@@ -213,3 +213,69 @@ fn duplicate_actors_and_invalid_records_never_make_complete_coverage() {
     }
     assert!(!malformed.bounded());
 }
+
+#[test]
+fn denial_is_paired_and_cannot_replace_visible_rows_or_missing_root_controls() {
+    use vpnhide_diagnostic_model::{
+        NativeMeasurement, ProcReadDenial, ProcReadStage, evaluate_paired_native_fixture,
+    };
+    let native = |proc_interfaces| NativeMeasurement {
+        proc_interfaces: Some(proc_interfaces),
+        ..NativeMeasurement::unavailable(ProbeError::Unsupported)
+    };
+    let negative = native(measured(false));
+    let positive = native(measured(true));
+    let denied = |stage| {
+        let mut sample = measured(false);
+        let error = ProbeError::ProcPermissionDenied(ProcReadDenial { stage, errno: 13 });
+        for actor in &mut sample.actors {
+            actor.devices = Sample::Error(error.clone());
+            actor.ipv6 = Sample::Error(error.clone());
+        }
+        native(sample)
+    };
+    let raw = denied(ProcReadStage::Open);
+    let protected = denied(ProcReadStage::Read);
+    let controls = [&negative, &positive, &protected, &positive, &negative];
+    let evaluated = evaluate_paired_native_fixture(&spec(), controls, Some(&raw)).proc_interfaces;
+    assert_eq!(evaluated.access_denials.len(), 4);
+    assert!(evaluated.access_denials.iter().all(|denial| {
+        denial.raw.stage == ProcReadStage::Open && denial.protected.stage == ProcReadStage::Read
+    }));
+    assert!(evaluated.proven.is_empty() && evaluated.leaked.is_empty());
+    assert!(evaluated.controls.is_empty());
+
+    assert!(
+        evaluate_paired_native_fixture(&spec(), controls, None)
+            .proc_interfaces
+            .access_denials
+            .is_empty()
+    );
+    let missing_end = [&negative, &positive, &protected, &negative, &negative];
+    assert!(
+        evaluate_paired_native_fixture(&spec(), missing_end, Some(&raw))
+            .proc_interfaces
+            .access_denials
+            .is_empty()
+    );
+
+    let mut leaking = protected.clone();
+    leaking.proc_interfaces.as_mut().unwrap().actors[0].devices =
+        positive.proc_interfaces.as_ref().unwrap().actors[0]
+            .devices
+            .clone();
+    let evaluated = evaluate_paired_native_fixture(
+        &spec(),
+        [&negative, &positive, &leaking, &positive, &negative],
+        Some(&raw),
+    )
+    .proc_interfaces;
+    assert_eq!(evaluated.access_denials.len(), 3);
+    assert_eq!(
+        evaluated.leaked,
+        [ProcInterfaceCheck {
+            actor: NativeReadActor::Libc,
+            surface: ProcInterfaceSurface::DeviceStats,
+        }]
+    );
+}

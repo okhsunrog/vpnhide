@@ -447,14 +447,8 @@ fn permission_denial(value: Option<&RouteObservation>) -> Option<ProcReadDenial>
     if !value.check.surface.proc_route() || !value.routes.is_empty() {
         return None;
     }
-    match value.error {
-        // Linux EPERM and EACCES. Rows retained from a partial read can still
-        // establish an exposure, so only a denied sample with no rows qualifies.
-        Some(ProbeError::ProcPermissionDenied(denial)) if matches!(denial.errno, 1 | 13) => {
-            Some(denial)
-        }
-        _ => None,
-    }
+    // Rows retained from a partial read can still establish an exposure.
+    value.error.as_ref()?.proc_read_denial()
 }
 
 fn evaluate_route_controls(
