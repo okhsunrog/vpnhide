@@ -218,6 +218,12 @@ and checks for a kernel panic. The field offsets in `kver_offsets.h` and the
 versioned `struct file::f_path` references come from the corresponding kernel
 sources and are accepted only after this harness passes.
 
+On ARM64 Cuttlefish with `6.12.74-android16-6`, a separate `RTM_GETADDR` probe
+compared the exact IPv6 bytes of a temporary TUN address. The corrected
+`inet6_ifaddr.idev` offset hides the address from the configured UID for both
+libc and direct syscall collection. The control UID still sees the TUN address,
+and both UIDs see `::1`.
+
 This matrix validates those reference kernel configurations under QEMU. Vendor
 trees can change structure layouts, compiler-generated symbols, configs, or CFI
 behavior without changing the reported kernel version. Therefore the version

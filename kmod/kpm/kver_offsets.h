@@ -270,7 +270,8 @@ static const struct vpnhide_offsets vpnhide_off_6_12 = {
 	.seqfile_count = 24,
 	.in_ifaddr_ifa_dev = 24,
 	.in_device_dev = 0,
-	.inet6_ifaddr_idev = 168,
+	/* Confirmed by BTF on Cuttlefish 6.12.74 and by inet6_fill_ifaddr on the 6.12.89 reference Image. */
+	.inet6_ifaddr_idev = 184,
 	.inet6_dev_dev = 0,
 	.addr_fill_argno = 3,
 	.fib_info_fib_nhs = 96,
