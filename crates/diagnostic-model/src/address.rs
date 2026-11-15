@@ -134,6 +134,9 @@ impl IfconfObservation {
     fn consistent(&self) -> bool {
         self.size_before == self.used_bytes && self.size_after == self.used_bytes
     }
+    pub fn size_changed(&self) -> bool {
+        self.size_before != self.size_after
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -167,6 +170,15 @@ pub struct AddressMeasurement {
     pub ifaddrs: Sample<Vec<ObservedAddress>>,
 }
 impl AddressMeasurement {
+    pub fn ifconf_size_changed(&self) -> bool {
+        self.actors.iter().any(|actor| {
+            actor
+                .ifconf
+                .value()
+                .is_some_and(IfconfObservation::size_changed)
+        })
+    }
+
     pub fn bounded(&self) -> bool {
         let mut actors = BTreeSet::new();
         self.actors.len() <= NativeReadActor::ALL.len()
@@ -262,24 +274,19 @@ fn ifconf_size(
         result.problem(ControlFailure::ProbeUnavailable);
         return;
     };
-    let without_fixture = |entries: &[ObservedAddress]| {
-        entries
-            .iter()
-            .filter(|a| !marker(spec, a, 4))
-            .cloned()
-            .collect::<BTreeSet<_>>()
-    };
+    let loopback = ordinary(&n.entries, 4);
     // Qualify the observed discrepancy from complete negative/start RAW lists
-    // and stable worker queries. Later failures withhold proof, not that evidence.
-    if ![n, s].iter().all(|v| v.consistent()) || w.size_before != w.size_after {
+    // and stable worker queries. Each count is local to its own ioctl sequence;
+    // only the owned fixture and loopback are expected to persist across phases.
+    if ![n, s].iter().all(|v| v.consistent()) || w.size_changed() {
         result.problem(ControlFailure::ProbeUnavailable);
         return;
     }
     if n.entries.iter().any(|a| marker(spec, a, 4))
         || !positive(spec, &s.entries, 4)
-        || ordinary(&n.entries, 4).is_empty()
-        || without_fixture(&n.entries) != without_fixture(&s.entries)
-        || ordinary(&w.entries, 4) != ordinary(&n.entries, 4)
+        || loopback.is_empty()
+        || ordinary(&s.entries, 4) != loopback
+        || ordinary(&w.entries, 4) != loopback
     {
         result.problem(ControlFailure::FixtureChanged);
         return;
@@ -295,9 +302,7 @@ fn ifconf_size(
     }
     let mut controlled = true;
     for failure in crate::later_control_failures(e, ControlFailure::FixtureChanged, |e| {
-        e.consistent()
-            && positive(spec, &e.entries, 4)
-            && without_fixture(&n.entries) == without_fixture(&e.entries)
+        e.consistent() && positive(spec, &e.entries, 4) && ordinary(&e.entries, 4) == loopback
     }) {
         result.problem(failure);
         controlled = false;
@@ -305,7 +310,7 @@ fn ifconf_size(
     for failure in crate::later_control_failures(c, ControlFailure::CleanupUnconfirmed, |c| {
         c.consistent()
             && !c.entries.iter().any(|a| marker(spec, a, 4))
-            && without_fixture(&n.entries) == without_fixture(&c.entries)
+            && ordinary(&c.entries, 4) == loopback
     }) {
         result.problem(failure);
         controlled = false;

@@ -188,10 +188,21 @@ addresses with NOPREFIXROUTE (and IPv6 NODAD); setup never raises the link or
 changes ordinary interfaces. Address availability is verified independently for
 each family. Unsupported/failed setup leaves the corresponding checks unverified.
 SIOCGIFCONF NULL-buffer size and data are separate checks, qualified by complete
-stable RAW lists and the worker's actual ifreq size. Interface-only getifaddrs
+RAW lists and the worker's actual ifreq size. Each NULL-size/data/NULL-size
+sequence uses its own address population. The fixture address and ordinary
+loopback are checked across phases, so Wi-Fi address removal between phases
+does not invalidate a stable sample. If the two NULL-size reads disagree,
+the collector repeats that sequence up to twice. A stable size excess still
+counts as leak evidence. Interface-only getifaddrs
 proof cannot establish IPv4/IPv6 coverage. Core requires all eighteen address
 subchecks before reporting complete scoped address coverage; this is not a full
 suite PASS. Cleanup and ordinary loopback controls remain mandatory.
+
+On Pixel 8 Pro with Builtin, six runs admitted 76–162 ms after enabling
+airplane mode and disabling Wi-Fi each measured all 20 required groups with
+no leaks. Five retained a current fingerprint. The runtime fingerprint
+changed during the other run. Two runs still observed `wlan0` in their RAW
+`SIOCGIFCONF` samples.
 
 The `ProcInterfaces` group has four required subchecks. It reads `/proc/net/dev`
 and `/proc/net/if_inet6` through libc and direct openat/read syscalls. Before

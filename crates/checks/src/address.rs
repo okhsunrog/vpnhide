@@ -124,8 +124,19 @@ fn ifconf_size(fd: &OwnedFd, actor: NativeReadActor) -> Result<u32, ProbeError> 
 }
 fn ifconf(actor: NativeReadActor) -> Result<IfconfObservation, ProbeError> {
     let fd = socket(actor)?;
+    let mut sample = ifconf_snapshot(&fd, actor)?;
+    for _ in 0..2 {
+        if !sample.size_changed() {
+            break;
+        }
+        sample = ifconf_snapshot(&fd, actor)?;
+    }
+    Ok(sample)
+}
+
+fn ifconf_snapshot(fd: &OwnedFd, actor: NativeReadActor) -> Result<IfconfObservation, ProbeError> {
     let record_bytes = size_of::<libc::ifreq>();
-    let before = ifconf_size(&fd, actor)?;
+    let before = ifconf_size(fd, actor)?;
     if before as usize > MAX_ADDRESSES * record_bytes {
         return Err(ProbeError::TooLarge);
     }
@@ -150,7 +161,7 @@ fn ifconf(actor: NativeReadActor) -> Result<IfconfObservation, ProbeError> {
     if used / record_bytes > MAX_ADDRESSES {
         return Err(ProbeError::TooLarge);
     }
-    let after = ifconf_size(&fd, actor)?;
+    let after = ifconf_size(fd, actor)?;
     let entries = records[..used / record_bytes]
         .iter()
         .map(|r| {

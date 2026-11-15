@@ -227,6 +227,38 @@ fn null_ifconf_size_is_independent_of_filtered_data_and_uses_the_worker_abi() {
 }
 
 #[test]
+fn null_ifconf_size_tolerates_unowned_address_changes_between_phases() {
+    let (mut n, mut p, mut worker) = (measurement(false), measurement(true), measurement(false));
+    let (end, cleanup) = (p.clone(), n.clone());
+    for (offset, measurement) in [&mut n, &mut p, &mut worker].into_iter().enumerate() {
+        for actor in &mut measurement.actors {
+            if let Sample::Value(sample) = &mut actor.ifconf {
+                sample.entries.push(ObservedAddress {
+                    index: Some(70 + offset as u32),
+                    name: Some(format!("wlan{offset}")),
+                    address: vec![192, 0, 2, 1 + offset as u8],
+                    prefix: None,
+                });
+                sample.used_bytes += sample.record_bytes;
+                sample.size_before = sample.used_bytes;
+                sample.size_after = sample.used_bytes;
+            }
+        }
+    }
+    assert!(evaluate_address_fixture(&spec(), &n, &p, &worker, &end, &cleanup).complete());
+    let Sample::Value(sample) = &mut worker.actors[0].ifconf else {
+        panic!("missing ioctl sample")
+    };
+    sample.size_before += sample.record_bytes;
+    sample.size_after += sample.record_bytes;
+    let result = evaluate_address_fixture(&spec(), &n, &p, &worker, &end, &cleanup);
+    assert_eq!(
+        result.leaked,
+        [check(NativeReadActor::Libc, AddressVector::IfconfSize)]
+    );
+}
+
+#[test]
 fn cleanup_failure_and_lost_ordinary_objects_preserve_observed_leaks() {
     let (n, p) = (measurement(false), measurement(true));
     let failed = evaluate_address_fixture(&spec(), &n, &p, &p, &p, &p);
