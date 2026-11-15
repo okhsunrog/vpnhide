@@ -1050,8 +1050,9 @@ impl LoaderRegistry {
             .iter()
             .map(|o| o.process)
             .collect();
-        crate::autonomous::android_worker::prepare_fresh(Path::new(crate::service::APP_DATA_DIR))?;
-        crate::autonomous::android_worker::launch()?;
+        crate::autonomous::android_worker::prepare_fresh(Path::new(crate::service::APP_DATA_DIR))
+            .map_err(|error| error.to_string())?;
+        crate::autonomous::android_worker::launch().map_err(|error| error.to_string())?;
         let start = Instant::now();
         while start.elapsed() < Duration::from_secs(5) {
             self.reconcile(Path::new("/proc"));

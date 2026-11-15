@@ -128,6 +128,17 @@ Zygisk generation. Cache identity includes policy, runtime/platform evidence and
 loaded-generation coverage. Missing required proof remains unverified. The
 current partial implementation has no full-success assessment variant.
 
+Core schedules up to two fresh runs for a timed-out or temporarily busy
+Android worker, an unstable address sample after local resampling, or an
+unavailable framework probe. The retry becomes eligible after five seconds
+for the first retry and ten for the second. Admission requires confirmed
+cleanup, a current fingerprint and absence of qualified leaks. The same
+admission lock checks the deadline and takes the retry. An explicit new run
+or a changed diagnostic fingerprint starts a new attempt budget.
+On Pixel 8 Pro, pausing the dedicated Android worker in two consecutive
+framework phases reproduced two timeouts with confirmed cleanup. The monitor
+started each retry, and the third diagnostic run confirmed all 20 groups.
+
 With Debug logging enabled, Core logs the first failed step of each admitted
 framework run. The line includes the run ID, requested phase, active phase,
 number of accepted samples, and failing operation. The assessment and IPC

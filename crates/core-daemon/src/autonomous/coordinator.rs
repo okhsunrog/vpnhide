@@ -2,6 +2,7 @@
 //! path, shell command, per-open restart, or inference from worker-owned PASS.
 use super::boot_time::{BootDeadline, BootInstant};
 use std::fs;
+use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
@@ -230,6 +231,7 @@ fn worker_identity(
     })
 }
 struct NativeEvidence {
+    address_snapshot_unstable: bool,
     kernel_filters: Option<KernelFilterResult>,
     link_request_denial: Option<LinkRequestDenial>,
     routes: ScopedRouteResult,
@@ -241,6 +243,7 @@ struct NativeEvidence {
     binding: ScopedBindResult,
 }
 struct MeasurementFailure {
+    transient: bool,
     kernel_filters: Option<KernelFilterResult>,
     link_request_denial: Option<LinkRequestDenial>,
     routes: Option<ScopedRouteResult>,
@@ -252,6 +255,30 @@ struct MeasurementFailure {
     detail: String,
     native: Option<ScopedNativeResult>,
     cleanup_confirmed: Option<bool>,
+}
+
+fn transient_worker_error(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+    )
+}
+
+fn retry_delay(
+    attempts: u8,
+    transient: bool,
+    clean: bool,
+    current: bool,
+    leaked: bool,
+) -> Option<Duration> {
+    if !transient || !clean || !current || leaked {
+        return None;
+    }
+    match attempts {
+        1 => Some(Duration::from_secs(5)),
+        2 => Some(Duration::from_secs(10)),
+        _ => None,
+    }
 }
 
 impl Coordinator {
@@ -314,6 +341,7 @@ impl Coordinator {
             RouteFixture::recover_rules(dir).map_err(|_| DiagnosticError::Busy)?;
             ports_fixture::recover(dir).map_err(|_| DiagnosticError::Busy)?;
         }
+        let now = BootInstant::now().map_err(|_| DiagnosticError::Disabled)?;
         if let Some(last) = inner.last.as_ref() {
             if inner.active.is_some() {
                 return if last.fingerprint == fingerprint {
@@ -322,21 +350,25 @@ impl Coordinator {
                     Err(DiagnosticError::Busy)
                 };
             }
-            if !force && last.fingerprint == fingerprint && last.plan == plan {
+            if !force
+                && last.fingerprint == fingerprint
+                && last.plan == plan
+                && inner.retry_at.is_none_or(|deadline| !deadline.expired(now))
+            {
                 // Retain a bounded partial/infrastructure receipt even without
                 // complete generation evidence. Cache eligibility is distinct from
                 // actual condition changes; neither turns a partial run into PASS.
                 return Ok(last.clone());
             }
         }
-        if inner
-            .last
-            .as_ref()
-            .is_none_or(|last| last.fingerprint != fingerprint)
+        if force
+            || inner
+                .last
+                .as_ref()
+                .is_none_or(|last| last.fingerprint != fingerprint || last.plan != plan)
         {
             inner.attempts = 0;
         }
-        let now = BootInstant::now().map_err(|_| DiagnosticError::Disabled)?;
         let deadline = now
             .after(START_BUDGET)
             .map_err(|_| DiagnosticError::Disabled)?;
@@ -409,6 +441,7 @@ impl Coordinator {
         let result = match &worker_lease {
             Ok(_) => self.measure(&state, session),
             Err(detail) => Err(Box::new(MeasurementFailure {
+                transient: transient_worker_error(detail),
                 kernel_filters: None,
                 link_request_denial: None,
                 routes: None,
@@ -417,7 +450,7 @@ impl Coordinator {
                 proc_interfaces: None,
                 addresses: None,
                 binding: None,
-                detail: detail.clone(),
+                detail: detail.to_string(),
                 native: None,
                 cleanup_confirmed: Some(true),
             })),
@@ -451,14 +484,24 @@ impl Coordinator {
             .and_then(|a| a.native.as_ref())
             .map(|n| n.receipt());
         inner.active = None;
-        let retryable = matches!(&result, Err(failure) if failure.cleanup_confirmed == Some(true))
-            || framework
-                .as_ref()
-                .is_some_and(|(result, clean)| *clean && !result.controls.is_empty());
-        if retryable && inner.attempts < 3 {
-            inner.retry_at =
-                BootDeadline::from_now(Duration::from_secs(30 * u64::from(inner.attempts))).ok();
-        }
+        let clean = result
+            .as_ref()
+            .err()
+            .is_none_or(|failure| failure.cleanup_confirmed == Some(true))
+            && framework.as_ref().is_none_or(|(_, clean)| *clean)
+            && ports.as_ref().is_none_or(|result| {
+                !result
+                    .controls
+                    .contains(&ControlFailure::CleanupUnconfirmed)
+            });
+        let transient = match &result {
+            Ok(evidence) => evidence.address_snapshot_unstable,
+            Err(failure) => failure.transient,
+        } || framework.as_ref().is_some_and(|(result, _)| {
+            result.controls.contains(
+                &vpnhide_diagnostic_model::framework::FrameworkControlFailure::ProbeUnavailable,
+            )
+        });
         let Some(run) = inner.last.as_mut() else {
             return;
         };
@@ -503,6 +546,21 @@ impl Coordinator {
             run.stale = true;
         }
         let run = run.clone();
+        if let Some(delay) = retry_delay(
+            inner.attempts,
+            transient,
+            clean,
+            !run.stale,
+            !run.assessment().leaked.is_empty(),
+        ) {
+            inner.retry_at = BootDeadline::from_now(delay).ok();
+            if inner.retry_at.is_some() && debug {
+                crate::alog::info(&format!(
+                    "diagnostics: automatic retry scheduled after session={session} delay_ms={}",
+                    delay.as_millis()
+                ));
+            }
+        }
         if matches!(run.outcome, DiagnosticOutcome::Incomplete { .. }) {
             inner.last_completed = Some(run.clone());
         }
@@ -538,6 +596,7 @@ impl Coordinator {
                 let (_, route_cleaned) =
                     self.finish_route_fixture(routes, &unavailable, None, None);
                 return Err(Box::new(MeasurementFailure {
+                    transient: transient_worker_error(&failure.error),
                     kernel_filters: None,
                     link_request_denial: None,
                     routes: None,
@@ -565,8 +624,10 @@ impl Coordinator {
             session,
             debug,
         );
-        let report = (|| -> Result<NativeMeasurement, String> {
-            let app_dir = app_dir.as_deref().ok_or("diagnostic adapter disabled")?;
+        let report = (|| -> io::Result<NativeMeasurement> {
+            let app_dir = app_dir
+                .as_deref()
+                .ok_or_else(|| io::Error::other("diagnostic adapter disabled"))?;
             if let (Ok(fixture), Some(dir), Ok(owner)) = (
                 &mut routes,
                 state.diagnostic_rule_dir(),
@@ -581,31 +642,33 @@ impl Coordinator {
             trace(debug, session, "worker_prepare_start");
             super::android_worker::prepare_fresh(app_dir)?;
             trace(debug, session, "worker_prepare_done");
-            let minimum_birth_ticks = boot_ticks()?
+            let minimum_birth_ticks = boot_ticks()
+                .map_err(io::Error::other)?
                 .checked_add(1)
-                .ok_or("worker birth clock overflow")?;
+                .ok_or_else(|| io::Error::other("worker birth clock overflow"))?;
             // Proc starttime is quantized. Dispatch in the next tick so an older
             // root pre-specialization child cannot claim this fresh run.
-            while boot_ticks()? < minimum_birth_ticks {
+            while boot_ticks().map_err(io::Error::other)? < minimum_birth_ticks {
                 std::thread::sleep(Duration::from_millis(2));
             }
             {
                 let mut inner = self.inner.lock().expect("diagnostic coordinator");
                 if inner.cancelled {
-                    return Err("diagnostic run cancelled".into());
+                    return Err(io::Error::new(
+                        io::ErrorKind::Interrupted,
+                        "diagnostic run cancelled",
+                    ));
                 }
                 let active = inner
                     .active
                     .as_mut()
                     .filter(|a| a.session == session)
-                    .ok_or("diagnostic session expired")?;
-                if active
-                    .deadline
-                    .expired(BootInstant::now().map_err(|e| e.to_string())?)
-                {
-                    return Err(
-                        "Android diagnostic worker start deadline exceeded before dispatch".into(),
-                    );
+                    .ok_or_else(|| io::Error::other("diagnostic session expired"))?;
+                if active.deadline.expired(BootInstant::now()?) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "Android diagnostic worker start deadline exceeded before dispatch",
+                    ));
                 }
                 active.minimum_birth_ticks = Some(minimum_birth_ticks);
                 active.task = Some(DiagnosticWorkerTask {
@@ -621,26 +684,25 @@ impl Coordinator {
             let mut inner = self.inner.lock().expect("diagnostic coordinator");
             loop {
                 if inner.cancelled {
-                    return Err("diagnostic run cancelled".into());
+                    return Err(io::Error::new(
+                        io::ErrorKind::Interrupted,
+                        "diagnostic run cancelled",
+                    ));
                 }
                 let active = inner
                     .active
                     .as_mut()
                     .filter(|a| a.session == session)
-                    .ok_or("diagnostic session expired")?;
+                    .ok_or_else(|| io::Error::other("diagnostic session expired"))?;
                 if active.finished {
-                    return active
-                        .report
-                        .clone()
-                        .ok_or("native worker finished without observation".into());
+                    return active.report.clone().ok_or_else(|| {
+                        io::Error::other("native worker finished without observation")
+                    });
                 }
-                let Some(remaining) = active
-                    .deadline
-                    .wait_slice(BootInstant::now().map_err(|e| e.to_string())?)
-                else {
-                    return Err(format!(
-                        "Android diagnostic {} deadline exceeded",
-                        active.stage()
+                let Some(remaining) = active.deadline.wait_slice(BootInstant::now()?) else {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        format!("Android diagnostic {} deadline exceeded", active.stage()),
                     ));
                 };
                 inner = self
@@ -679,6 +741,19 @@ impl Coordinator {
             .or(early_report.as_ref())
             .unwrap_or(&unavailable);
         let completion = fixture.finish_paired(protected, app_raw);
+        let address_snapshot_unstable = !completion.addresses.complete()
+            && [
+                Some(&fixture.negative),
+                Some(&fixture.root_start),
+                app_raw,
+                Some(protected),
+                Some(&completion.root_end),
+                Some(&completion.cleanup),
+            ]
+            .into_iter()
+            .flatten()
+            .filter_map(|sample| sample.addresses.as_ref())
+            .any(AddressMeasurement::ifconf_size_changed);
         let mut kernel_filters = kernel_pair.as_ref().map(|pair| {
             let [netlink_links, proc_interfaces] = evaluate_kernel_interfaces(
                 &spec,
@@ -715,6 +790,7 @@ impl Coordinator {
         let cleaned = native_clean && route_clean;
         match report {
             Ok(_) if cleaned => Ok(NativeEvidence {
+                address_snapshot_unstable,
                 kernel_filters,
                 link_request_denial: completion.link_request_denial,
                 routes,
@@ -726,6 +802,7 @@ impl Coordinator {
                 binding: completion.binding,
             }),
             Ok(_) => Err(Box::new(MeasurementFailure {
+                transient: false,
                 kernel_filters,
                 link_request_denial: completion.link_request_denial,
                 routes: Some(routes),
@@ -744,6 +821,7 @@ impl Coordinator {
                 cleanup_confirmed: Some(false),
             })),
             Err(detail) => Err(Box::new(MeasurementFailure {
+                transient: transient_worker_error(&detail),
                 kernel_filters,
                 link_request_denial: completion.link_request_denial,
                 routes: Some(routes),
@@ -752,7 +830,7 @@ impl Coordinator {
                 proc_interfaces: Some(completion.proc_interfaces),
                 addresses: Some(completion.addresses),
                 binding: Some(completion.binding),
-                detail,
+                detail: detail.to_string(),
                 native: Some(completion.result),
                 cleanup_confirmed: Some(cleaned),
             })),
@@ -967,13 +1045,11 @@ impl Coordinator {
                     if inner.cancelled {
                         return;
                     }
-                    let force = BootInstant::now()
-                        .is_ok_and(|now| inner.retry_at.is_some_and(|t| t.expired(now)));
                     drop(inner);
                     let Some(state) = weak.upgrade() else {
                         return;
                     };
-                    let _ = coordinator.request(state, force);
+                    let _ = coordinator.request(state, false);
                 }
             });
         if let Err(error) = started {
@@ -1287,6 +1363,28 @@ mod tests {
     use super::*;
     use crate::publisher::Publisher;
     use vpnhide_core_rpc::{CanonicalConfig, NativeBackend, NativeBackendStatus, StateSnapshot};
+
+    #[test]
+    fn automatic_retries_are_bounded_and_preserve_leaks_and_cleanup_holds() {
+        assert!(transient_worker_error(&io::ErrorKind::TimedOut.into()));
+        assert!(transient_worker_error(&io::ErrorKind::WouldBlock.into()));
+        assert!(!transient_worker_error(
+            &io::ErrorKind::PermissionDenied.into()
+        ));
+        assert_eq!(
+            retry_delay(1, true, true, true, false),
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(
+            retry_delay(2, true, true, true, false),
+            Some(Duration::from_secs(10))
+        );
+        assert_eq!(retry_delay(3, true, true, true, false), None);
+        assert_eq!(retry_delay(1, false, true, true, false), None);
+        assert_eq!(retry_delay(1, true, false, true, false), None);
+        assert_eq!(retry_delay(1, true, true, false, false), None);
+        assert_eq!(retry_delay(1, true, true, true, true), None);
+    }
 
     fn task() -> DiagnosticWorkerTask {
         DiagnosticWorkerTask {

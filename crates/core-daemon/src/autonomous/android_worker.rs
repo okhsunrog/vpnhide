@@ -2,16 +2,23 @@
 //! package is never force-stopped and an arbitrary PID is never signalled.
 use super::boot_time::{BootDeadline, BootInstant};
 use std::fs;
+use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::time::Duration;
 use vpnhide_loader_ipc::{WORKER_PROCESS, image};
 
 static OWNER: std::sync::Mutex<()> = std::sync::Mutex::new(());
-pub(crate) fn lease() -> Result<std::sync::MutexGuard<'static, ()>, String> {
-    OWNER
-        .try_lock()
-        .map_err(|_| "dedicated Android worker is owned by another run".into())
+pub(crate) fn lease() -> io::Result<std::sync::MutexGuard<'static, ()>> {
+    OWNER.try_lock().map_err(|error| match error {
+        std::sync::TryLockError::WouldBlock => io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "dedicated Android worker is owned by another run",
+        ),
+        std::sync::TryLockError::Poisoned(_) => {
+            io::Error::other("dedicated Android worker owner poisoned")
+        }
+    })
 }
 
 /// Boot probing waits for an existing autonomous run rather than converting
@@ -43,36 +50,33 @@ fn lease_from_before(
 
 const COMPONENT: &str = "dev.okhsunrog.vpnhide/.diagnostics.LoaderProbeService";
 
-fn run(args: &[&str]) -> Result<(), String> {
+fn run(args: &[&str]) -> io::Result<()> {
     let mut command = std::process::Command::new("/system/bin/cmd");
     command.args(args);
     let name = args[..2].join(" ");
     let output = vpnhide_activator::output_with_timeout(&mut command, Duration::from_secs(2))
-        .map_err(|error| format!("Android worker {name}: {error}"))?;
+        .map_err(|error| io::Error::new(error.kind(), format!("Android worker {name}: {error}")))?;
     if !output.status.success() {
-        return Err(format!(
+        return Err(io::Error::other(format!(
             "Android worker {name} refused: {}",
             String::from_utf8_lossy(&output.stderr)
                 .chars()
                 .take(256)
                 .collect::<String>()
-        ));
+        )));
     }
     Ok(())
 }
-fn existing(app_dir: &Path) -> Result<bool, String> {
-    let uid = fs::metadata(app_dir).map_err(|e| e.to_string())?.uid();
+fn existing(app_dir: &Path) -> io::Result<bool> {
+    let uid = fs::metadata(app_dir)?.uid();
     if uid < 10_000 {
-        return Err("invalid Android worker owner".into());
+        return Err(io::Error::other("invalid Android worker owner"));
     }
-    for (count, entry) in fs::read_dir("/proc")
-        .map_err(|e| e.to_string())?
-        .enumerate()
-    {
+    for (count, entry) in fs::read_dir("/proc")?.enumerate() {
         if count >= 65_536 {
-            return Err("process inventory exceeds bound".into());
+            return Err(io::Error::other("process inventory exceeds bound"));
         }
-        let path = entry.map_err(|e| e.to_string())?.path();
+        let path = entry?.path();
         if path
             .file_name()
             .and_then(|s| s.to_str())
@@ -83,7 +87,7 @@ fn existing(app_dir: &Path) -> Result<bool, String> {
         let metadata = match fs::metadata(&path) {
             Ok(m) => m,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(e),
         };
         if metadata.uid() != uid {
             continue;
@@ -91,7 +95,7 @@ fn existing(app_dir: &Path) -> Result<bool, String> {
         let name = match image::bounded_text(&path.join("cmdline"), 512) {
             Ok(s) => s,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(e),
         };
         if name.split('\0').next() == Some(WORKER_PROCESS) {
             return Ok(true);
@@ -100,16 +104,17 @@ fn existing(app_dir: &Path) -> Result<bool, String> {
     Ok(false)
 }
 
-pub fn prepare_fresh(app_dir: &Path) -> Result<(), String> {
+pub fn prepare_fresh(app_dir: &Path) -> io::Result<()> {
     if existing(app_dir)? {
         // AOSP returns nonzero even for its "Service stopped" branch. Command
         // status is not exit evidence: observe actual dedicated-process absence.
         let stopped = run(&["activity", "stop-service", "--user", "0", "-n", COMPONENT]);
-        let deadline = BootDeadline::from_now(Duration::from_secs(2)).map_err(|e| e.to_string())?;
+        let deadline = BootDeadline::from_now(Duration::from_secs(2))?;
         while existing(app_dir)? {
-            if deadline.expired(BootInstant::now().map_err(|e| e.to_string())?) {
-                return Err(format!(
-                    "previous dedicated diagnostic process did not exit: {stopped:?}"
+            if deadline.expired(BootInstant::now()?) {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!("previous dedicated diagnostic process did not exit: {stopped:?}"),
                 ));
             }
             std::thread::sleep(Duration::from_millis(25));
@@ -118,7 +123,7 @@ pub fn prepare_fresh(app_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub fn launch() -> Result<(), String> {
+pub fn launch() -> io::Result<()> {
     run(&[
         "deviceidle",
         "tempwhitelist",
