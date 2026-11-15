@@ -22,19 +22,31 @@ pub(super) fn thread_identity(
     if birth.start_ticks < worker.process.start_ticks || birth.start_ticks == 0 {
         return Err(DiagnosticError::WrongProcess);
     }
-    for namespace in ["pid", "user", "net"] {
-        let own = namespace_identity(&root.join("self/ns").join(namespace))?;
-        let current = namespace_identity(&thread.join("ns").join(namespace))?;
-        let leader = namespace_identity(&process.join("ns").join(namespace))?;
-        if own != current || own != leader {
+    for (namespace, optional) in [("pid", true), ("user", true), ("net", false)] {
+        let own = root.join("self/ns").join(namespace);
+        let current = thread.join("ns").join(namespace);
+        let leader = process.join("ns").join(namespace);
+        // A kernel built without PID or user namespaces omits that entry for
+        // every task. A dangling link or a denied read is still an error.
+        if optional
+            && [&own, &current, &leader].into_iter().all(|path| {
+                fs::symlink_metadata(path)
+                    .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+            })
+        {
+            continue;
+        }
+        let own = namespace_identity(&own)?;
+        if own != namespace_identity(&current)? || own != namespace_identity(&leader)? {
             return Err(DiagnosticError::WrongProcess);
         }
     }
-    // Re-read the leader after membership/namespace observations: a replaced
-    // numeric process ID cannot lend its thread directory to the old worker.
+    // Re-read both birth identities after observing namespaces.
     if image::process_identity(root, worker.process.pid)
         .map_err(|_| DiagnosticError::WrongProcess)?
         != worker.process
+        || image::process_identity(&threads, tid).map_err(|_| DiagnosticError::WrongProcess)?
+            != birth
     {
         return Err(DiagnosticError::WrongProcess);
     }
@@ -196,9 +208,34 @@ mod tests {
             fs::remove_file(&path).unwrap();
             fs::hard_link(root.join("self/ns").join(name), path).unwrap();
         }
+        for name in ["pid", "user"] {
+            let path = thread.join("ns").join(name);
+            fs::remove_file(&path).unwrap();
+            assert_eq!(
+                thread_identity(root, worker, 43),
+                Err(DiagnosticError::WrongProcess)
+            );
+            std::os::unix::fs::symlink("missing", &path).unwrap();
+            fs::remove_file(root.join("self/ns").join(name)).unwrap();
+            fs::remove_file(process.join("ns").join(name)).unwrap();
+            assert_eq!(
+                thread_identity(root, worker, 43),
+                Err(DiagnosticError::WrongProcess)
+            );
+            fs::remove_file(path).unwrap();
+            assert_eq!(thread_identity(root, worker, 43), Ok(original));
+        }
         fs::write(thread.join("stat"), stat(43, 102)).unwrap();
         assert_ne!(thread_identity(root, worker, 43).unwrap(), original);
         fs::write(process.join("stat"), stat(42, 102)).unwrap();
+        assert_eq!(
+            thread_identity(root, worker, 43),
+            Err(DiagnosticError::WrongProcess)
+        );
+        fs::write(process.join("stat"), stat(42, 100)).unwrap();
+        for dir in [root.join("self/ns"), process.join("ns"), thread.join("ns")] {
+            fs::remove_file(dir.join("net")).unwrap();
+        }
         assert_eq!(
             thread_identity(root, worker, 43),
             Err(DiagnosticError::WrongProcess)

@@ -48,9 +48,12 @@ retains accepted observations; no timer claims cleanup can execute while the CPU
 is asleep. Clock failures deny further worker authority. Framework envelopes inherit the original run expiration; beginning Java collection never renews it. Framework fixtures exercise actual public APIs,
 Binder, source transformations and production normalization. Framework RAW grants
 are scoped to the exact test process and never turn off protection for the whole UID.
-Native collection now uses one dedicated Android collector thread. Core authenticates
-its genuine Zygote process and revalidates thread membership/birth plus PID, user
-and network namespaces at each phase. Root controls and same-worker RAW/protected
+Native collection uses one dedicated Android collector thread. Core authenticates
+its genuine Zygote process and revalidates thread membership, both birth identities
+and the shared network namespace at each phase. PID and user namespaces are also
+checked when the kernel exposes them. On kernels that omit these namespaces, the
+corresponding procfs entries must be absent for Core, the worker and its collector.
+Root controls and same-worker RAW/protected
 observations are evaluated together; root visibility alone cannot prove the app's
 RAW visibility. An absent/unsupported grant withholds native proof while retaining
 qualified protected leaks. Unknown activation/revocation never authorizes a
