@@ -19,6 +19,7 @@ class CoreStateBindingContractTest {
             observation = CoreObservationFreshness.CURRENT,
             runtime = CoreNativeRuntimeStatus(CoreNativeBackend.BUILTIN, 1u, 3u, 0u),
             observationError = null,
+            kpmObservationError = "KPM inventory unavailable",
             attempts = emptyList(),
             delivery = CoreNativeDeliveryView(CoreNativeBackend.BUILTIN, 8uL, 4uL, CorePhaseOutcome.CONFIRMED, "a".repeat(64)),
             requiredHooks = 3u,
@@ -107,6 +108,7 @@ class CoreStateBindingContractTest {
                     observedFreshness = CoreObservationFreshness.CURRENT,
                     runtimeStatus = native.runtime,
                     observationError = null,
+                    kpmObservationError = native.kpmObservationError,
                     selected = CoreNativeBackend.BUILTIN,
                     applied = CoreNativeBackend.BUILTIN,
                     active = CoreNativeBackend.BUILTIN,
@@ -144,6 +146,7 @@ class CoreStateBindingContractTest {
         assertEquals("storage held", bound.storageFault)
         assertEquals(1, bound.activeCaptures)
         assertEquals("setup_ready", bound.nativeStatus?.setup)
+        assertEquals("KPM inventory unavailable", bound.nativeStatus?.kpmObservationError)
         assertEquals(3L, bound.nativeStatus?.requiredHooks)
         native.requiredHooks = 0u
         native.delivery?.wireSha256 = null

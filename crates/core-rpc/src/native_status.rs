@@ -94,6 +94,8 @@ pub struct NativeReadModel {
     pub observation: ObservationFreshness,
     pub runtime: Option<NativeRuntimeStatus>,
     pub observation_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kpm_observation_error: Option<String>,
     pub attempts: Vec<NativeAttemptView>,
     pub delivery: Option<NativeDeliveryView>,
     /// Desired supported policy, independent of which hooks happened to install.

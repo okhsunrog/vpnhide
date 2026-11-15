@@ -131,6 +131,10 @@ delivery, observation freshness and backend conflicts still contribute. Missing
 required proof remains unverified. The current partial implementation has no
 full-success assessment variant.
 
+A KPM observation failure does not invalidate evidence for a still-current
+kernel backend. A confirmed competing backend invalidates the retained context
+and holds new diagnostic admission until the conflict is resolved.
+
 Core schedules up to two fresh runs for a timed-out or temporarily busy
 Android worker, an unstable address sample after local resampling, or an
 unavailable framework probe. The retry becomes eligible after five seconds

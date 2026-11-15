@@ -36,6 +36,9 @@ internal fun NativeCoreStatusCard(snapshot: NativeStatusSnapshot) {
             )
             if (backend != null) Text(stringResource(nativeBackendNameResource(backend)), style = MaterialTheme.typography.bodyLarge)
             Text(stringResource(nativeSetupResource(status)), style = MaterialTheme.typography.bodyMedium)
+            if (current && model?.kpmObservationError != null) {
+                Text(stringResource(R.string.native_status_kpm_unavailable), style = MaterialTheme.typography.bodySmall)
+            }
             if (current && model?.displayed?.source in setOf("bundled", "builtin", "legacy")) {
                 Spacer(Modifier.height(4.dp))
                 Text(stringResource(nativeSourceResource(model?.displayed?.source)), style = MaterialTheme.typography.bodySmall)

@@ -145,14 +145,14 @@ fn project(config_arg: Option<String>) {
             .unwrap_or_else(|| Path::new(backend::MODULES_ROOT)),
         kpm_lock.as_deref(),
     );
-    let Some(active) = observed.active else {
+    let Some(runtime) = observed.status.runtime_status else {
         eprintln!(
             "project: no compatible active native backend (kernel node: {})",
             ctl.display()
         );
         std::process::exit(1);
     };
-    match activation::project_native_wire(&config, active) {
+    match activation::project_native_wire(&config, runtime.backend) {
         Ok(wire) => print!("{wire}"),
         Err(e) => {
             eprintln!("project: {e}");

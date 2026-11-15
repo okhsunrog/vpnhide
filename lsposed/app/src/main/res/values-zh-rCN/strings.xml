@@ -582,6 +582,7 @@
     <string name="native_status_unavailable">Core 状态不可用</string>
     <string name="native_status_no_selection">尚未选择原生后端</string>
     <string name="native_status_awaiting_runtime">等待运行确认</string>
+    <string name="native_status_kpm_unavailable">无法检查 KPM 状态</string>
     <string name="native_status_conflict">原生后端冲突</string>
     <string name="native_status_pending">正在应用配置</string>
     <string name="native_status_failed">需要检查设置</string>

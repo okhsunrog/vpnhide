@@ -594,6 +594,7 @@
     <string name="native_status_unavailable">Статус Core недоступен</string>
     <string name="native_status_no_selection">Native backend не выбран</string>
     <string name="native_status_awaiting_runtime">Ожидается подтверждение запуска</string>
+    <string name="native_status_kpm_unavailable">Не удалось проверить статус KPM</string>
     <string name="native_status_conflict">Конфликт native backend</string>
     <string name="native_status_pending">Применяется конфигурация</string>
     <string name="native_status_failed">Нужна проверка настройки</string>

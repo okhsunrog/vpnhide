@@ -298,6 +298,14 @@ checked against that evidence. Insufficient coverage holds the selected resident
 without trying another family. Runtime health remains partial; this admission
 does not claim successful delivery, complete process coverage or behavioral PASS.
 
+The live observer reads the kernel control node and KPM inventory independently.
+A failed KPM observation remains visible beside an otherwise current kernel
+status. A positive VPN Hide KPM inventory hit establishes presence even when
+detailed KPM status is unavailable. Two confirmed native owners produce a
+runtime conflict. A later incomplete poll retains that conflict until a
+fresh observation establishes that either source is absent. This read model
+does not authorize backend loads or policy writes.
+
 Ports resolves the complete package/UID map before touching firewall rules,
 preserving old rules on resolution failure. IPv4 and IPv6 outcomes remain independent.
 

@@ -610,6 +610,7 @@
     <string name="native_status_unavailable">Core status unavailable</string>
     <string name="native_status_no_selection">No native backend selected</string>
     <string name="native_status_awaiting_runtime">Waiting for runtime confirmation</string>
+    <string name="native_status_kpm_unavailable">KPM status could not be checked</string>
     <string name="native_status_conflict">Conflicting native backends</string>
     <string name="native_status_pending">Applying configuration</string>
     <string name="native_status_failed">Setup needs attention</string>

@@ -13,7 +13,7 @@
 
 use std::path::Path;
 
-use vpnhide_activator::{BUILTIN_BACKEND_ID, KMOD_BACKEND_ID};
+use vpnhide_activator::{BUILTIN_BACKEND_ID, CoreKpm, KMOD_BACKEND_ID, KpmRuntimeObservation};
 use vpnhide_core_rpc::{
     NativeBackend, NativeBackendStatus, NativeRuntimeStatus, ObservationFreshness,
 };
@@ -34,51 +34,62 @@ pub fn kpm_lock_from_env() -> Option<std::path::PathBuf> {
         .map(Into::into)
 }
 
-/// Include KPM runtime evidence only when its management channel is explicitly
-/// enabled. Failure never invents an active backend from an installed artifact.
-pub fn detect_managed(ctl: &Path, modules: &Path, kpm_lock: Option<&Path>) -> NativeBackendStatus {
-    let mut detected = detect(ctl, modules);
-    if let Some(lock) = kpm_lock {
-        let observed = (|| -> Result<Option<NativeRuntimeStatus>, String> {
-            if detected.observed_freshness != ObservationFreshness::Current {
-                return Err(detected
-                    .observation_error
-                    .clone()
-                    .unwrap_or_else(|| "kernel observation unavailable".into()));
-            }
-            let kernel = detected.runtime_status.clone();
-            let client = vpnhide_activator::CoreKpm::connect(lock).map_err(|e| e.to_string())?;
-            let kpm = client
-                .as_ref()
-                .map(|client| client.status())
-                .transpose()
-                .map_err(|e| e.to_string())?
-                .flatten();
-            combine_runtime(&mut detected, kernel, kpm)
-        })();
-        set_runtime_observation(&mut detected, observed);
-    }
-    detected
+pub struct BackendObservation {
+    pub status: NativeBackendStatus,
+    /// Fresh evidence that at least one of the two runtime sources is absent.
+    pub(crate) conflict_excluded: bool,
+}
+
+/// Observe KPM independently when its management channel is enabled.
+pub fn detect_managed(ctl: &Path, modules: &Path, kpm_lock: Option<&Path>) -> BackendObservation {
+    let kernel = detect(ctl, modules);
+    combine_runtime(kernel, kpm_lock.map(CoreKpm::observe_runtime))
 }
 
 fn combine_runtime(
-    detected: &mut NativeBackendStatus,
-    kernel: Option<NativeRuntimeStatus>,
-    kpm: Option<vpnhide_protocol::Status>,
-) -> Result<Option<NativeRuntimeStatus>, String> {
-    if let Some(status) = &kpm
-        && status.backend != vpnhide_protocol::hook_ids::Backend::Kpm as u32
-    {
-        return Err("unexpected KPM runtime identity".into());
-    }
-    match (kernel, kpm) {
-        (Some(_), Some(_)) => {
-            detected.runtime_conflict = true;
-            Err("conflicting kernel and KPM identities".into())
+    mut kernel: NativeBackendStatus,
+    kpm: Option<KpmRuntimeObservation>,
+) -> BackendObservation {
+    use KpmRuntimeObservation::{Absent, Present, Unknown};
+    let kernel_absent =
+        kernel.observed_freshness == ObservationFreshness::Current && kernel.active.is_none();
+    let conflict_excluded = kernel_absent || matches!(&kpm, Some(Absent));
+    match kpm {
+        None | Some(Absent) => {}
+        Some(Unknown(detail)) => {
+            if kernel_absent {
+                kernel.observed_freshness = ObservationFreshness::Unknown;
+            }
+            kernel.kpm_observation_error = Some(detail);
         }
-        (None, Some(status)) => Ok(Some(runtime_status(NativeBackend::Kpm, status))),
-        (kernel, None) => Ok(kernel),
+        Some(Present(status)) => {
+            if kernel.active.is_some() {
+                mark_runtime_conflict(&mut kernel);
+            }
+            match status {
+                Ok(status) if kernel_absent => {
+                    let status = runtime_status(NativeBackend::Kpm, status);
+                    set_runtime_observation(&mut kernel, Ok(Some(status)));
+                }
+                Ok(_) => {}
+                Err(detail) => {
+                    if kernel_absent {
+                        kernel.active = Some(NativeBackend::Kpm);
+                    }
+                    kernel.kpm_observation_error = Some(detail);
+                }
+            }
+        }
     }
+    BackendObservation {
+        status: kernel,
+        conflict_excluded,
+    }
+}
+
+pub(crate) fn mark_runtime_conflict(status: &mut NativeBackendStatus) {
+    status.runtime_conflict = true;
+    set_runtime_observation(status, Err("conflicting kernel and KPM identities".into()));
 }
 
 pub fn kernel_modules_from_env() -> Option<std::path::PathBuf> {
@@ -211,38 +222,83 @@ mod tests {
 
     #[test]
     fn confirmed_competing_owners_are_not_an_unavailable_or_successful_runtime() {
-        let mut detected = NativeBackendStatus::default();
-        let kernel = NativeRuntimeStatus {
-            backend: NativeBackend::Builtin,
-            kernel_version: 1,
-            installed_hooks: 0x3ff,
-            status_error: 0,
-        };
+        let dir = tempfile::tempdir().unwrap();
+        let kernel = detect(&write_status(dir.path(), "4"), dir.path());
         let kpm = vpnhide_protocol::Status {
             backend: 1,
             kver: 1,
             hooks: 0x3ff,
             error: 0,
         };
-        let observation = combine_runtime(&mut detected, Some(kernel.clone()), Some(kpm));
-        set_runtime_observation(&mut detected, observation);
-        assert!(detected.runtime_conflict);
-        assert_eq!(detected.active, None);
-        assert_eq!(detected.runtime_status, None);
-        let mut snapshot = vpnhide_core_rpc::StateSnapshot {
-            backend: detected,
-            ..Default::default()
-        };
-        crate::native_status::refresh(&mut snapshot);
+        for status in [Ok(kpm), Err("inventory found KPM without status".into())] {
+            let observed =
+                combine_runtime(kernel.clone(), Some(KpmRuntimeObservation::Present(status)));
+            assert!(!observed.conflict_excluded);
+            assert!(observed.status.runtime_conflict);
+            assert_eq!(observed.status.active, None);
+            assert_eq!(observed.status.runtime_status, None);
+            let mut snapshot = vpnhide_core_rpc::StateSnapshot {
+                backend: observed.status,
+                ..Default::default()
+            };
+            crate::native_status::refresh(&mut snapshot);
+            assert_eq!(
+                snapshot.native_view.setup,
+                vpnhide_core_rpc::NativeSetupHealth::RuntimeConflict
+            );
+        }
+    }
+
+    #[test]
+    fn kpm_uncertainty_preserves_only_positive_kernel_observation() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctl = write_status(dir.path(), "4");
+        let kernel = detect(&ctl, dir.path());
+        let unavailable = || Some(KpmRuntimeObservation::Unknown("unrecognized ABI".into()));
+        let observed = combine_runtime(kernel.clone(), unavailable());
+        assert!(!observed.conflict_excluded);
         assert_eq!(
-            snapshot.native_view.setup,
-            vpnhide_core_rpc::NativeSetupHealth::RuntimeConflict
+            observed.status.observed_freshness,
+            ObservationFreshness::Current
         );
-        let mut detected = NativeBackendStatus::default();
-        let observation = combine_runtime(&mut detected, Some(kernel.clone()), None);
-        set_runtime_observation(&mut detected, observation);
-        assert!(!detected.runtime_conflict);
-        assert_eq!(detected.runtime_status, Some(kernel));
+        assert_eq!(observed.status.runtime_status, kernel.runtime_status);
+        assert_eq!(observed.status.active, Some(NativeBackend::Builtin));
+        assert_eq!(
+            observed.status.kpm_observation_error.as_deref(),
+            Some("unrecognized ABI")
+        );
+        assert!(!observed.status.runtime_conflict);
+
+        fs::remove_file(&ctl).unwrap();
+        let observed = combine_runtime(detect(&ctl, dir.path()), unavailable());
+        assert_eq!(
+            observed.status.observed_freshness,
+            ObservationFreshness::Unknown
+        );
+        assert_eq!(observed.status.active, None);
+    }
+
+    #[test]
+    fn inventory_only_kpm_is_live_without_claiming_hook_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let kernel = detect(&dir.path().join("missing-ctl"), dir.path());
+        let observed = combine_runtime(
+            kernel,
+            Some(KpmRuntimeObservation::Present(Err(
+                "no status adapter".into()
+            ))),
+        );
+        assert!(observed.conflict_excluded);
+        assert_eq!(
+            observed.status.observed_freshness,
+            ObservationFreshness::Current
+        );
+        assert_eq!(observed.status.active, Some(NativeBackend::Kpm));
+        assert_eq!(observed.status.runtime_status, None);
+        assert_eq!(
+            observed.status.kpm_observation_error.as_deref(),
+            Some("no status adapter")
+        );
     }
 
     #[test]

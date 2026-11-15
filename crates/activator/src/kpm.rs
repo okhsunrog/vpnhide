@@ -350,6 +350,12 @@ pub enum KpmLiveCheck {
     },
 }
 
+pub enum KpmRuntimeObservation {
+    Absent,
+    Present(std::result::Result<vpnhide_protocol::Status, String>),
+    Unknown(String),
+}
+
 impl CoreKpm {
     /// Like [`Self::connect`], but keeps an authentication refusal distinct from other
     /// probe failures so core can tell "awaiting the superkey" from "broken runtime".
@@ -450,7 +456,41 @@ impl CoreKpm {
         Ok(Some(out))
     }
 
-    /// Runtime evidence, not module-directory presence. No canonical read or load.
+    /// Read-only presence and status. Preserve a positive inventory hit even
+    /// when that running module cannot answer the status request.
+    pub fn observe_runtime(lock_path: &Path) -> KpmRuntimeObservation {
+        use KpmRuntimeObservation::{Absent, Present, Unknown};
+        match Self::probe(lock_path) {
+            Ok(
+                KpmRuntimeProbe::NoRuntime | KpmRuntimeProbe::InventoryOnly { loaded: false, .. },
+            ) => Absent,
+            Ok(KpmRuntimeProbe::InventoryOnly {
+                loaded: true,
+                detail,
+            }) => Present(Err(detail)),
+            Ok(
+                KpmRuntimeProbe::AwaitingAuthentication(detail)
+                | KpmRuntimeProbe::Unrecognized(detail),
+            ) => Unknown(detail),
+            Ok(KpmRuntimeProbe::Ready(client)) => client
+                .observe_managed()
+                .unwrap_or_else(|error| Unknown(error.to_string())),
+            Err(error) => Unknown(error.to_string()),
+        }
+    }
+
+    fn observe_managed(&self) -> Result<KpmRuntimeObservation> {
+        let _lock = KpmCtlLock::acquire_at(&self.lock_path, true)?;
+        if self.client.list_contains()? {
+            Ok(KpmRuntimeObservation::Present(
+                self.read_status_locked().map_err(|error| error.to_string()),
+            ))
+        } else {
+            Ok(KpmRuntimeObservation::Absent)
+        }
+    }
+
+    /// Detailed status for callers that require a compatible control endpoint.
     pub fn status(&self) -> Result<Option<vpnhide_protocol::Status>> {
         let _lock = KpmCtlLock::acquire_at(&self.lock_path, true)?;
         self.status_locked()
@@ -502,6 +542,10 @@ impl CoreKpm {
         if !self.client.list_contains()? {
             return Ok(None);
         }
+        self.read_status_locked().map(Some)
+    }
+
+    fn read_status_locked(&self) -> Result<vpnhide_protocol::Status> {
         let reply = self.client.ctl0_read_raw("vpnhide 1 status")?;
         if !reply.ends_with('\n') {
             return Err("truncated KPM status".into());
@@ -512,7 +556,7 @@ impl CoreKpm {
         if status.backend != vpnhide_protocol::hook_ids::Backend::Kpm as u32 {
             return Err("foreign KPM control owner".into());
         }
-        Ok(Some(status))
+        Ok(status)
     }
 
     /// Load only the artifact selected by core; never select neighbors or fallback.
@@ -1349,7 +1393,7 @@ esac
             lock_path: root.join("control.lock"),
         };
         let observer = client();
-        let reader = std::thread::spawn(move || observer.status());
+        let reader = std::thread::spawn(move || observer.observe_managed());
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         while !root.join("observing").exists() && std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(5));
@@ -1370,7 +1414,10 @@ esac
         );
         assert!(!root.join("dispatched").exists());
         std::fs::write(root.join("release"), "").unwrap();
-        assert!(reader.join().unwrap().unwrap().is_some());
+        assert!(matches!(
+            reader.join().unwrap().unwrap(),
+            super::KpmRuntimeObservation::Present(Ok(_))
+        ));
         let delivered = result
             .recv_timeout(std::time::Duration::from_secs(2))
             .unwrap();

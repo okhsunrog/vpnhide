@@ -120,8 +120,9 @@ pub mod sys;
 
 use kpm::*;
 pub use kpm::{
-    CoreKpm, KpmConfigError, KpmInfo, KpmLiveCheck, KpmLoadFailure, KpmObserved, KpmRuntimeProbe,
-    MIN_KPM_VERSION, kpm_version_compatible, set_session_superkey,
+    CoreKpm, KpmConfigError, KpmInfo, KpmLiveCheck, KpmLoadFailure, KpmObserved,
+    KpmRuntimeObservation, KpmRuntimeProbe, MIN_KPM_VERSION, kpm_version_compatible,
+    set_session_superkey,
 };
 pub use model::*;
 pub use ownership::{

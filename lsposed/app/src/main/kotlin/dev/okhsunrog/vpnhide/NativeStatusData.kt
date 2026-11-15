@@ -1,5 +1,7 @@
 package dev.okhsunrog.vpnhide
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import uniffi.vpnhide_core_ffi.CoreNativeAttemptView
 import uniffi.vpnhide_core_ffi.CoreNativeDeliveryView
@@ -45,6 +47,7 @@ internal data class NativeDeliveryInfo(
 )
 
 @Serializable
+@OptIn(ExperimentalSerializationApi::class)
 internal data class NativeStatusInfo(
     val boot: NativeBootStatus?,
     val selected: NativeImplementationInfo?,
@@ -63,6 +66,7 @@ internal data class NativeStatusInfo(
     val filesystem: String,
     val processCoverageComplete: Boolean,
     val legacyInstalled: List<NativeBackendId>,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val kpmObservationError: String? = null,
 )
 
 @Serializable
@@ -118,4 +122,5 @@ internal fun CoreNativeReadModel.toNativeStatusInfo(): NativeStatusInfo =
         nativeStatusId(filesystem),
         processCoverageComplete,
         legacyInstalled.map { it.toBackend() },
+        kpmObservationError,
     )

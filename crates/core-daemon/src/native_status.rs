@@ -344,6 +344,7 @@ pub(crate) fn refresh(snapshot: &mut StateSnapshot) {
         .clone()
         .filter(|status| Some(status.backend) == view.observed);
     view.observation_error = snapshot.backend.observation_error.clone();
+    view.kpm_observation_error = snapshot.backend.kpm_observation_error.clone();
     view.displayed = view
         .selected
         .clone()

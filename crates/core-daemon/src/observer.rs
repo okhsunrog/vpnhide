@@ -1,6 +1,6 @@
 //! Live native-backend observation. Autonomous diagnostics owns its fixtures;
 //! no foreign VPN presence or app split-tunnel membership is observed here.
-use crate::CoreState;
+use crate::{CoreState, backend::BackendObservation};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -8,8 +8,8 @@ async fn refresh_backend(state: &Arc<CoreState>) {
     use crate::{activation, backend};
     use std::path::Path;
     // Only this source owns live/installed evidence. Boot decision and delivery
-    // receipts remain with their owner. A busy KPM read becomes Unknown rather
-    // than preserving an old active identity as current forever.
+    // receipts remain with their owner. A busy KPM read leaves the kernel
+    // observation intact and cannot clear a previously confirmed conflict.
     refresh_zygisk_lifecycle(state).await;
     let before = state.publisher.current().snapshot;
     let ctl = activation::kmod_ctl_path_from_env()
@@ -50,20 +50,26 @@ async fn refresh_zygisk_lifecycle(state: &Arc<CoreState>) {
 
 fn merge_backend_observation(
     current: &mut vpnhide_core_rpc::NativeBackendStatus,
-    observed: vpnhide_core_rpc::NativeBackendStatus,
+    observation: BackendObservation,
 ) -> bool {
+    let mut observed = observation.status;
+    if current.runtime_conflict && !observation.conflict_excluded && !observed.runtime_conflict {
+        crate::backend::mark_runtime_conflict(&mut observed);
+    }
     let changed = current.active != observed.active
         || current.installed != observed.installed
         || current.observed_freshness != observed.observed_freshness
         || current.runtime_conflict != observed.runtime_conflict
         || current.runtime_status != observed.runtime_status
-        || current.observation_error != observed.observation_error;
+        || current.observation_error != observed.observation_error
+        || current.kpm_observation_error != observed.kpm_observation_error;
     current.active = observed.active;
     current.installed = observed.installed;
     current.observed_freshness = observed.observed_freshness;
     current.runtime_conflict = observed.runtime_conflict;
     current.runtime_status = observed.runtime_status;
     current.observation_error = observed.observation_error;
+    current.kpm_observation_error = observed.kpm_observation_error;
     changed
 }
 
@@ -111,17 +117,48 @@ mod tests {
             boot: Some(boot.clone()),
             ..Default::default()
         };
-        let observed = NativeBackendStatus {
-            installed: vec![NativeBackend::Kpm],
-            observed_freshness: ObservationFreshness::Unknown,
-            ..Default::default()
+        let observed = || BackendObservation {
+            status: NativeBackendStatus {
+                installed: vec![NativeBackend::Kpm],
+                observed_freshness: ObservationFreshness::Unknown,
+                ..Default::default()
+            },
+            conflict_excluded: false,
         };
-        assert!(merge_backend_observation(&mut current, observed.clone()));
+        assert!(merge_backend_observation(&mut current, observed()));
         assert_eq!(current.boot, Some(boot));
         assert_eq!(current.selected, Some(NativeBackend::Kpm));
         assert_eq!(current.applied, Some(NativeBackend::Kpm));
         assert_eq!(current.active, None);
         assert_eq!(current.observed_freshness, ObservationFreshness::Unknown);
-        assert!(!merge_backend_observation(&mut current, observed));
+        assert!(!merge_backend_observation(&mut current, observed()));
+    }
+
+    #[test]
+    fn a_confirmed_conflict_requires_positive_evidence_to_clear() {
+        use vpnhide_core_rpc::{NativeBackend, NativeBackendStatus, ObservationFreshness};
+        let mut current = NativeBackendStatus::default();
+        crate::backend::mark_runtime_conflict(&mut current);
+        let observed = |error, conflict_excluded| BackendObservation {
+            status: NativeBackendStatus {
+                active: Some(NativeBackend::Builtin),
+                observed_freshness: ObservationFreshness::Current,
+                kpm_observation_error: error,
+                ..Default::default()
+            },
+            conflict_excluded,
+        };
+        assert!(merge_backend_observation(
+            &mut current,
+            observed(Some("KPM unreadable".into()), false)
+        ));
+        assert!(current.runtime_conflict);
+        assert_eq!(current.active, None);
+        assert!(merge_backend_observation(
+            &mut current,
+            observed(None, true)
+        ));
+        assert!(!current.runtime_conflict);
+        assert_eq!(current.active, Some(NativeBackend::Builtin));
     }
 }

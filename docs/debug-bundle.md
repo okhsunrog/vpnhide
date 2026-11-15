@@ -115,6 +115,8 @@ jq '.autonomousDiagnostics.assessment | {required, proven, leaked, unverified,
 `nativeStatus` retains Core currentness/source identity and its typed model:
 selected implementation/provenance, attempts, delivery receipt, applied identity,
 observed runtime, required/installed/missing hooks, setup and filesystem state.
+When present, `model.kpmObservationError` records a KPM observation or status
+failure independently of the observed kernel runtime.
 These facts must stay distinct. Legacy module directories in `backends` are
 inventory evidence; bundled alternatives are not independently active modules.
 `activeBackend` is a Core-derived display projection, not an APK priority selector.

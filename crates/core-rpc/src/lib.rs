@@ -335,6 +335,9 @@ pub struct NativeBackendStatus {
     pub runtime_status: Option<NativeRuntimeStatus>,
     #[serde(default)]
     pub observation_error: Option<String>,
+    /// Trouble observing KPM can coexist with a current kernel status.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kpm_observation_error: Option<String>,
     /// Last backend selected by this core instance for an apply attempt.
     /// Distinct from [`Self::applied`]: selection/publication attempt ≠ confirmed apply.
     /// Zygisk file publication is not proof of per-process hooks.
@@ -1026,6 +1029,7 @@ mod tests {
                             runtime_conflict: false,
                             runtime_status: None,
                             observation_error: None,
+                            kpm_observation_error: Some("KPM inventory unavailable".into()),
                             observed_freshness: ObservationFreshness::Current,
                             selected: Some(NativeBackend::Zygisk),
                             applied: Some(NativeBackend::Builtin),

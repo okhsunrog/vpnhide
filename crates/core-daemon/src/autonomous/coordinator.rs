@@ -1,7 +1,6 @@
 //! One Core-owned bounded run. No network/VPN prerequisite, app-supplied root
 //! path, shell command, per-open restart, or inference from worker-owned PASS.
 use super::boot_time::{BootDeadline, BootInstant};
-use std::borrow::Cow;
 use std::fs;
 use std::io;
 use std::os::unix::fs::MetadataExt;
@@ -127,17 +126,30 @@ fn platform_identity() -> Option<String> {
     Some(hash(material))
 }
 fn context_digests(snapshot: &vpnhide_core_rpc::StateSnapshot) -> (String, String) {
-    let mut backend = Cow::Borrowed(&snapshot.backend);
+    let backend = &snapshot.backend;
     // Boot publication can populate `active` while the live observer has no
     // current evidence. Clearing that hint does not change the measured runtime.
-    if backend.observed_freshness != ObservationFreshness::Current && backend.active.is_some() {
-        backend.to_mut().active = None;
-    }
+    let active = (backend.observed_freshness == ObservationFreshness::Current)
+        .then_some(backend.active)
+        .flatten();
+    // KPM read errors are reported separately. They do not withdraw a current
+    // kernel observation. A confirmed conflict does affect attribution.
+    let runtime = (
+        backend.runtime_conflict,
+        backend.observed_freshness,
+        &backend.runtime_status,
+        &backend.observation_error,
+        backend.selected,
+        backend.applied,
+        active,
+        &backend.installed,
+        &backend.boot,
+    );
     (
         hash(serde_json::to_vec(&snapshot.config).expect("config codec")),
         hash(
             serde_json::to_vec(&(
-                backend.as_ref(),
+                runtime,
                 &snapshot.apply_evidence,
                 &snapshot.zygisk_revocation,
                 &snapshot.held_resources,
@@ -163,6 +175,19 @@ pub(crate) fn invalidate_published(snapshot: &mut vpnhide_core_rpc::StateSnapsho
             || run.fingerprint.runtime_sha256 != runtime;
         snapshot.autonomous_assessment = Some(run.assessment());
     }
+}
+
+fn publish_completion(state: &CoreState, mut run: DiagnosticRun) -> DiagnosticRun {
+    state.publisher.update(|snapshot| {
+        // An observer may have revoked this run while measurements were in
+        // flight, even if the context has returned to its original value.
+        run.stale |= snapshot
+            .autonomous_diagnostics
+            .as_ref()
+            .is_some_and(|published| published.session == run.session && published.stale);
+        snapshot.autonomous_diagnostics = Some(run.clone());
+    });
+    run
 }
 
 fn fingerprint(
@@ -314,6 +339,7 @@ impl Coordinator {
         if snapshot.startup_error.is_some()
             || snapshot.storage_fault.is_some()
             || snapshot.mutation_held
+            || snapshot.backend.runtime_conflict
             || !snapshot.operations_in_flight.is_empty()
             || snapshot.config.is_none()
             || snapshot.config.as_ref().is_some_and(|config| {
@@ -350,6 +376,11 @@ impl Coordinator {
             ports_fixture::recover(dir).map_err(|_| DiagnosticError::Busy)?;
         }
         let now = BootInstant::now().map_err(|_| DiagnosticError::Disabled)?;
+        let published_stale = snapshot
+            .autonomous_diagnostics
+            .as_ref()
+            .filter(|published| published.stale)
+            .map(|published| published.session);
         if let Some(last) = inner.last.as_ref() {
             if inner.active.is_some() {
                 return if last.fingerprint == fingerprint {
@@ -359,6 +390,8 @@ impl Coordinator {
                 };
             }
             if !force
+                && !last.stale
+                && published_stale != Some(last.session)
                 && last.fingerprint == fingerprint
                 && last.plan == plan
                 && inner.retry_at.is_none_or(|deadline| !deadline.expired(now))
@@ -370,10 +403,12 @@ impl Coordinator {
             }
         }
         if force
-            || inner
-                .last
-                .as_ref()
-                .is_none_or(|last| last.fingerprint != fingerprint || last.plan != plan)
+            || inner.last.as_ref().is_none_or(|last| {
+                last.stale
+                    || published_stale == Some(last.session)
+                    || last.fingerprint != fingerprint
+                    || last.plan != plan
+            })
         {
             inner.attempts = 0;
         }
@@ -553,7 +588,7 @@ impl Coordinator {
         if run.fingerprint != current {
             run.stale = true;
         }
-        let run = run.clone();
+        let run = publish_completion(&state, run.clone());
         if let Some(delay) = retry_delay(
             inner.attempts,
             transient,
@@ -572,9 +607,7 @@ impl Coordinator {
         if matches!(run.outcome, DiagnosticOutcome::Incomplete { .. }) {
             inner.last_completed = Some(run.clone());
         }
-        state
-            .publisher
-            .update(|s| s.autonomous_diagnostics = Some(run));
+        inner.last = Some(run);
         self.changed.notify_all();
         trace(debug, session, "run_done");
     }
@@ -1733,6 +1766,60 @@ mod tests {
 
         state.publisher.update(|s| s.backend.active = None);
         assert_ne!(fingerprint(&state, &state.snapshot()), current);
+    }
+
+    #[test]
+    fn kpm_observation_failure_keeps_builtin_context_but_conflict_blocks_admission() {
+        let state = state();
+        state.publisher.update(|s| {
+            s.backend.active = Some(NativeBackend::Builtin);
+            s.backend.observed_freshness = ObservationFreshness::Current;
+            s.backend.runtime_status = Some(vpnhide_core_rpc::NativeRuntimeStatus {
+                backend: NativeBackend::Builtin,
+                kernel_version: 1,
+                installed_hooks: 0x3ff,
+                status_error: 0,
+            });
+        });
+        let before = fingerprint(&state, &state.snapshot());
+        state.publisher.update(|s| {
+            s.backend.kpm_observation_error = Some("unrecognized KPM inventory ABI".into());
+        });
+        let snapshot = state.snapshot();
+        assert_eq!(fingerprint(&state, &snapshot), before);
+        let coordinator = Arc::new(Coordinator {
+            spawn: |_| Ok(()),
+            ..Default::default()
+        });
+        coordinator.configure(PathBuf::from("/nonexistent-app"));
+        let mut run = coordinator.request(state.clone(), true).unwrap();
+        state
+            .publisher
+            .update(|s| crate::backend::mark_runtime_conflict(&mut s.backend));
+        assert_ne!(fingerprint(&state, &state.snapshot()), before);
+        assert_eq!(
+            coordinator.request(state.clone(), true),
+            Err(DiagnosticError::Busy)
+        );
+
+        state.publisher.update(|s| s.backend = snapshot.backend);
+        assert_eq!(fingerprint(&state, &state.snapshot()), before);
+        run.outcome = DiagnosticOutcome::Infrastructure {
+            detail: "fixture finished".into(),
+            native: None,
+            cleanup_confirmed: Some(true),
+        };
+        let run = publish_completion(&state, run);
+        assert!(run.stale);
+        let session = run.session;
+        let mut inner = coordinator.inner.lock().unwrap();
+        inner.active = None;
+        inner.last = Some(run);
+        drop(inner);
+        assert_eq!(
+            coordinator.request(state, false).unwrap().session,
+            session + 1
+        );
     }
     #[test]
     fn assessment_is_core_owned_and_changes_atomically_with_its_source_run() {
