@@ -155,6 +155,8 @@ pub enum DiagnosticOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiagnosticRun {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_request_denial: Option<crate::LinkRequestDenial>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ports: Option<crate::ScopedPortsResult>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routes: Option<crate::ScopedRouteResult>,
@@ -268,6 +270,7 @@ mod tests {
     #[test]
     fn four_native_successes_never_replace_the_supported_contract() {
         let mut run = DiagnosticRun {
+            link_request_denial: None,
             ports: None,
             native_raw: Some(crate::assessment::tests::paired_receipt()),
             routes: None,

@@ -121,6 +121,7 @@ impl UpTun {
 }
 
 pub struct NativeCompletion {
+    pub link_request_denial: Option<vpnhide_diagnostic_model::LinkRequestDenial>,
     pub filesystem: vpnhide_diagnostic_model::ScopedFilesystemResult,
     pub sys_interfaces: vpnhide_diagnostic_model::ScopedSysInterfaceResult,
     pub proc_interfaces: vpnhide_diagnostic_model::ScopedProcInterfaceResult,
@@ -296,18 +297,19 @@ impl TunFixture {
         app_raw: Option<&NativeMeasurement>,
     ) -> NativeCompletion {
         let (root_end, cleanup) = self.measure_cleanup();
-        let result = vpnhide_diagnostic_model::evaluate_paired_native_fixture(
-            &self.spec,
-            [
-                &self.negative,
-                &self.root_start,
-                worker,
-                &root_end,
-                &cleanup,
-            ],
-            app_raw,
-        );
+        let samples = [
+            &self.negative,
+            &self.root_start,
+            worker,
+            &root_end,
+            &cleanup,
+        ];
+        let result =
+            vpnhide_diagnostic_model::evaluate_paired_native_fixture(&self.spec, samples, app_raw);
+        let link_request_denial =
+            vpnhide_diagnostic_model::evaluate_link_request_denial(&self.spec, samples, app_raw);
         NativeCompletion {
+            link_request_denial,
             filesystem: result.filesystem,
             sys_interfaces: result.sys_interfaces,
             proc_interfaces: result.proc_interfaces,
@@ -354,6 +356,7 @@ impl TunFixture {
             &cleanup,
         ];
         NativeCompletion {
+            link_request_denial: None,
             filesystem: vpnhide_diagnostic_model::evaluate_filesystem_fixture(
                 &self.spec,
                 measurements.map(|m| m.filesystem.as_ref()),

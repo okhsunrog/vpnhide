@@ -875,6 +875,10 @@ mod tests {
                 },
             ] {
                 let run = DiagnosticRun {
+                    link_request_denial: Some(vpnhide_diagnostic_model::LinkRequestDenial {
+                        raw_errno: 13,
+                        protected_errno: 13,
+                    }),
                     ports: Some(vpnhide_diagnostic_model::ScopedPortsResult {
                         proven: vpnhide_diagnostic_model::PortsVector::ALL.to_vec(),
                         ..Default::default()

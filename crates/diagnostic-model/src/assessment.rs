@@ -318,6 +318,12 @@ impl DiagnosticRun {
                 }
             }
         }
+        if self.link_request_denial.is_some()
+            && !proven.contains(&NetlinkLinks)
+            && !leaked.contains(&NetlinkLinks)
+        {
+            native_controls.push(ControlFailure::NetlinkLinkRequestDenied);
+        }
         proven.retain(|check| !leaked.contains(check));
         let unverified = required
             .iter()
@@ -366,6 +372,7 @@ pub(crate) mod tests {
     }
     fn run(native: ScopedNativeResult) -> DiagnosticRun {
         DiagnosticRun {
+            link_request_denial: None,
             ports: None,
             native_raw: Some(paired_receipt()),
             routes: None,

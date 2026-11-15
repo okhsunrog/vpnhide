@@ -203,8 +203,17 @@ pub(crate) fn dump_before(
             ),
         }
     };
+    if sent < 0 {
+        let failure = error();
+        return match (kind, failure) {
+            (DumpKind::Links, ProbeError::Errno(errno @ (libc::EACCES | libc::EPERM))) => {
+                Err(ProbeError::GetlinkSendDenied(errno))
+            }
+            (_, failure) => Err(failure),
+        };
+    }
     if sent != length as libc::c_long {
-        return Err(error());
+        return Err(ProbeError::Malformed);
     }
     let mut total = 0usize;
     for _ in 0..128 {

@@ -78,10 +78,22 @@ internal fun AutonomousDiagnosticRows(snapshot: AutonomousDiagnosticSnapshot) {
     val assessment = snapshot.assessment ?: return
     for (id in assessment.required) {
         val status =
-            when (id) {
-                in assessment.leaked -> R.string.diag_status_leak
-                in assessment.proven -> R.string.autonomous_verified
-                else -> R.string.dashboard_protection_not_verified
+            when {
+                id in assessment.leaked -> {
+                    R.string.diag_status_leak
+                }
+
+                id in assessment.proven -> {
+                    R.string.autonomous_verified
+                }
+
+                id == "netlink_links" && "netlink_link_request_denied" in assessment.nativeControls -> {
+                    R.string.autonomous_netlink_link_request_denied
+                }
+
+                else -> {
+                    R.string.dashboard_protection_not_verified
+                }
             }
         Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
             Text(stringResource(diagnosticVectorLabel(id)), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)

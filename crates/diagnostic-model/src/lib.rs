@@ -47,6 +47,7 @@ impl NativeReadActor {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProbeError {
     Errno(i32),
+    GetlinkSendDenied(i32),
     Timeout,
     Malformed,
     TooLarge,
@@ -258,6 +259,7 @@ pub enum ControlFailure {
     OrdinaryObjectsChanged,
     ProbeUnavailable,
     CleanupUnconfirmed,
+    NetlinkLinkRequestDenied,
 }
 
 /// Later observations qualify proof, never erase an earlier qualified leak.
@@ -727,5 +729,7 @@ mod tests {
 mod native_raw;
 pub use native_raw::*;
 
+mod link_access;
+pub use link_access::*;
 mod native_pair;
 pub use native_pair::*;

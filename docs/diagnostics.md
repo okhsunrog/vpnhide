@@ -222,8 +222,14 @@ Core creates the route pair before measuring the primary fixture's baseline
 and keeps it through the primary cleanup sample. This keeps the two route
 interfaces from changing the population measured by `SIOCGIFCONF`.
 Worker-side link enumeration, flags, MTU and socket binding qualify their
-RAW and protected controls independently. A denied `RTM_GETLINK` dump
-leaves that check unverified while the other observations can qualify.
+RAW and protected controls independently. Core records a distinct Android
+access restriction when the admitted worker receives a permission error at
+the `RTM_GETLINK` send in both phases and root sees the expected link and
+loopback controls before, during and after the fixture. The Dashboard
+shows the restriction and leaves the hiding check unverified. A socket-open
+error, a receive error or a missing RAW sample cannot establish the restriction.
+On a device that allows the request, the existing hiding and leak
+checks still use the returned links. APK/Core RPC42 carries the typed denial.
 
 The worker measures routes on the existing RAW/protected collector thread
 under one second of read budget per route observation. Its report contains
@@ -273,6 +279,20 @@ or in the existing isolated Linux oracles for kernel-only evidence. The
 earlier [KMOD proc-interface run](archive/2026-11-03-proc-interface-fixture-qualification.md)
 observed all four proc-interface leaks when the guest permitted those reads.
 [Android route netlink policy](https://android.googlesource.com/platform/system/sepolicy/+/android16-release/private/net.te)
+
+An independent Pixel probe retained the KernelSU SELinux domain, switched to
+the diagnostic app's UID and verified an empty effective capability set. In
+five runs the root dump saw the active TUN, and the targeted UID's allowed
+dump saw loopback with the test TUN filtered out. After cleanup both dumps
+saw loopback and fixture absence. This exercises the Builtin filter with a
+caller that can send GETLINK. The regular app's result records Android's
+access restriction.
+
+With RPC42, the same Pixel reported EACCES at the GETLINK send in both worker
+phases in all 22 runs. The final 20 consecutive current runs confirmed the
+same 17 protection groups. The Dashboard displayed the Android restriction
+for the link enumeration row. Both the saved config and the production Ports
+rules retained their pre-series checksums.
 
 On Linux with user/network namespaces and `/dev/net/tun`, run the fixture test
 from the repository root. It checks coexistence with the DOWN fixture, the

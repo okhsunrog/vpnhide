@@ -67,12 +67,14 @@ enum_map!(
     FixtureChanged,
     OrdinaryObjectsChanged,
     ProbeUnavailable,
-    CleanupUnconfirmed
+    CleanupUnconfirmed,
+    NetlinkLinkRequestDenied
 );
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum CoreProbeError {
     Errno { code: i32 },
+    GetlinkSendDenied { code: i32 },
     Timeout,
     Malformed,
     TooLarge,
@@ -82,6 +84,7 @@ impl From<model::ProbeError> for CoreProbeError {
     fn from(v: model::ProbeError) -> Self {
         match v {
             model::ProbeError::Errno(code) => Self::Errno { code },
+            model::ProbeError::GetlinkSendDenied(code) => Self::GetlinkSendDenied { code },
             model::ProbeError::Timeout => Self::Timeout,
             model::ProbeError::Malformed => Self::Malformed,
             model::ProbeError::TooLarge => Self::TooLarge,
@@ -93,6 +96,7 @@ impl From<CoreProbeError> for model::ProbeError {
     fn from(v: CoreProbeError) -> Self {
         match v {
             CoreProbeError::Errno { code } => Self::Errno(code),
+            CoreProbeError::GetlinkSendDenied { code } => Self::GetlinkSendDenied(code),
             CoreProbeError::Timeout => Self::Timeout,
             CoreProbeError::Malformed => Self::Malformed,
             CoreProbeError::TooLarge => Self::TooLarge,

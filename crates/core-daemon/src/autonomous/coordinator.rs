@@ -230,6 +230,7 @@ fn worker_identity(
     })
 }
 struct NativeEvidence {
+    link_request_denial: Option<LinkRequestDenial>,
     routes: ScopedRouteResult,
     filesystem: vpnhide_diagnostic_model::ScopedFilesystemResult,
     sys_interfaces: vpnhide_diagnostic_model::ScopedSysInterfaceResult,
@@ -239,6 +240,7 @@ struct NativeEvidence {
     binding: ScopedBindResult,
 }
 struct MeasurementFailure {
+    link_request_denial: Option<LinkRequestDenial>,
     routes: Option<ScopedRouteResult>,
     filesystem: Option<vpnhide_diagnostic_model::ScopedFilesystemResult>,
     sys_interfaces: Option<vpnhide_diagnostic_model::ScopedSysInterfaceResult>,
@@ -343,6 +345,7 @@ impl Coordinator {
         inner.retry_at = None;
         inner.next = inner.next.checked_add(1).ok_or(DiagnosticError::Expired)?;
         let run = DiagnosticRun {
+            link_request_denial: None,
             ports: None,
             native_raw: None,
             routes: None,
@@ -403,6 +406,7 @@ impl Coordinator {
         let result = match &worker_lease {
             Ok(_) => self.measure(&state, session),
             Err(detail) => Err(Box::new(MeasurementFailure {
+                link_request_denial: None,
                 routes: None,
                 filesystem: None,
                 sys_interfaces: None,
@@ -457,6 +461,7 @@ impl Coordinator {
         run.native_raw = raw_receipt;
         match result {
             Ok(evidence) => {
+                run.link_request_denial = evidence.link_request_denial;
                 run.record_routes(evidence.routes);
                 run.record_filesystem(evidence.filesystem);
                 run.record_sys_interfaces(evidence.sys_interfaces);
@@ -466,6 +471,7 @@ impl Coordinator {
                 run.record_binding(evidence.binding);
             }
             Err(failure) => {
+                run.link_request_denial = failure.link_request_denial;
                 run.routes = failure.routes;
                 run.filesystem = failure.filesystem;
                 run.sys_interfaces = failure.sys_interfaces;
@@ -525,6 +531,7 @@ impl Coordinator {
                 let unavailable = NativeMeasurement::unavailable(ProbeError::Unsupported);
                 let (_, route_cleaned) = self.finish_route_fixture(routes, &unavailable, None);
                 return Err(Box::new(MeasurementFailure {
+                    link_request_denial: None,
                     routes: None,
                     filesystem: None,
                     sys_interfaces: None,
@@ -668,6 +675,7 @@ impl Coordinator {
         let cleaned = native_clean && route_clean;
         match report {
             Ok(_) if cleaned => Ok(NativeEvidence {
+                link_request_denial: completion.link_request_denial,
                 routes,
                 filesystem: completion.filesystem,
                 sys_interfaces: completion.sys_interfaces,
@@ -677,6 +685,7 @@ impl Coordinator {
                 binding: completion.binding,
             }),
             Ok(_) => Err(Box::new(MeasurementFailure {
+                link_request_denial: completion.link_request_denial,
                 routes: Some(routes),
                 filesystem: Some(completion.filesystem),
                 sys_interfaces: Some(completion.sys_interfaces),
@@ -693,6 +702,7 @@ impl Coordinator {
                 cleanup_confirmed: Some(false),
             })),
             Err(detail) => Err(Box::new(MeasurementFailure {
+                link_request_denial: completion.link_request_denial,
                 routes: Some(routes),
                 filesystem: Some(completion.filesystem),
                 sys_interfaces: Some(completion.sys_interfaces),
@@ -1429,6 +1439,7 @@ mod tests {
         coordinator.configure(PathBuf::from("/nonexistent-app"));
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
+            link_request_denial: None,
             ports: None,
             native_raw: None,
             routes: None,
@@ -1463,6 +1474,7 @@ mod tests {
         let state = state();
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
+            link_request_denial: None,
             ports: None,
             native_raw: None,
             routes: None,
@@ -1503,6 +1515,7 @@ mod tests {
         let state = state();
         let snapshot = state.snapshot();
         let run = DiagnosticRun {
+            link_request_denial: None,
             ports: None,
             native_raw: None,
             routes: None,
