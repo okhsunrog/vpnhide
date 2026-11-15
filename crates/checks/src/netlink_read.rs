@@ -17,7 +17,7 @@ fn error() -> ProbeError {
     )
 }
 
-pub fn bound_socket(actor: NativeReadActor) -> Result<OwnedFd, ProbeError> {
+fn socket(actor: NativeReadActor) -> Result<OwnedFd, ProbeError> {
     let kind = libc::SOCK_RAW | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC;
     let raw = unsafe {
         match actor {
@@ -35,7 +35,11 @@ pub fn bound_socket(actor: NativeReadActor) -> Result<OwnedFd, ProbeError> {
     if raw < 0 {
         return Err(error());
     }
-    let fd = unsafe { OwnedFd::from_raw_fd(raw as i32) };
+    Ok(unsafe { OwnedFd::from_raw_fd(raw as i32) })
+}
+
+pub fn bound_socket(actor: NativeReadActor) -> Result<OwnedFd, ProbeError> {
+    let fd = socket(actor)?;
     let mut address: libc::sockaddr_nl = unsafe { zeroed() };
     address.nl_family = libc::AF_NETLINK as _;
     let pointer = (&address as *const libc::sockaddr_nl).cast::<libc::sockaddr>();
@@ -131,6 +135,8 @@ pub enum DumpKind {
     Addresses,
     RoutesIpv4,
     RoutesIpv6,
+    RulesIpv4,
+    RulesIpv6,
 }
 pub fn dump(
     kind: DumpKind,
@@ -154,7 +160,10 @@ pub(crate) fn dump_before(
     if Instant::now() >= deadline {
         return Err(ProbeError::Timeout);
     }
-    let fd = bound_socket(actor)?;
+    // Unicast dumps get an automatic local port on send. Android restricts
+    // explicit route-netlink bind for untrusted apps separately from read
+    // requests. The kernel still authorizes the actual request type.
+    let fd = socket(actor)?;
     let mut address: libc::sockaddr_nl = unsafe { zeroed() };
     address.nl_family = libc::AF_NETLINK as _;
     let (request_kind, payload_length, family) = match kind {
@@ -162,6 +171,8 @@ pub(crate) fn dump_before(
         DumpKind::Addresses => (22u16, 8, 0),
         DumpKind::RoutesIpv4 => (26u16, 12, libc::AF_INET as u8),
         DumpKind::RoutesIpv6 => (26u16, 12, libc::AF_INET6 as u8),
+        DumpKind::RulesIpv4 => (34u16, 12, libc::AF_INET as u8),
+        DumpKind::RulesIpv6 => (34u16, 12, libc::AF_INET6 as u8),
     };
     let mut request = vec![0u8; 16 + payload_length];
     let length = request.len();

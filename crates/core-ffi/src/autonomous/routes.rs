@@ -7,7 +7,9 @@ enum_map!(
     NetlinkIpv4,
     NetlinkIpv6,
     ProcIpv4,
-    ProcIpv6
+    ProcIpv6,
+    RuleIpv4,
+    RuleIpv6
 );
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -86,9 +88,61 @@ impl From<CoreObservedRoute> for model::ObservedRoute {
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CoreRuleUidRange {
+    pub first: u32,
+    pub last: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CoreObservedRule {
+    pub priority: Option<u32>,
+    pub goto: Option<u32>,
+    pub output_name: Option<String>,
+    pub uid_range: Option<CoreRuleUidRange>,
+    pub table: u32,
+    pub protocol: Option<u8>,
+    pub action: u8,
+    pub flags: u32,
+    pub additional_selectors: bool,
+}
+impl From<model::ObservedRule> for CoreObservedRule {
+    fn from(v: model::ObservedRule) -> Self {
+        Self {
+            priority: v.priority,
+            goto: v.goto,
+            output_name: v.output_name,
+            uid_range: v
+                .uid_range
+                .map(|[first, last]| CoreRuleUidRange { first, last }),
+            table: v.table,
+            protocol: v.protocol,
+            action: v.action,
+            flags: v.flags,
+            additional_selectors: v.additional_selectors,
+        }
+    }
+}
+impl From<CoreObservedRule> for model::ObservedRule {
+    fn from(v: CoreObservedRule) -> Self {
+        Self {
+            priority: v.priority,
+            goto: v.goto,
+            output_name: v.output_name,
+            uid_range: v.uid_range.map(|range| [range.first, range.last]),
+            table: v.table,
+            protocol: v.protocol,
+            action: v.action,
+            flags: v.flags,
+            additional_selectors: v.additional_selectors,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreRouteObservation {
     pub check: CoreRouteCheck,
     pub routes: Vec<CoreObservedRoute>,
+    pub rules: Vec<CoreObservedRule>,
     pub error: Option<CoreProbeError>,
 }
 impl From<model::RouteObservation> for CoreRouteObservation {
@@ -96,6 +150,7 @@ impl From<model::RouteObservation> for CoreRouteObservation {
         Self {
             check: v.check.into(),
             routes: v.routes.into_iter().map(Into::into).collect(),
+            rules: v.rules.into_iter().map(Into::into).collect(),
             error: v.error.map(Into::into),
         }
     }
@@ -105,6 +160,7 @@ impl From<CoreRouteObservation> for model::RouteObservation {
         Self {
             check: v.check.into(),
             routes: v.routes.into_iter().map(Into::into).collect(),
+            rules: v.rules.into_iter().map(Into::into).collect(),
             error: v.error.map(Into::into),
         }
     }
@@ -153,6 +209,7 @@ pub struct CoreRouteFixtureSpec {
     pub session: u64,
     pub vpn: CoreFixtureInterface,
     pub ordinary: CoreFixtureInterface,
+    pub rule_uid: Option<u32>,
 }
 impl From<model::RouteFixtureSpec> for CoreRouteFixtureSpec {
     fn from(v: model::RouteFixtureSpec) -> Self {
@@ -160,6 +217,7 @@ impl From<model::RouteFixtureSpec> for CoreRouteFixtureSpec {
             session: v.session,
             vpn: v.vpn.into(),
             ordinary: v.ordinary.into(),
+            rule_uid: v.rule_uid,
         }
     }
 }
@@ -169,6 +227,7 @@ impl From<CoreRouteFixtureSpec> for model::RouteFixtureSpec {
             session: v.session,
             vpn: v.vpn.into(),
             ordinary: v.ordinary.into(),
+            rule_uid: v.rule_uid,
         }
     }
 }

@@ -8,7 +8,9 @@ import kotlinx.serialization.json.jsonObject
 
 internal enum class FixturePhase { PREPARED, RAW, PROTECTED, REVOKED }
 
-internal enum class FixtureTransaction { NETWORKS, CAPABILITIES, PROPERTIES, LEGACY_TYPE, LEGACY_ENUM, OTHER }
+internal enum class FixtureTransaction { NETWORKS, CAPABILITIES, PROPERTIES, LEGACY_TYPE, LEGACY_ENUM, ACTIVE_NETWORK, OTHER }
+
+internal const val FRAMEWORK_FIXTURE_PROTOCOL = 3
 
 internal data class FixtureWorker(
     val uid: Int,
@@ -67,7 +69,7 @@ internal fun parseFixtureAuthority(bytes: String): FixtureAuthority? =
         root.exact(
             "version session core_epoch boot_id nonce expected_hook_sha256 worker_uid worker_pid worker_start_ticks expires_boot_ms generation phase fixture",
         )
-        require(root.number("version") == 2L)
+        require(root.number("version") == FRAMEWORK_FIXTURE_PROTOCOL.toLong())
         val phase = FixturePhase.valueOf(root.text("phase").uppercase())
         require(root.number("generation") == phase.ordinal.toLong())
         val fixture = root.getValue("fixture").jsonObject
@@ -144,6 +146,14 @@ internal data class FixtureEvidenceSnapshot(
     val legacyEnumerationCalls: Int,
     val legacyTypeStartedNs: Long,
     val legacyEnumerationStartedNs: Long,
+    val activeNetwork: FixtureActiveNetworkEvidence,
+)
+
+internal data class FixtureActiveNetworkEvidence(
+    val calls: Int = 0,
+    val startedNs: Long = 0,
+    val originalHandle: Long? = null,
+    val replaced: Boolean = false,
 )
 
 /** Repeated invocations publish their own baseline even when a flag already exists. */
@@ -158,6 +168,8 @@ internal class FixtureEvidenceLedger {
         private set
     var legacyBaseline: FixtureLegacyBaseline? = null
         private set
+    var activeNetwork = FixtureActiveNetworkEvidence()
+        private set
 
     fun snapshot() =
         FixtureEvidenceSnapshot(
@@ -167,6 +179,7 @@ internal class FixtureEvidenceLedger {
             legacyEnumerationCalls,
             legacyTypeStartedNs,
             legacyEnumerationStartedNs,
+            activeNetwork,
         )
 
     fun begin(
@@ -175,6 +188,10 @@ internal class FixtureEvidenceLedger {
     ) {
         require(bootNanos > 0)
         when (kind) {
+            FixtureTransaction.ACTIVE_NETWORK -> {
+                activeNetwork = FixtureActiveNetworkEvidence((activeNetwork.calls + 1).coerceAtMost(2), bootNanos)
+            }
+
             FixtureTransaction.LEGACY_TYPE -> {
                 legacyTypeStartedNs = bootNanos
                 legacyTypeCalls = (legacyTypeCalls + 1).coerceAtMost(2)
@@ -191,6 +208,16 @@ internal class FixtureEvidenceLedger {
             else -> {
                 return
             }
+        }
+    }
+
+    fun recordActiveSource(originalHandle: Long) {
+        activeNetwork = activeNetwork.copy(originalHandle = originalHandle)
+    }
+
+    fun recordActiveReplacement() {
+        if (activeNetwork.originalHandle != null) {
+            activeNetwork = activeNetwork.copy(replaced = true)
         }
     }
 

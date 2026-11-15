@@ -11,6 +11,8 @@ mod assessment;
 pub use assessment::*;
 mod route;
 pub use route::*;
+mod rule;
+pub use rule::*;
 mod proc_interfaces;
 pub use proc_interfaces::*;
 mod sys_interfaces;
@@ -18,6 +20,7 @@ pub use sys_interfaces::*;
 mod filesystem;
 pub use filesystem::*;
 pub mod framework;
+pub mod framework_default;
 pub mod framework_legacy;
 mod run;
 pub use run::*;
@@ -330,6 +333,34 @@ fn positive(spec: &NativeFixtureSpec, observation: &NativeMeasurement) -> bool {
         && ordinary_preserved(spec, observation)
 }
 
+fn native_raw_positive(
+    spec: &NativeFixtureSpec,
+    raw: &NativeMeasurement,
+    check: NativeCheck,
+) -> bool {
+    match check {
+        NativeCheck::IoctlFlags => {
+            raw.flags.value() == Some(&spec.flags)
+                && raw.ordinary_flags.value() == Some(&spec.ordinary.flags)
+        }
+        NativeCheck::IoctlMtu => {
+            raw.mtu.value() == Some(&spec.mtu)
+                && raw.ordinary_mtu.value() == Some(&spec.ordinary.mtu)
+        }
+        NativeCheck::Getifaddrs | NativeCheck::NetlinkGetlink => {
+            let sample = if check == NativeCheck::Getifaddrs {
+                &raw.ifaddrs
+            } else {
+                &raw.links
+            };
+            sample.value().is_some_and(|entries| {
+                entries.iter().any(|e| e.matches(&spec.interface))
+                    && entries.iter().any(|e| e.matches(&spec.ordinary.interface))
+            })
+        }
+    }
+}
+
 pub fn cleanup_confirmed(spec: &NativeFixtureSpec, observation: &NativeMeasurement) -> bool {
     spec.valid()
         && observation.bounded()
@@ -382,29 +413,35 @@ pub fn evaluate_native_fixture(
             incomplete.push(reason);
         }
     };
-    if !cleanup_confirmed(spec, cleanup) {
+    let cleaned = cleanup_confirmed(spec, cleanup);
+    if !cleaned {
         problem(ControlFailure::CleanupUnconfirmed);
     }
-    if worker.ordinary_flags.value().is_none()
-        || worker.ordinary_mtu.value().is_none()
-        || worker.ifaddrs.value().is_none()
-        || worker.links.value().is_none()
-    {
-        problem(ControlFailure::ProbeUnavailable);
-    } else if !ordinary_preserved(spec, worker) {
-        problem(ControlFailure::OrdinaryObjectsChanged);
-    }
+    let mut proven = Vec::new();
     let mut leaked = Vec::new();
-    for (check, sample) in [
-        (NativeCheck::IoctlFlags, &worker.flags),
-        (NativeCheck::IoctlMtu, &worker.mtu),
+    for (check, sample, ordinary, expected) in [
+        (
+            NativeCheck::IoctlFlags,
+            &worker.flags,
+            &worker.ordinary_flags,
+            spec.ordinary.flags,
+        ),
+        (
+            NativeCheck::IoctlMtu,
+            &worker.mtu,
+            &worker.ordinary_mtu,
+            spec.ordinary.mtu,
+        ),
     ] {
-        if !absent_value(sample) {
-            if sample.value().is_some() {
-                leaked.push(check);
-            } else {
-                problem(ControlFailure::ProbeUnavailable);
-            }
+        if sample.value().is_some() {
+            leaked.push(check);
+        }
+        match ordinary.value() {
+            None => problem(ControlFailure::ProbeUnavailable),
+            Some(value) if *value != expected => problem(ControlFailure::OrdinaryObjectsChanged),
+            Some(_) if absent_value(sample) => proven.push(check),
+            Some(_) if sample.value().is_none() => problem(ControlFailure::ProbeUnavailable),
+            Some(_) => (),
         }
     }
     for (check, sample) in [
@@ -412,14 +449,18 @@ pub fn evaluate_native_fixture(
         (NativeCheck::NetlinkGetlink, &worker.links),
     ] {
         if let Some(entries) = sample.value() {
-            if entries
+            let exposed = entries
                 .iter()
-                .any(|e| e.name == spec.interface.name || e.index == Some(spec.interface.index))
-            {
+                .any(|e| e.name == spec.interface.name || e.index == Some(spec.interface.index));
+            if exposed {
                 leaked.push(check);
             }
             if entries.iter().any(|e| e.index.is_none()) {
                 problem(ControlFailure::ProbeUnavailable);
+            } else if !entries.iter().any(|e| e.matches(&spec.ordinary.interface)) {
+                problem(ControlFailure::OrdinaryObjectsChanged);
+            } else if !exposed {
+                proven.push(check);
             }
         } else {
             problem(ControlFailure::ProbeUnavailable);
@@ -445,17 +486,13 @@ pub fn evaluate_native_fixture(
             incomplete,
         };
     }
+    if cleaned && !proven.is_empty() {
+        return ScopedNativeResult::Proven { checks: proven };
+    }
     if let Some(reason) = incomplete.first() {
         return unknown(*reason);
     }
-    ScopedNativeResult::Proven {
-        checks: vec![
-            NativeCheck::IoctlFlags,
-            NativeCheck::IoctlMtu,
-            NativeCheck::Getifaddrs,
-            NativeCheck::NetlinkGetlink,
-        ],
-    }
+    unknown(ControlFailure::ProbeUnavailable)
 }
 
 #[cfg(test)]
@@ -554,18 +591,24 @@ mod tests {
         denied.flags = Sample::Error(ProbeError::Errno(13));
         assert_eq!(
             evaluate_native_fixture(&spec, &absent, &positive, &denied, &positive, &absent),
-            ScopedNativeResult::Unverified {
-                observed_leaks: Vec::new(),
-                reason: ControlFailure::ProbeUnavailable
+            ScopedNativeResult::Proven {
+                checks: vec![
+                    NativeCheck::IoctlMtu,
+                    NativeCheck::Getifaddrs,
+                    NativeCheck::NetlinkGetlink
+                ]
             }
         );
         let mut broken = absent.clone();
         broken.ordinary_mtu = Sample::Value(0);
         assert_eq!(
             evaluate_native_fixture(&spec, &absent, &positive, &broken, &positive, &absent),
-            ScopedNativeResult::Unverified {
-                observed_leaks: Vec::new(),
-                reason: ControlFailure::OrdinaryObjectsChanged
+            ScopedNativeResult::Proven {
+                checks: vec![
+                    NativeCheck::IoctlFlags,
+                    NativeCheck::Getifaddrs,
+                    NativeCheck::NetlinkGetlink
+                ]
             }
         );
         let mut changed = positive.clone();
@@ -633,7 +676,7 @@ mod tests {
     }
 
     #[test]
-    fn malformed_identity_lists_and_unknown_indices_never_produce_proof() {
+    fn malformed_identity_lists_and_unknown_indices_cannot_qualify_the_affected_check() {
         let (spec, absent, positive) = (spec(), measure(false), measure(true));
         for index in [0, u32::MAX] {
             let mut bad = absent.clone();
@@ -665,9 +708,12 @@ mod tests {
         }
         assert_eq!(
             evaluate_native_fixture(&spec, &absent, &positive, &unknown, &positive, &absent),
-            ScopedNativeResult::Unverified {
-                reason: ControlFailure::ProbeUnavailable,
-                observed_leaks: vec![]
+            ScopedNativeResult::Proven {
+                checks: vec![
+                    NativeCheck::IoctlFlags,
+                    NativeCheck::IoctlMtu,
+                    NativeCheck::NetlinkGetlink
+                ]
             }
         );
     }

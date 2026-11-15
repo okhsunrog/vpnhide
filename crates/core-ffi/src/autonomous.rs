@@ -553,7 +553,7 @@ pub fn observe_diagnostic_fixture(
     }
     let route_observation = routes
         .as_ref()
-        .map(|spec| vpnhide_checks::route::observe().scoped(spec));
+        .map(|spec| vpnhide_checks::route::observe_worker(spec.rule_uid.is_some()).scoped(spec));
     let mut observation = vpnhide_checks::fixture::observe(&task.interface_name);
     observation.routes = route_observation;
     Ok(bound_route_worker_report(observation).into())
@@ -620,6 +620,7 @@ mod tests {
     #[test]
     fn issued_route_task_survives_the_typed_worker_boundary() {
         let spec = model::RouteFixtureSpec {
+            rule_uid: Some(10_000),
             session: 1,
             vpn: model::InterfaceId {
                 name: "tun000000004001".into(),
@@ -636,10 +637,34 @@ mod tests {
             interface_name: "tun000000000001".into(),
             routes: Some(spec.clone().into()),
         };
-        let measured =
+        let mut measured =
             model::NativeMeasurement::from(observe_diagnostic_fixture(task.clone()).unwrap());
         assert!(measured.bounded_for_routes(Some(&spec)));
-        assert!(measured.routes.is_some());
+        let rule_view = measured
+            .routes
+            .as_mut()
+            .unwrap()
+            .observations
+            .iter_mut()
+            .find(|view| view.check.surface.rule())
+            .expect("worker collected a rule view");
+        let role = model::RuleRole::WorkerUid;
+        rule_view.rules.push(model::ObservedRule {
+            priority: Some(role.priority(&spec)),
+            goto: None,
+            output_name: None,
+            uid_range: Some([10_000; 2]),
+            table: role.table(),
+            protocol: Some(model::DIAGNOSTIC_RULE_PROTOCOL),
+            action: model::DIAGNOSTIC_RULE_ACTION,
+            flags: 0,
+            additional_selectors: false,
+        });
+        assert_eq!(
+            model::NativeMeasurement::from(CoreNativeMeasurement::from(measured.clone())),
+            measured
+        );
+        assert!(measured.bounded_for_routes(Some(&spec)));
         assert!(!measured.bounded_for_routes(None));
         let mut wrong = task;
         wrong.routes.as_mut().unwrap().session = 2;

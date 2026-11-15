@@ -3,12 +3,14 @@
 //! through the old DOWN contract. Nonpersistent TUN descriptor lifetime owns all
 //! addresses/routes; no default route, global rule, packet IO or delete-by-name.
 mod identity;
+mod rules;
 use super::native_fixture::{TunFixture, UpTun};
 pub use identity::RouteCleanupPlan;
 use std::{
     io,
     mem::zeroed,
     os::fd::AsRawFd,
+    path::Path,
     time::{Duration, Instant},
 };
 use vpnhide_diagnostic_model::{
@@ -62,9 +64,11 @@ fn request(spec: &RouteFixtureSpec, ordinary: bool, ipv6: bool, sequence: u32) -
     bytes
 }
 fn install(spec: &RouteFixtureSpec, ordinary: bool, ipv6: bool) -> io::Result<()> {
+    mutate(&request(spec, ordinary, ipv6, 1), "route")
+}
+fn mutate(bytes: &[u8], operation: &str) -> io::Result<()> {
     let fd = vpnhide_checks::netlink_read::bound_socket(NativeReadActor::Syscall)
-        .map_err(|e| invalid(format!("route socket: {e:?}")))?;
-    let bytes = request(spec, ordinary, ipv6, 1);
+        .map_err(|e| invalid(format!("{operation} socket: {e:?}")))?;
     let mut target: libc::sockaddr_nl = unsafe { zeroed() };
     target.nl_family = libc::AF_NETLINK as _;
     let sent = unsafe {
@@ -85,9 +89,11 @@ fn install(spec: &RouteFixtureSpec, ordinary: bool, ipv6: bool) -> io::Result<()
         NativeReadActor::Syscall,
         Instant::now() + Duration::from_secs(1),
     )
-    .map_err(|e| invalid(format!("route ACK read: {e:?}")))?;
-    vpnhide_checks::netlink_wire::acknowledgement(&reply, &bytes)
-        .map_err(|e| invalid(format!("route ACK: {e:?}")))
+    .map_err(|e| invalid(format!("{operation} ACK read: {e:?}")))?;
+    vpnhide_checks::netlink_wire::acknowledgement(&reply, bytes).map_err(|e| match e {
+        ProbeError::Errno(errno) => io::Error::from_raw_os_error(errno),
+        error => invalid(format!("{operation} ACK: {error:?}")),
+    })
 }
 fn absent(interface: &InterfaceId) -> bool {
     if !matches!(
@@ -109,11 +115,13 @@ pub struct RouteFixture {
     pub start: RouteMeasurement,
     owners: Option<[UpTun; 2]>,
     cleanup_plan: RouteCleanupPlan,
+    rules: Option<rules::RuleFixture>,
 }
 pub struct RouteCleanup {
     pub end: RouteMeasurement,
     pub cleanup: RouteMeasurement,
     pub interfaces_clean: bool,
+    pub rules_clean: bool,
 }
 #[derive(Debug)]
 struct InjectedSetupFault;
@@ -137,6 +145,7 @@ pub struct RouteCompletion {
     pub end: RouteMeasurement,
     pub cleanup: RouteMeasurement,
     pub interfaces_clean: bool,
+    pub rules_clean: bool,
     pub result: ScopedRouteResult,
 }
 impl RouteFixture {
@@ -150,6 +159,7 @@ impl RouteFixture {
     fn create_tracked(session: u64, fault: bool) -> Result<Self, RouteCreateFailure> {
         let placeholder = |name| InterfaceId { name, index: 0 };
         let mut spec = RouteFixtureSpec {
+            rule_uid: None,
             session,
             vpn: placeholder(String::new()),
             ordinary: placeholder(String::new()),
@@ -271,10 +281,28 @@ impl RouteFixture {
             start,
             owners: Some([vpn, ordinary]),
             cleanup_plan: plan.clone(),
+            rules: None,
         })
     }
     pub fn cleanup_plan(&self) -> RouteCleanupPlan {
         self.cleanup_plan.clone()
+    }
+    pub fn recover_rules(path: &Path) -> io::Result<()> {
+        rules::recover(path)
+    }
+
+    pub fn enable_rules(&mut self, path: &Path, uid: u32) -> io::Result<()> {
+        let mut spec = self.spec.clone();
+        spec.rule_uid = Some(uid);
+        if self.rules.is_some() || !spec.valid() || !self.cleanup_plan.current() {
+            return Err(invalid("invalid policy-rule fixture"));
+        }
+        let (owner, negative, start) = rules::RuleFixture::create(path, &spec)?;
+        self.negative.observations.extend(negative.observations);
+        self.start.observations.extend(start.observations);
+        self.rules = Some(owner);
+        self.spec = spec;
+        Ok(())
     }
     #[cfg(feature = "fixture-oracle")]
     pub fn duplicate_for_oracle(&self, ordinary: bool) -> io::Result<std::fs::File> {
@@ -284,17 +312,31 @@ impl RouteFixture {
         .duplicate_for_oracle()
     }
     fn measure_cleanup(&mut self) -> RouteCleanup {
-        let end = if self.cleanup_plan.current() {
+        let mut end = if self.cleanup_plan.current() {
             vpnhide_checks::route::observe()
         } else {
             identity::unavailable()
         };
+        let rules = self.rules.take().map(|owner| {
+            end.observations
+                .extend(vpnhide_checks::rule::observe().observations);
+            owner.finish()
+        });
         drop(self.owners.take());
-        let (cleanup, interfaces_clean) = observe_cleanup(&self.cleanup_plan);
+        let (mut cleanup, interfaces_clean) = observe_cleanup(&self.cleanup_plan);
+        let rules_clean = match rules {
+            Some(Ok(sample)) => {
+                cleanup.observations.extend(sample.observations);
+                true
+            }
+            Some(Err(_)) => false,
+            None => true,
+        };
         RouteCleanup {
             end,
             cleanup,
             interfaces_clean,
+            rules_clean,
         }
     }
     #[cfg(feature = "fixture-oracle")]
@@ -311,6 +353,7 @@ impl RouteFixture {
             end,
             cleanup,
             interfaces_clean,
+            rules_clean,
         } = self.measure_cleanup();
         let measurements = [
             Some(&self.negative),
@@ -337,6 +380,7 @@ impl RouteFixture {
             end,
             cleanup,
             interfaces_clean,
+            rules_clean,
             result,
         }
     }
@@ -348,6 +392,7 @@ mod tests {
     #[test]
     fn route_write_request_is_exclusive_host_only_and_binds_the_owned_output_index() {
         let spec = RouteFixtureSpec {
+            rule_uid: None,
             session: 1,
             vpn: InterfaceId {
                 name: "tun000000004001".into(),

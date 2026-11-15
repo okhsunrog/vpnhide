@@ -1,5 +1,5 @@
 {
-    "schema": 12,
+    "schema": 13,
     "generatedAt": "2026-08-22T12:00:00+0300",
     "captureKind": "debug",
     "app": {
@@ -147,7 +147,8 @@
             "filesystem": null,
             "routes": {
                 "provenChecks": [
-                    "libc.netlink_ipv4"
+                    "libc.netlink_ipv4",
+                    "libc.rule_ipv4"
                 ],
                 "leakedChecks": [
                     "syscall.proc_ipv6"
@@ -358,7 +359,8 @@
                     "filesystem": null,
                     "routes": {
                         "provenChecks": [
-                            "libc.netlink_ipv4"
+                            "libc.netlink_ipv4",
+                            "libc.rule_ipv4"
                         ],
                         "leakedChecks": [
                             "syscall.proc_ipv6"
@@ -493,7 +495,8 @@
                 "filesystem": null,
                 "routes": {
                     "provenChecks": [
-                        "libc.netlink_ipv4"
+                        "libc.netlink_ipv4",
+                        "libc.rule_ipv4"
                     ],
                     "leakedChecks": [
                         "syscall.proc_ipv6"

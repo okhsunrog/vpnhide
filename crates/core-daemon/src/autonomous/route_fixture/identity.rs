@@ -10,28 +10,38 @@ pub struct Environment {
     namespace: (u64, u64),
 }
 impl Environment {
-    fn observe_in(root: &Path) -> io::Result<Self> {
-        let boot_id = crate::native_boot::read_boot_id(&root.join("sys/kernel/random/boot_id"));
-        if boot_id.len() != 36
-            || !boot_id.bytes().enumerate().all(|(i, b)| {
+    pub(super) fn valid(&self) -> bool {
+        self.boot_id.len() == 36
+            && self.boot_id.bytes().enumerate().all(|(i, b)| {
                 if [8, 13, 18, 23].contains(&i) {
                     b == b'-'
                 } else {
                     b.is_ascii_hexdigit()
                 }
             })
-            || !boot_id.bytes().any(|b| b.is_ascii_hexdigit() && b != b'0')
-        {
-            return Err(io::Error::other("boot identity unavailable"));
-        }
+            && self
+                .boot_id
+                .bytes()
+                .any(|b| b.is_ascii_hexdigit() && b != b'0')
+            && self.namespace.0 != 0
+            && self.namespace.1 != 0
+    }
+    pub(super) fn same_boot(&self, other: &Self) -> bool {
+        self.boot_id == other.boot_id
+    }
+    fn observe_in(root: &Path) -> io::Result<Self> {
+        let boot_id = crate::native_boot::read_boot_id(&root.join("sys/kernel/random/boot_id"));
         let meta = std::fs::metadata(root.join("thread-self/ns/net"))?;
-        if meta.dev() == 0 || meta.ino() == 0 {
-            return Err(io::Error::other("network namespace identity unavailable"));
-        }
-        Ok(Self {
+        let identity = Self {
             boot_id,
             namespace: (meta.dev(), meta.ino()),
-        })
+        };
+        if !identity.valid() {
+            return Err(io::Error::other(
+                "boot or network namespace identity unavailable",
+            ));
+        }
+        Ok(identity)
     }
     pub(super) fn observe() -> io::Result<Self> {
         Self::observe_in(Path::new("/proc"))

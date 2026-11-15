@@ -61,13 +61,13 @@ pub struct LegacyCallWindow {
     pub finished_boot_ns: u64,
 }
 impl LegacyCallWindow {
-    fn bounded(&self) -> bool {
+    pub(crate) fn bounded(&self) -> bool {
         self.started_boot_ns > 0
             && self.started_boot_ns < self.finished_boot_ns
             && self.finished_boot_ns <= i64::MAX as u64
             && self.finished_boot_ns - self.started_boot_ns <= 25_000_000_000
     }
-    fn contains(&self, observed: u64) -> bool {
+    pub(crate) fn contains(&self, observed: u64) -> bool {
         self.bounded() && self.started_boot_ns <= observed && observed <= self.finished_boot_ns
     }
 }

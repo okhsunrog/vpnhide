@@ -2,10 +2,11 @@
 //! both phases; only the production hiding path may change protected observations.
 use crate::{
     ProbeError, Sample,
+    framework_default::{ActiveNetworkObservation, ActiveNetworkSource},
     framework_legacy::{LegacyObservation, LegacySourceEvidence},
 };
 use serde::{Deserialize, Serialize};
-pub const FRAMEWORK_PROTOCOL: u32 = 2;
+pub const FRAMEWORK_PROTOCOL: u32 = 3;
 pub const FRAMEWORK_LEASE_MS: u64 = 25_000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -148,12 +149,14 @@ pub struct FrameworkAcknowledgement {
     pub networks_filtered: bool,
     pub capabilities_filtered: bool,
     pub properties_filtered: bool,
+    pub active_network: ActiveNetworkSource,
     pub legacy: LegacySourceEvidence,
 }
 impl FrameworkAcknowledgement {
     pub fn matches(&self, envelope: &FrameworkEnvelope) -> bool {
         envelope.valid()
             && self.legacy.bounded()
+            && self.active_network.bounded()
             && self.version == FRAMEWORK_PROTOCOL
             && self.session == envelope.session
             && self.core_epoch == envelope.core_epoch
@@ -188,11 +191,13 @@ pub struct FrameworkObservation {
     pub vpn_interface: Sample<Option<String>>,
     pub ordinary_capabilities_sha256: Sample<String>,
     pub ordinary_properties_sha256: Sample<String>,
+    pub active_network: ActiveNetworkObservation,
     pub legacy: LegacyObservation,
 }
 impl FrameworkObservation {
     pub fn bounded(&self) -> bool {
         self.legacy.bounded()
+            && self.active_network.bounded()
             && self.networks.value().is_none_or(|v| {
                 v.len() <= 256
                     && v.iter().all(|&h| h != 0)
@@ -221,6 +226,7 @@ impl FrameworkObservation {
             vpn_interface: Sample::Error(ProbeError::Unsupported),
             ordinary_capabilities_sha256: Sample::Error(ProbeError::Unsupported),
             ordinary_properties_sha256: Sample::Error(ProbeError::Unsupported),
+            active_network: ActiveNetworkObservation::unavailable(),
             legacy: LegacyObservation::unavailable(),
         }
     }
@@ -234,6 +240,7 @@ pub enum FrameworkCheck {
     LinkProperties,
     LegacyTypeVpn,
     LegacyEnumeration,
+    DefaultNetwork,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -353,10 +360,12 @@ fn observed_leaks(phases: &[FrameworkPhaseEvidence]) -> Vec<FrameworkCheck> {
         leaked.push(FrameworkCheck::LinkProperties);
     }
     leaked.extend(crate::framework_legacy::observed_leaks(raw, protected));
+    if crate::framework_default::leaked(raw, protected) {
+        leaked.push(FrameworkCheck::DefaultNetwork);
+    }
     leaked
 }
-/// Synchronous handle and legacy type/enumeration scenarios cannot discharge
-/// default/request/callback or PendingIntent requirements. Leaks survive cleanup failure.
+/// Scoped synchronous scenarios and legacy queries. Leaks survive cleanup failure.
 pub fn evaluate_framework(
     phases: &[FrameworkPhaseEvidence],
     cleanup: bool,
@@ -522,6 +531,11 @@ pub fn evaluate_framework(
     result.proven.extend(legacy.proven);
     result.leaked.extend(legacy.leaked);
     result.controls.extend(legacy.controls);
+    match crate::framework_default::evaluate([prepared, raw, protected, revoked]) {
+        Ok(()) if cleanup => result.proven.push(V::DefaultNetwork),
+        Ok(()) => {}
+        Err(failure) => result.controls.push(failure),
+    }
     result.leaked.sort();
     result.leaked.dedup();
     result.controls.sort();
@@ -597,6 +611,7 @@ mod tests {
                     networks_filtered: protected,
                     capabilities_filtered: protected,
                     properties_filtered: protected,
+                    active_network: ActiveNetworkSource::default(),
                     legacy: LegacySourceEvidence::default(),
                 },
                 observation: FrameworkObservation {
@@ -613,6 +628,7 @@ mod tests {
                     vpn_interface: Sample::Value(raw.then(|| base.fixture.interface_name.clone())),
                     ordinary_capabilities_sha256: Sample::Value("1".repeat(64)),
                     ordinary_properties_sha256: Sample::Value("2".repeat(64)),
+                    active_network: ActiveNetworkObservation::unavailable(),
                     legacy: LegacyObservation::unavailable(),
                 },
             }
@@ -676,12 +692,75 @@ mod tests {
         }
         phases
     }
+
+    #[test]
+    fn active_network_needs_a_real_cover_and_preserves_observed_leaks() {
+        use crate::framework_legacy::LegacyCallWindow;
+
+        let make = || {
+            let mut evidence = legacy_phases();
+            for (index, phase) in evidence.iter_mut().enumerate() {
+                let active = matches!(index, 1 | 2);
+                let raw = index == 1;
+                phase.acknowledgement.active_network = ActiveNetworkSource {
+                    calls: 1,
+                    started_boot_ns: 3_100,
+                    original_handle: active.then_some(11),
+                    replaced: index == 2,
+                };
+                phase.observation.active_network = ActiveNetworkObservation {
+                    window: Some(LegacyCallWindow {
+                        started_boot_ns: 3_000,
+                        finished_boot_ns: 3_200,
+                    }),
+                    handle: Sample::Value(Some(if raw { 101 } else { 11 })),
+                    transport_vpn: Sample::Value(raw),
+                };
+            }
+            evidence
+        };
+        let check = FrameworkCheck::DefaultNetwork;
+        let evidence = make();
+        let passes = evaluate_framework(&evidence, true);
+        assert!(passes.proven.contains(&check));
+        assert!(
+            crate::assessment::framework_checks(&passes.proven, true)
+                .contains(&crate::RequiredCheck::FrameworkDefaultNetwork)
+        );
+        assert!(!evaluate_framework(&evidence, false).proven.contains(&check));
+        for change in 0..8 {
+            let mut evidence = make();
+            match change {
+                0 => evidence[1].acknowledgement.active_network.original_handle = None,
+                1 => evidence[2].acknowledgement.active_network.replaced = false,
+                2 => evidence[2].acknowledgement.active_network.calls = 2,
+                3 => evidence[2].acknowledgement.active_network.started_boot_ns = 2_999,
+                4 => evidence[2].observation.active_network.handle = Sample::Value(None),
+                5 => evidence[2].observation.active_network.handle = Sample::Value(Some(102)),
+                6 => evidence[2].observation.active_network.transport_vpn = Sample::Value(true),
+                _ => evidence[3].observation.active_network.handle = Sample::Value(Some(12)),
+            }
+            let result = evaluate_framework(&evidence, true);
+            assert!(!result.proven.contains(&check), "change={change}");
+            assert!(result.proven.contains(&FrameworkCheck::Networks));
+        }
+        let mut leaked = make();
+        leaked[2].acknowledgement.active_network.replaced = false;
+        leaked[2].observation.active_network.handle =
+            leaked[1].observation.active_network.handle.clone();
+        let fails = evaluate_framework(&leaked[..3], false);
+        assert!(fails.leaked.contains(&check));
+        assert!(!fails.proven.contains(&check));
+    }
     #[test]
     fn legacy_apis_require_both_production_paths_and_per_invocation_preservation() {
         use FrameworkCheck as V;
         let phases = legacy_phases();
         let result = evaluate_framework(&phases, true);
-        assert!(result.controls.is_empty());
+        assert_eq!(
+            result.controls,
+            vec![FrameworkControlFailure::MissingNegativeControl]
+        );
         assert_eq!(
             result.proven,
             vec![

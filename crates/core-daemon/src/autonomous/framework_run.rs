@@ -120,7 +120,7 @@ impl FrameworkRun {
                 return Err(DiagnosticError::StaleSession);
             }
             self.failure_context = "read system_server acknowledgement";
-            if let Some(ack) = store.acknowledgement(&self.envelope).map_err(failed)? {
+            if let Some(ack) = store.poll_acknowledgement(&self.envelope).map_err(failed)? {
                 self.failure_context = "verify system_server identity";
                 if !validate(&ack) {
                     return Err(DiagnosticError::WrongProcess);
@@ -355,6 +355,7 @@ mod tests {
             networks_filtered: false,
             capabilities_filtered: false,
             properties_filtered: false,
+            active_network: Default::default(),
             legacy: Default::default(),
         }
     }

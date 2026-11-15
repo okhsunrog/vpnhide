@@ -31,6 +31,7 @@ fn merge<T: Copy + PartialEq>(
     }
     proven.retain(|v| !leaked.contains(v));
 }
+#[cfg(test)]
 fn leaks(value: &ScopedNativeResult) -> &[NativeCheck] {
     match value {
         ScopedNativeResult::Proven { .. } => &[],
@@ -38,55 +39,22 @@ fn leaks(value: &ScopedNativeResult) -> &[NativeCheck] {
         ScopedNativeResult::Unverified { observed_leaks, .. } => observed_leaks,
     }
 }
-fn controls(value: &ScopedNativeResult) -> Vec<ControlFailure> {
-    match value {
-        ScopedNativeResult::Proven { .. } => vec![],
-        ScopedNativeResult::Leaked { incomplete, .. } => incomplete.clone(),
-        ScopedNativeResult::Unverified { reason, .. } => vec![*reason],
-    }
-}
-fn native_merge(root: ScopedNativeResult, app: ScopedNativeResult) -> ScopedNativeResult {
-    match root {
-        ScopedNativeResult::Proven { checks } => match app {
-            ScopedNativeResult::Proven { checks: app_checks } => ScopedNativeResult::Proven {
-                checks: checks
-                    .into_iter()
-                    .filter(|c| app_checks.contains(c))
-                    .collect(),
-            },
-            other => other,
-        },
-        ScopedNativeResult::Leaked {
-            mut checks,
-            mut incomplete,
-        } => {
-            for check in leaks(&app) {
-                if !checks.contains(check) {
-                    checks.push(*check);
-                }
-            }
-            for reason in controls(&app) {
-                if !incomplete.contains(&reason) {
-                    incomplete.push(reason);
-                }
-            }
-            ScopedNativeResult::Leaked { checks, incomplete }
-        }
-        ScopedNativeResult::Unverified {
-            reason,
-            mut observed_leaks,
-        } => {
-            for check in leaks(&app) {
-                if !observed_leaks.contains(check) {
-                    observed_leaks.push(*check);
-                }
-            }
-            ScopedNativeResult::Unverified {
-                reason,
-                observed_leaks,
-            }
+fn qualify_native_raw(
+    mut result: ScopedNativeResult,
+    spec: &NativeFixtureSpec,
+    raw: &NativeMeasurement,
+) -> ScopedNativeResult {
+    if let ScopedNativeResult::Proven { checks } = &mut result {
+        let bounded = raw.bounded();
+        checks.retain(|check| bounded && crate::native_raw_positive(spec, raw, *check));
+        if checks.is_empty() {
+            return ScopedNativeResult::Unverified {
+                reason: ControlFailure::MissingPositiveControl,
+                observed_leaks: Vec::new(),
+            };
         }
     }
+    result
 }
 /// `app_raw` is supplied only after Core correlates the active interval and
 /// confirms revocation. The app cannot label its own observation protected/RAW.
@@ -99,9 +67,10 @@ pub fn evaluate_paired_native_fixture(
     let raw = app_raw.unwrap_or(&unavailable);
     let [negative, root_start, worker, root_end, cleanup] = samples;
     let app_samples = [negative, raw, worker, root_end, cleanup];
-    let native = native_merge(
+    let native = qualify_native_raw(
         evaluate_native_fixture(spec, negative, root_start, worker, root_end, cleanup),
-        evaluate_native_fixture(spec, negative, raw, worker, root_end, cleanup),
+        spec,
+        raw,
     );
     let mut addresses = evaluate_native_address_fixture(spec, samples);
     let app_addresses = evaluate_native_address_fixture(spec, app_samples);

@@ -311,7 +311,7 @@ private fun sampleAutonomousRun() =
             sampleFrameworkAttribution(),
         routes =
             dev.okhsunrog.vpnhide.diagnostics.AutonomousNativeReadInfo(
-                provenChecks = listOf("libc.netlink_ipv4"),
+                provenChecks = listOf("libc.netlink_ipv4", "libc.rule_ipv4"),
                 leakedChecks = listOf("syscall.proc_ipv6"),
                 controls = listOf("probe_unavailable"),
             ),

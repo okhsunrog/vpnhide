@@ -1,7 +1,7 @@
 # Reading a VPN Hide debug bundle
 
 Start with `state.json` inside the exported ZIP. This guide describes the current
-schema12, paired APK/Core RPC35 and diagnostic contract10. Historical captures use
+schema13, paired APK/Core RPC37 and diagnostic contract11. Historical captures use
 [the versioned reference](archive/2026-11-03-debug-bundle-legacy-reference.md).
 Current exports do not require a foreign VPN or split-tunnel membership, and
 collecting a file does not admit a diagnostic run.
@@ -46,6 +46,7 @@ wire versions are separate boundaries.
 
 | Schema | Shipped in | What changed |
 |---|---|---|
+| 13 | main (unreleased) | `run.routes` also carries the `rule_ipv4` and `rule_ipv6` subchecks. Scoped policy-rule rows can appear in `run.nativeRaw`. |
 | 12 | main (unreleased) | `run.routes` records per-actor netlink and proc IPv4/IPv6 route proof, leaks and control failures. `run.nativeRaw` can also carry scoped route observations. |
 | 11 | main (unreleased) | Logcat duration now includes suspend using CLOCK_BOOTTIME. `clock_unavailable` is a distinct auto-stop reason; its duration can be the last measured lower bound. Field names remain stable. |
 | 10 | main (unreleased) | `run.filesystem` preserves eighteen separate libc/direct-syscall stat/access/open-directory checks for sysfs and both proc-sys families, plus matching RAW observations. Denied/unsupported lookups remain unverified; late control failures retain qualified leaks. Directory enumeration remains separate. |

@@ -32,6 +32,7 @@ sample!(CoreBooleanSample, bool);
 sample!(CoreHandlesSample, Vec<u64>);
 sample!(CoreTextSample, String);
 sample!(CoreOptionalTextSample, Option<String>);
+sample!(CoreOptionalHandleSample, Option<u64>);
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreLegacyCallWindow {
     pub started_boot_ns: u64,
@@ -137,11 +138,18 @@ pub struct CoreFrameworkObservation {
     pub vpn_interface: CoreOptionalTextSample,
     pub ordinary_capabilities_sha256: CoreTextSample,
     pub ordinary_properties_sha256: CoreTextSample,
+    pub active_network: CoreActiveNetworkObservation,
     pub legacy_type_window: Option<CoreLegacyCallWindow>,
     pub legacy_enumeration_window: Option<CoreLegacyCallWindow>,
     pub legacy_type: CoreLegacyInfoSample,
     pub legacy_enumeration: CoreLegacyInfosSample,
     pub legacy_ordinary: CoreLegacyOrdinarySample,
+}
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CoreActiveNetworkObservation {
+    pub window: Option<CoreLegacyCallWindow>,
+    pub handle: CoreOptionalHandleSample,
+    pub transport_vpn: CoreBooleanSample,
 }
 impl From<CoreFrameworkObservation> for model::FrameworkObservation {
     fn from(v: CoreFrameworkObservation) -> Self {
@@ -153,6 +161,11 @@ impl From<CoreFrameworkObservation> for model::FrameworkObservation {
             vpn_interface: v.vpn_interface.into(),
             ordinary_capabilities_sha256: v.ordinary_capabilities_sha256.into(),
             ordinary_properties_sha256: v.ordinary_properties_sha256.into(),
+            active_network: vpnhide_diagnostic_model::framework_default::ActiveNetworkObservation {
+                window: v.active_network.window.map(Into::into),
+                handle: v.active_network.handle.into(),
+                transport_vpn: v.active_network.transport_vpn.into(),
+            },
             legacy: vpnhide_diagnostic_model::framework_legacy::LegacyObservation {
                 type_window: v.legacy_type_window.map(Into::into),
                 enumeration_window: v.legacy_enumeration_window.map(Into::into),
@@ -187,7 +200,8 @@ simple_enum!(
     Capabilities,
     LinkProperties,
     LegacyTypeVpn,
-    LegacyEnumeration
+    LegacyEnumeration,
+    DefaultNetwork
 );
 simple_enum!(
     CoreFrameworkControlFailure,
@@ -293,6 +307,13 @@ mod tests {
     #[test]
     fn typed_worker_samples_keep_null_distinct_from_error_and_preserve_bounds() {
         let value = CoreFrameworkObservation {
+            active_network: CoreActiveNetworkObservation {
+                window: None,
+                handle: CoreOptionalHandleSample::Value { value: None },
+                transport_vpn: CoreBooleanSample::Error {
+                    error: CoreProbeError::Unsupported,
+                },
+            },
             legacy_type_window: None,
             legacy_enumeration_window: None,
             legacy_type: CoreLegacyInfoSample::Value { value: None },

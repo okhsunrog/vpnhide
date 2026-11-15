@@ -31,17 +31,22 @@ internal class FrameworkFixtureChannel {
             val path = "$FRAMEWORK_DIRECTORY/$FRAMEWORK_AUTHORITY_FILE"
             val fd = Os.open(path, OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or OsConstants.O_NOFOLLOW or OsConstants.O_NONBLOCK, 0)
             val bytes =
-                FileInputStream(fd).use { stream ->
-                    val before = Os.fstat(fd)
-                    require(OsConstants.S_ISREG(before.st_mode) && before.st_uid == 0 && before.st_nlink == 1L)
-                    require(before.st_mode and 18 == 0 && before.st_size in 1..4096)
-                    val bytes = stream.readBytesBounded()
-                    val after = Os.fstat(fd)
-                    val linked = Os.lstat(path)
-                    require(before.st_dev == after.st_dev && before.st_ino == after.st_ino && before.st_size == after.st_size)
-                    require(before.st_mtime == after.st_mtime && before.st_ctime == after.st_ctime)
-                    require(before.st_dev == linked.st_dev && before.st_ino == linked.st_ino && before.st_uid == linked.st_uid)
-                    bytes
+                try {
+                    FileInputStream(fd).use { stream ->
+                        val before = Os.fstat(fd)
+                        require(OsConstants.S_ISREG(before.st_mode) && before.st_uid == 0 && before.st_nlink == 1L)
+                        require(before.st_mode and 18 == 0 && before.st_size in 1..4096)
+                        val bytes = stream.readBytesBounded()
+                        val after = Os.fstat(fd)
+                        val linked = Os.lstat(path)
+                        require(before.st_dev == after.st_dev && before.st_ino == after.st_ino && before.st_size == after.st_size)
+                        require(before.st_mtime == after.st_mtime && before.st_ctime == after.st_ctime)
+                        require(before.st_dev == linked.st_dev && before.st_ino == linked.st_ino && before.st_uid == linked.st_uid)
+                        bytes
+                    }
+                } finally {
+                    // Android's stream constructors borrow an existing descriptor.
+                    Os.close(fd)
                 }
             requireNotNull(parseFixtureAuthority(bytes.decodeToString(throwOnInvalidSequence = true))).also {
                 require(it.boot == boot && it.hookHash == BuildConfig.HOOK_SOURCE_SHA256)
@@ -78,10 +83,14 @@ internal class FrameworkFixtureChannel {
                 416,
             )
         try {
-            FileOutputStream(fd).use {
-                it.write(json)
-                it.flush()
-                it.fd.sync()
+            try {
+                FileOutputStream(fd).use {
+                    it.write(json)
+                    it.flush()
+                    it.fd.sync()
+                }
+            } finally {
+                Os.close(fd)
             }
             check(read() == authority) { "fixture authority changed" }
             Os.rename(temporary, "$FRAMEWORK_DIRECTORY/$FRAMEWORK_ACK_FILE")
@@ -126,6 +135,14 @@ internal class FrameworkFixtureChannel {
             )
         }
 
+    private fun encodeActiveNetwork(evidence: FixtureActiveNetworkEvidence) =
+        buildJsonObject {
+            put("calls", evidence.calls)
+            put("started_boot_ns", evidence.startedNs)
+            put("original_handle", evidence.originalHandle)
+            put("replaced", evidence.replaced)
+        }
+
     private fun encode(
         authority: FixtureAuthority,
         objects: FrameworkFixtureObjects,
@@ -133,7 +150,7 @@ internal class FrameworkFixtureChannel {
     ): ByteArray =
         buildJsonObject {
             val flags = evidence.flags
-            put("version", 2)
+            put("version", FRAMEWORK_FIXTURE_PROTOCOL)
             put("session", authority.session)
             put("core_epoch", authority.epoch)
             put("nonce", authority.nonce)
@@ -166,6 +183,7 @@ internal class FrameworkFixtureChannel {
                 },
             )
             put("legacy", encodeLegacy(evidence))
+            put("active_network", encodeActiveNetwork(evidence.activeNetwork))
             for (name in listOf(
                 "networks_source",
                 "capabilities_source",

@@ -238,7 +238,21 @@ fn proc_rows(
     Ok(())
 }
 pub fn observe() -> RouteMeasurement {
+    observe_before(Instant::now() + Duration::from_secs(1))
+}
+
+pub fn observe_worker(with_rules: bool) -> RouteMeasurement {
     let deadline = Instant::now() + Duration::from_secs(1);
+    let mut sample = observe_before(deadline);
+    if with_rules {
+        sample
+            .observations
+            .extend(crate::rule::observe_before(deadline).observations);
+    }
+    sample
+}
+
+fn observe_before(deadline: Instant) -> RouteMeasurement {
     RouteMeasurement {
         observations: RouteCheck::required()
             .into_iter()
@@ -269,10 +283,12 @@ pub fn observe() -> RouteMeasurement {
                         let error = proc_rows(&read.bytes, check.surface, &mut rows).err();
                         (rows, read.error.or(error))
                     }
+                    RouteSurface::RuleIpv4 | RouteSurface::RuleIpv6 => unreachable!(),
                 };
                 RouteObservation {
                     check,
                     routes,
+                    rules: Vec::new(),
                     error,
                 }
             })

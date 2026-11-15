@@ -21,6 +21,12 @@ pub(super) struct FrameworkStore {
 fn invalid(message: impl ToString) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.to_string())
 }
+fn replaced() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::WouldBlock,
+        "framework channel file was replaced",
+    )
+}
 fn identity(m: &fs::Metadata) -> (u64, u64, u64, u32, u32, i64, i64, i64, i64) {
     (
         m.dev(),
@@ -67,25 +73,47 @@ impl FrameworkStore {
     }
     fn read<T: DeserializeOwned>(&self, name: &str, owner: u32) -> io::Result<Option<T>> {
         self.revalidate()?;
-        let mut file = match crate::payloads::open_beneath(&self.directory, name) {
+        let file = match crate::payloads::open_beneath(&self.directory, name) {
             Ok(file) => file,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e),
         };
+        self.read_opened(file, name, owner)
+    }
+    fn read_opened<T: DeserializeOwned>(
+        &self,
+        mut file: File,
+        name: &str,
+        owner: u32,
+    ) -> io::Result<Option<T>> {
         let before = file.metadata()?;
         if before.uid() != owner
-            || before.nlink() != 1
+            || before.nlink() > 1
             || before.mode() & 0o022 != 0
             || before.len() == 0
             || before.len() > MAX_BYTES
         {
             return Err(invalid("framework channel ownership/type/size is invalid"));
         }
+        if before.nlink() == 0 {
+            return Err(replaced());
+        }
         let mut bytes = Vec::new();
         (&mut file).take(MAX_BYTES + 1).read_to_end(&mut bytes)?;
+        let after = file.metadata()?;
+        let named = fs::symlink_metadata(self.pinned().join(name)).map_err(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                replaced()
+            } else {
+                error
+            }
+        })?;
+        if (before.dev(), before.ino()) != (named.dev(), named.ino()) {
+            return Err(replaced());
+        }
         if bytes.len() as u64 > MAX_BYTES
-            || identity(&before) != identity(&file.metadata()?)
-            || identity(&before) != identity(&fs::symlink_metadata(self.pinned().join(name))?)
+            || identity(&before) != identity(&after)
+            || identity(&before) != identity(&named)
         {
             return Err(invalid("framework channel changed during read"));
         }
@@ -98,6 +126,17 @@ impl FrameworkStore {
             return Err(invalid("invalid framework authority"));
         }
         Ok(value)
+    }
+    pub(super) fn poll_acknowledgement(
+        &self,
+        expected: &FrameworkEnvelope,
+    ) -> io::Result<Option<FrameworkAcknowledgement>> {
+        match self.acknowledgement(expected) {
+            // system_server publishes each phase by renaming a complete ACK.
+            // Retry the new name under the phase deadline, never use the old inode.
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(None),
+            result => result,
+        }
     }
     pub(super) fn acknowledgement(
         &self,
@@ -195,6 +234,34 @@ mod tests {
     fn store(root: &Path) -> FrameworkStore {
         let owner = unsafe { libc::geteuid() };
         FrameworkStore::open(root, owner, owner).unwrap()
+    }
+    #[test]
+    fn atomic_ack_replacement_invalidates_the_open_inode_but_not_the_channel() {
+        let root = tempfile::tempdir().unwrap();
+        let store = store(root.path());
+        let path = root.path().join(ACK_FILE);
+        fs::write(&path, b"1").unwrap();
+        let opened = crate::payloads::open_beneath(&store.directory, ACK_FILE).unwrap();
+
+        let mut staged = tempfile::NamedTempFile::new_in(root.path()).unwrap();
+        staged.write_all(b"2").unwrap();
+        staged.persist(&path).unwrap();
+
+        assert_eq!(
+            store
+                .read_opened::<u8>(opened, ACK_FILE, store.ack_owner)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::WouldBlock,
+        );
+        assert_eq!(
+            store.read::<u8>(ACK_FILE, store.ack_owner).unwrap(),
+            Some(2)
+        );
+        assert_eq!(
+            store.poll_acknowledgement(&envelope()).unwrap_err().kind(),
+            io::ErrorKind::InvalidData,
+        );
     }
     #[test]
     fn publication_is_exact_idempotent_and_recovery_revokes_only_a_known_orphan() {

@@ -76,6 +76,9 @@ pub(crate) fn framework_checks(
             FrameworkCheck::LinkProperties => {
                 result.insert(RequiredCheck::FrameworkLinkProperties);
             }
+            FrameworkCheck::DefaultNetwork => {
+                result.insert(RequiredCheck::FrameworkDefaultNetwork);
+            }
             FrameworkCheck::LegacyTypeVpn | FrameworkCheck::LegacyEnumeration => {
                 if !require_both_legacy
                     || [
@@ -240,19 +243,25 @@ impl DiagnosticRun {
             }
         }
         if let Some(routes) = &self.routes {
-            for (group, netlink) in [(NetlinkRoutes, true), (ProcRoutes, false)] {
+            let group_of = |check: &crate::RouteCheck| {
+                if check.surface.rule() {
+                    NetlinkRules
+                } else if check.surface.netlink() {
+                    NetlinkRoutes
+                } else {
+                    ProcRoutes
+                }
+            };
+            for group in [NetlinkRoutes, ProcRoutes, NetlinkRules] {
                 if crate::RouteCheck::required()
-                    .iter()
-                    .filter(|check| check.surface.netlink() == netlink)
-                    .all(|check| routes.proven.contains(check))
+                    .into_iter()
+                    .chain(crate::RouteCheck::rules())
+                    .filter(|check| group_of(check) == group)
+                    .all(|check| routes.proven.contains(&check))
                 {
                     proven.insert(group);
                 }
-                if routes
-                    .leaked
-                    .iter()
-                    .any(|check| check.surface.netlink() == netlink)
-                {
+                if routes.leaked.iter().any(|check| group_of(check) == group) {
                     leaked.insert(group);
                 }
             }
@@ -385,6 +394,14 @@ pub(crate) mod tests {
                 .contains(&RequiredCheck::NetlinkRoutes)
         );
         evidence.proven = netlink;
+        evidence.proven.extend(crate::RouteCheck::rules().skip(1));
+        run.record_routes(evidence.clone());
+        assert!(
+            run.assessment()
+                .unverified
+                .contains(&RequiredCheck::NetlinkRules)
+        );
+        evidence.proven.extend(crate::RouteCheck::rules().take(1));
         run.record_routes(evidence);
         assert!(
             run.assessment()
@@ -394,7 +411,7 @@ pub(crate) mod tests {
         assert!(run.assessment().leaked.contains(&RequiredCheck::ProcRoutes));
         assert!(
             run.assessment()
-                .unverified
+                .proven
                 .contains(&RequiredCheck::NetlinkRules)
         );
         run.native_raw = None;

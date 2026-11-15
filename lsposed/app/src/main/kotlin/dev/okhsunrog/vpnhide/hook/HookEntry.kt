@@ -1243,18 +1243,17 @@ class HookEntry : IXposedHookLoadPackage {
         val cs = param.thisObject ?: return
         if (!isVpnNetwork(cs, network)) return
         val replacement = coverNetworkFor(cs, effectiveCallerUid())
+        param.result = replacement
+        frameworkFixture.activeNetworkReplaced(network)
+        LsposedStats.record(effectiveCallerUid(), HookIds.Hook.LSPOSED_CONNECTIVITY_NETWORK)
         if (replacement == null) {
             // No cover resolves — e.g. a background/blocked uid whose every network
             // is blocked by the per-uid firewall. A uid with no VPN would see no
             // active network at all in that state, so report none rather than
             // leaving the VPN handle as the active network.
-            param.result = null
-            LsposedStats.record(effectiveCallerUid(), HookIds.Hook.LSPOSED_CONNECTIVITY_NETWORK)
             HookLog.i("VpnHide: nulled active VPN Network handle for uid=${effectiveCallerUid()}; no cover resolved")
             return
         }
-        param.result = replacement
-        LsposedStats.record(effectiveCallerUid(), HookIds.Hook.LSPOSED_CONNECTIVITY_NETWORK)
         HookLog.i("VpnHide: replaced active VPN Network handle for uid=${effectiveCallerUid()}")
     }
 

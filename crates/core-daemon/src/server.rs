@@ -1922,6 +1922,11 @@ impl CoreState {
     pub fn configure_autonomous_diagnostics(&self, app_dir: PathBuf) {
         self.diagnostics.configure(app_dir);
     }
+    pub(crate) fn diagnostic_rule_dir(&self) -> Option<&std::path::Path> {
+        self.journal_path
+            .as_deref()
+            .and_then(std::path::Path::parent)
+    }
     pub fn start_autonomous_diagnostics(self: &Arc<Self>) {
         self.diagnostics.monitor(self);
     }

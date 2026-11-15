@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{NativeFixtureSpec, NativeMeasurement, ScopedNativeResult};
 
-pub const DIAGNOSTIC_CONTRACT: u32 = 10;
+pub const DIAGNOSTIC_CONTRACT: u32 = 11;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

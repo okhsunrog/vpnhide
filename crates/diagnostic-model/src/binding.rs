@@ -124,10 +124,7 @@ pub fn evaluate_bind_fixture(
             problem(&mut result, ControlFailure::MissingNegativeControl);
             continue;
         }
-        if !super::positive(spec, root_start)
-            || !s.bound_to(&spec.interface.name)
-            || !so.bound_to("lo")
-        {
+        if !s.bound_to(&spec.interface.name) || !so.bound_to("lo") {
             problem(&mut result, ControlFailure::MissingPositiveControl);
             continue;
         }
@@ -190,6 +187,7 @@ pub fn evaluate_bind_fixture(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::NativeCheck;
     use crate::{
         InterfaceId, ObservedInterface, OrdinaryControl, ScopedNativeResult,
         evaluate_native_fixture,
@@ -330,6 +328,32 @@ mod tests {
             &observation(false),
         );
         assert!(matches!(result, ScopedNativeResult::Proven { checks } if checks.len() == 4));
+    }
+
+    #[test]
+    fn denied_getlink_does_not_discard_successful_raw_socket_binding() {
+        let negative = observation(false);
+        let root = observation(true);
+        let mut raw = root.clone();
+        let mut protected = negative.clone();
+        raw.links = Sample::Error(ProbeError::Errno(13));
+        protected.links = raw.links.clone();
+        let result = crate::evaluate_paired_native_fixture(
+            &spec(),
+            [&negative, &root, &protected, &root, &negative],
+            Some(&raw),
+        );
+        assert!(result.binding.complete());
+        assert_eq!(
+            result.native,
+            ScopedNativeResult::Proven {
+                checks: vec![
+                    NativeCheck::IoctlFlags,
+                    NativeCheck::IoctlMtu,
+                    NativeCheck::Getifaddrs
+                ],
+            }
+        );
     }
     #[test]
     fn cleanup_or_fixture_change_preserves_independently_observed_bind_leaks() {

@@ -3,6 +3,7 @@ package dev.okhsunrog.vpnhide.diagnostics
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.NetworkInfo
 import android.os.Parcel
 import android.os.Parcelable
@@ -10,6 +11,7 @@ import android.os.SystemClock
 import dev.okhsunrog.vpnhide.BuildConfig
 import dev.okhsunrog.vpnhide.legacyInfoFields
 import dev.okhsunrog.vpnhide.legacyOrdinaryInfo
+import uniffi.vpnhide_core_ffi.CoreActiveNetworkObservation
 import uniffi.vpnhide_core_ffi.CoreBooleanSample
 import uniffi.vpnhide_core_ffi.CoreDiagnosticWorkerTask
 import uniffi.vpnhide_core_ffi.CoreFrameworkObservation
@@ -22,6 +24,7 @@ import uniffi.vpnhide_core_ffi.CoreLegacyInfosSample
 import uniffi.vpnhide_core_ffi.CoreLegacyNetworkInfo
 import uniffi.vpnhide_core_ffi.CoreLegacyOrdinary
 import uniffi.vpnhide_core_ffi.CoreLegacyOrdinarySample
+import uniffi.vpnhide_core_ffi.CoreOptionalHandleSample
 import uniffi.vpnhide_core_ffi.CoreOptionalTextSample
 import uniffi.vpnhide_core_ffi.CoreProbeError
 import uniffi.vpnhide_core_ffi.CoreSession
@@ -67,11 +70,30 @@ private fun observeFramework(
         properties.fold({ CoreOptionalTextSample.Value(it?.interfaceName) }, { CoreOptionalTextSample.Error(CoreProbeError.Unsupported) }),
         ordinaryCapabilities.fold({ CoreTextSample.Value(it) }, { CoreTextSample.Error(CoreProbeError.Unsupported) }),
         ordinaryProperties.fold({ CoreTextSample.Value(it) }, { CoreTextSample.Error(CoreProbeError.Unsupported) }),
+        observeActiveNetwork(manager),
         legacy.typeWindow,
         legacy.enumerationWindow,
         legacy.type,
         legacy.enumeration,
         legacy.ordinary,
+    )
+}
+
+private fun observeActiveNetwork(manager: ConnectivityManager): CoreActiveNetworkObservation {
+    val start = SystemClock.elapsedRealtimeNanos()
+    val active = runCatching { manager.activeNetwork }
+    val finish = SystemClock.elapsedRealtimeNanos()
+    val vpnTransport =
+        active.mapCatching {
+            val capabilities = requireNotNull(manager.getNetworkCapabilities(requireNotNull(it)))
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+        }
+    return CoreActiveNetworkObservation(
+        CoreLegacyCallWindow(start.toULong(), finish.toULong()),
+        active.fold({ CoreOptionalHandleSample.Value(it?.networkHandle?.toULong()) }, {
+            CoreOptionalHandleSample.Error(CoreProbeError.Unsupported)
+        }),
+        vpnTransport.fold({ CoreBooleanSample.Value(it) }, { CoreBooleanSample.Error(CoreProbeError.Unsupported) }),
     )
 }
 

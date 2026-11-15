@@ -1,6 +1,6 @@
 # Core architecture
 
-Current implementation, app/core RPC35 and journal21 (reads1–20). Backend policy
+Current implementation, app/core RPC37 and journal21 (reads1–20). Backend policy
 implementation and publication of verified changes are approved under
 [RFC0005](rfcs/0005-unified-backend-lifecycle-policy.md); remaining flows and device
 gates are tracked separately. Kernel control-v2 / telemetry-v1 is unchanged.
@@ -475,7 +475,7 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-The current paired APK/Core contract is RPC35; journal21 reads schemas1–20. These
+The current paired APK/Core contract is RPC37; journal21 reads schemas1–20. These
 versions are independent of kernel control2/telemetry1 and do not require a
 compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
 publication and sampled current/stale/unattributed process consumption are separate
@@ -563,6 +563,14 @@ This implements more scenarios but does not establish Android device acceptance,
 callback/default/active-network coverage or complete loaded-game generations.
 Private journal11 (reads1–10) and kernel control2/telemetry1 are unchanged.
 
+RPC37 adds active-network observations to framework protocol version3. The
+worker calls the public `ConnectivityManager.getActiveNetwork()` API. The
+authorized source hook captures the ordinary reply before injecting the
+fixture VPN. Core checks that the production replacement returns the same
+ordinary network and binds the source acknowledgement to the worker's Binder
+call window. Missing active-network evidence leaves the other framework
+scenarios independently verifiable.
+
 
 ## Native read projection and removed routing gate (RPC21)
 
@@ -576,7 +584,7 @@ Zygisk authorization cannot claim global process coverage.
 The foreign-VPN observer, UID-in-tunnel probe and routing RPC/FFI field are removed.
 Dashboard/diagnostics consume Core evidence independently of external VPN presence
 and split-tunnel membership. Real fixture/hook API observations and manual network
-forensics remain. APK/Core must both speak RPC35; journal21 and the frozen
+forensics remain. APK/Core must both speak RPC37; journal21 and the frozen
 kernel control2/telemetry1 are independent, so a compatible builtin kernel does not
 need rebuilding merely because the app protocol changed.
 

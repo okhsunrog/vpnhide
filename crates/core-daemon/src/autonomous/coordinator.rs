@@ -287,6 +287,11 @@ impl Coordinator {
         if inner.app_dir.is_none() || inner.cancelled {
             return Err(DiagnosticError::Disabled);
         }
+        if inner.active.is_none()
+            && let Some(dir) = state.diagnostic_rule_dir()
+        {
+            RouteFixture::recover_rules(dir).map_err(|_| DiagnosticError::Busy)?;
+        }
         if let Some(last) = inner.last.as_ref() {
             if inner.active.is_some() {
                 return if last.fingerprint == fingerprint {
@@ -464,30 +469,37 @@ impl Coordinator {
         state: &CoreState,
         session: u64,
     ) -> Result<NativeEvidence, Box<MeasurementFailure>> {
-        let fixture = TunFixture::create_detailed(session).map_err(|failure| {
-            let cleaned = failure.cleanup.as_ref().map(|(_, cleaned)| *cleaned);
-            let mut inner = self.inner.lock().expect("diagnostic coordinator");
-            if failure.resource_created && cleaned != Some(true) {
-                if let Some((spec, _)) = failure.cleanup {
-                    inner.pending_cleanup = Some(spec);
-                } else {
-                    inner.unidentified_cleanup = true;
-                }
-            }
-            Box::new(MeasurementFailure {
-                routes: None,
-                filesystem: None,
-                sys_interfaces: None,
-                proc_interfaces: None,
-                addresses: None,
-                binding: None,
-                detail: format!("native fixture unavailable: {}", failure.error),
-                native: None,
-                cleanup_confirmed: cleaned,
-            })
-        })?;
         let debug = state.snapshot().config.is_some_and(|config| config.debug);
-        let routes = self.prepare_route_fixture(session, debug);
+        // Keep both route interfaces present throughout the primary fixture's
+        // negative, start, end and cleanup samples of the interface population.
+        let mut routes = self.prepare_route_fixture(session, debug);
+        let fixture = match TunFixture::create_detailed(session) {
+            Ok(fixture) => fixture,
+            Err(failure) => {
+                let cleaned = failure.cleanup.as_ref().map(|(_, cleaned)| *cleaned);
+                if failure.resource_created && cleaned != Some(true) {
+                    let mut inner = self.inner.lock().expect("diagnostic coordinator");
+                    if let Some((spec, _)) = failure.cleanup {
+                        inner.pending_cleanup = Some(spec);
+                    } else {
+                        inner.unidentified_cleanup = true;
+                    }
+                }
+                let unavailable = NativeMeasurement::unavailable(ProbeError::Unsupported);
+                let (_, route_cleaned) = self.finish_route_fixture(routes, &unavailable, None);
+                return Err(Box::new(MeasurementFailure {
+                    routes: None,
+                    filesystem: None,
+                    sys_interfaces: None,
+                    proc_interfaces: None,
+                    addresses: None,
+                    binding: None,
+                    detail: format!("native fixture unavailable: {}", failure.error),
+                    native: None,
+                    cleanup_confirmed: if route_cleaned { cleaned } else { Some(false) },
+                }));
+            }
+        };
         let report = (|| -> Result<NativeMeasurement, String> {
             let app_dir = self
                 .inner
@@ -496,6 +508,17 @@ impl Coordinator {
                 .app_dir
                 .clone()
                 .ok_or("diagnostic adapter disabled")?;
+            if let (Ok(fixture), Some(dir), Ok(owner)) = (
+                &mut routes,
+                state.diagnostic_rule_dir(),
+                fs::metadata(&app_dir),
+            ) && let Err(error) = fixture.enable_rules(dir, owner.uid())
+                && debug
+            {
+                crate::alog::info(&format!(
+                    "diagnostics: rule fixture session={session} setup failed: {error}"
+                ));
+            }
             super::android_worker::prepare_fresh(&app_dir)?;
             let minimum_birth_ticks = boot_ticks()?
                 .checked_add(1)
@@ -616,7 +639,7 @@ impl Coordinator {
                 addresses: Some(completion.addresses),
                 binding: Some(completion.binding),
                 detail: if native_clean {
-                    "route fixture cleanup unconfirmed; diagnostic admission held"
+                    "route or rule fixture cleanup unconfirmed; diagnostic admission held"
                 } else {
                     "native fixture cleanup unconfirmed; diagnostic admission held"
                 }
@@ -696,7 +719,7 @@ impl Coordinator {
                 .expect("diagnostic coordinator")
                 .pending_route_cleanup = Some(plan);
         }
-        (result.result, result.interfaces_clean)
+        (result.result, result.interfaces_clean && result.rules_clean)
     }
 
     fn reconcile_cleanup(&self) -> Result<(), DiagnosticError> {
@@ -759,6 +782,20 @@ impl Coordinator {
         use std::sync::atomic::Ordering;
         if self.monitoring.swap(true, Ordering::SeqCst) {
             return;
+        }
+        {
+            let inner = self.inner.lock().expect("diagnostic coordinator");
+            // Core boot can dispatch its first run before starting this monitor.
+            // Only recover a receipt when no live run can own it.
+            if inner.active.is_none()
+                && let Some(dir) = state.diagnostic_rule_dir()
+                && let Err(error) = RouteFixture::recover_rules(dir)
+                && state.snapshot().config.is_some_and(|config| config.debug)
+            {
+                crate::alog::info(&format!(
+                    "diagnostics: orphan rule cleanup deferred: {error}"
+                ));
+            }
         }
         let coordinator = self.clone();
         let weak = Arc::downgrade(state);
@@ -952,6 +989,15 @@ impl Active {
             return Err(DiagnosticError::WrongProcess);
         }
         if self.worker.is_some_and(|previous| previous != identity) {
+            return Err(DiagnosticError::WrongProcess);
+        }
+        if self
+            .task
+            .as_ref()
+            .and_then(|task| task.routes.as_ref())
+            .and_then(|fixture| fixture.rule_uid)
+            .is_some_and(|uid| uid != identity.uid)
+        {
             return Err(DiagnosticError::WrongProcess);
         }
         if self.task.is_some() {

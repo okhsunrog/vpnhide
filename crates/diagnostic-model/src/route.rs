@@ -1,6 +1,6 @@
 //! Literal route observations and evaluation with owned positive, ordinary and
 //! cleanup controls.
-use crate::{NativeReadActor, ProbeError};
+use crate::{NativeReadActor, ObservedRule, ProbeError, RuleRole};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -16,6 +16,8 @@ pub enum RouteSurface {
     NetlinkIpv6,
     ProcIpv4,
     ProcIpv6,
+    RuleIpv4,
+    RuleIpv6,
 }
 impl RouteSurface {
     pub const ALL: [Self; 4] = [
@@ -26,12 +28,15 @@ impl RouteSurface {
     ];
     pub fn address_bytes(self) -> usize {
         match self {
-            Self::NetlinkIpv4 | Self::ProcIpv4 => 4,
-            Self::NetlinkIpv6 | Self::ProcIpv6 => 16,
+            Self::NetlinkIpv4 | Self::ProcIpv4 | Self::RuleIpv4 => 4,
+            Self::NetlinkIpv6 | Self::ProcIpv6 | Self::RuleIpv6 => 16,
         }
     }
     pub fn netlink(self) -> bool {
         matches!(self, Self::NetlinkIpv4 | Self::NetlinkIpv6)
+    }
+    pub fn rule(self) -> bool {
+        matches!(self, Self::RuleIpv4 | Self::RuleIpv6)
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -50,6 +55,13 @@ impl RouteCheck {
                     .map(move |surface| Self { actor, surface })
             })
             .collect()
+    }
+    pub fn rules() -> impl Iterator<Item = Self> {
+        NativeReadActor::ALL.into_iter().flat_map(|actor| {
+            [RouteSurface::RuleIpv4, RouteSurface::RuleIpv6]
+                .into_iter()
+                .map(move |surface| Self { actor, surface })
+        })
     }
 }
 /// Optional fields remain unknown when the source does not expose them. In
@@ -99,6 +111,8 @@ pub struct RouteObservation {
     pub check: RouteCheck,
     /// Valid rows already read survive a later malformed/truncated/failed read.
     pub routes: Vec<ObservedRoute>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<ObservedRule>,
     pub error: Option<ProbeError>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,6 +128,7 @@ impl RouteMeasurement {
                 .map(|check| RouteObservation {
                     check,
                     routes: Vec::new(),
+                    rules: Vec::new(),
                     error: Some(error.clone()),
                 })
                 .collect(),
@@ -137,10 +152,18 @@ impl RouteMeasurement {
                             || spec.exposes(row, true, value.check.surface)
                     });
                     let routes = rows.by_ref().take(MAX_SCOPED_ROUTES).cloned().collect();
-                    let overflow = rows.next().is_some();
+                    let rules = value.rules.iter().filter(|row| {
+                        RuleRole::ALL
+                            .into_iter()
+                            .any(|role| role.exposes(spec, row))
+                    });
+                    let mut rules = rules;
+                    let retained_rules = rules.by_ref().take(MAX_SCOPED_ROUTES).cloned().collect();
+                    let overflow = rows.next().is_some() || rules.next().is_some();
                     RouteObservation {
                         check: value.check,
                         routes,
+                        rules: retained_rules,
                         error: value
                             .error
                             .clone()
@@ -152,11 +175,18 @@ impl RouteMeasurement {
     }
     pub fn bounded(&self) -> bool {
         let mut seen = BTreeSet::new();
-        self.observations.len() <= RouteCheck::required().len()
+        self.observations.len() <= RouteCheck::required().len() + RouteCheck::rules().count()
             && self.observations.iter().all(|v| {
                 seen.insert(v.check)
                     && v.routes.len() <= MAX_ROUTES
                     && v.routes.iter().all(|r| r.valid(v.check.surface))
+                    && v.rules.len() <= MAX_ROUTES
+                    && v.rules.iter().all(ObservedRule::valid)
+                    && if v.check.surface.rule() {
+                        v.routes.is_empty()
+                    } else {
+                        v.rules.is_empty()
+                    }
             })
     }
 
@@ -165,17 +195,23 @@ impl RouteMeasurement {
             && self
                 .observations
                 .iter()
-                .all(|v| v.routes.len() <= MAX_SCOPED_ROUTES)
+                .all(|v| v.routes.len() <= MAX_SCOPED_ROUTES && v.rules.len() <= MAX_SCOPED_ROUTES)
     }
 
     pub fn scoped_for(&self, spec: &RouteFixtureSpec) -> bool {
         spec.valid()
             && self.bounded_scoped()
             && self.observations.iter().all(|value| {
-                value.routes.iter().all(|row| {
-                    spec.exposes(row, false, value.check.surface)
-                        || spec.exposes(row, true, value.check.surface)
-                })
+                (!value.check.surface.rule() || spec.rule_uid.is_some())
+                    && value.rules.iter().all(|row| {
+                        RuleRole::ALL
+                            .into_iter()
+                            .any(|role| role.exposes(spec, row))
+                    })
+                    && value.routes.iter().all(|row| {
+                        spec.exposes(row, false, value.check.surface)
+                            || spec.exposes(row, true, value.check.surface)
+                    })
             })
     }
 }
@@ -208,6 +244,7 @@ mod tests {
                 surface: RouteSurface::NetlinkIpv4,
             },
             routes: vec![row()],
+            rules: vec![],
             error: Some(ProbeError::Timeout),
         };
         let mut value = RouteMeasurement {
@@ -231,10 +268,21 @@ pub struct RouteFixtureSpec {
     pub session: u64,
     pub vpn: crate::InterfaceId,
     pub ordinary: crate::InterfaceId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule_uid: Option<u32>,
 }
 impl RouteFixtureSpec {
+    fn checks(&self) -> impl Iterator<Item = RouteCheck> {
+        RouteCheck::required()
+            .into_iter()
+            .chain(RouteCheck::rules().filter(|_| self.rule_uid.is_some()))
+    }
+
     pub fn valid(&self) -> bool {
         self.session != 0
+            && self
+                .rule_uid
+                .is_none_or(|uid| (10_000..u32::MAX).contains(&uid))
             && self.role_session(false) != 0
             && self.role_session(true) != 0
             && self.vpn.index > 0
@@ -339,6 +387,37 @@ fn observation(
         .iter()
         .find(|v| v.check == check)
 }
+fn positive(spec: &RouteFixtureSpec, value: &RouteObservation, ordinary: bool) -> bool {
+    if value.check.surface.rule() {
+        RuleRole::ALL
+            .into_iter()
+            .filter(|role| (*role == RuleRole::Ordinary) == ordinary)
+            .all(|role| value.rules.iter().any(|row| role.matches(spec, row, false)))
+    } else {
+        value
+            .routes
+            .iter()
+            .any(|row| spec.positive(row, ordinary, value.check.surface))
+    }
+}
+
+fn exposes(spec: &RouteFixtureSpec, value: &RouteObservation, ordinary: bool) -> bool {
+    if value.check.surface.rule() {
+        RuleRole::ALL
+            .into_iter()
+            .filter(|role| (*role == RuleRole::Ordinary) == ordinary)
+            .any(|role| value.rules.iter().any(|row| role.exposes(spec, row)))
+    } else {
+        value
+            .routes
+            .iter()
+            .any(|row| spec.exposes(row, ordinary, value.check.surface))
+    }
+}
+
+fn paired_positive(spec: &RouteFixtureSpec, value: &RouteObservation) -> bool {
+    value.error.is_none() && positive(spec, value, false) && positive(spec, value, true)
+}
 /// Root controls qualify each vector before a worker row can establish a leak.
 /// Later worker/ordinary/end/cleanup failures preserve that leak and withhold proof.
 /// `interfaces_clean` is Root's independent name/index cleanup, never app input.
@@ -353,22 +432,12 @@ pub fn evaluate_route_fixture(
         result.problem(InvalidSpec);
         return result;
     }
-    for check in RouteCheck::required() {
+    for check in spec.checks() {
         let [negative, start, worker, end, cleanup] = measurements.map(|m| observation(m, check));
         let absent = |v: &RouteObservation| {
-            v.error.is_none()
-                && !v.routes.iter().any(|r| {
-                    spec.exposes(r, false, check.surface) || spec.exposes(r, true, check.surface)
-                })
+            v.error.is_none() && !exposes(spec, v, false) && !exposes(spec, v, true)
         };
-        let positive = |v: &RouteObservation| {
-            v.error.is_none()
-                && [false, true].into_iter().all(|ordinary| {
-                    v.routes
-                        .iter()
-                        .any(|r| spec.positive(r, ordinary, check.surface))
-                })
-        };
+        let root_positive = |v: &RouteObservation| paired_positive(spec, v);
         if negative.is_none_or(|v| !absent(v)) {
             result.problem(MissingNegativeControl);
             if negative.is_none_or(|v| v.error.is_some()) {
@@ -376,18 +445,14 @@ pub fn evaluate_route_fixture(
             }
             continue;
         }
-        if start.is_none_or(|v| !positive(v)) {
+        if start.is_none_or(|v| !root_positive(v)) {
             result.problem(MissingPositiveControl);
             if start.is_none_or(|v| v.error.is_some()) {
                 result.problem(ProbeUnavailable);
             }
             continue;
         }
-        let leaked = worker.is_some_and(|v| {
-            v.routes
-                .iter()
-                .any(|r| spec.exposes(r, false, check.surface))
-        });
+        let leaked = worker.is_some_and(|v| exposes(spec, v, false));
         if leaked {
             result.leaked.push(check);
         }
@@ -395,15 +460,11 @@ pub fn evaluate_route_fixture(
         if !worker_available {
             result.problem(ProbeUnavailable);
         }
-        let ordinary_ok = worker.is_some_and(|v| {
-            v.routes
-                .iter()
-                .any(|r| spec.positive(r, true, check.surface))
-        });
+        let ordinary_ok = worker.is_some_and(|v| positive(spec, v, true));
         if !ordinary_ok {
             result.problem(OrdinaryObjectsChanged);
         }
-        let end_ok = end.is_some_and(positive);
+        let end_ok = end.is_some_and(root_positive);
         if !end_ok {
             result.problem(FixtureChanged);
             if end.is_none_or(|v| v.error.is_some()) {
@@ -432,21 +493,12 @@ pub fn evaluate_paired_route_fixture(
     interfaces_clean: bool,
 ) -> ScopedRouteResult {
     let mut result = evaluate_route_fixture(spec, measurements, interfaces_clean);
-    let qualified: Vec<_> = RouteCheck::required()
-        .into_iter()
-        .filter(|check| {
-            observation(raw, *check).is_some_and(|v| {
-                v.error.is_none()
-                    && [false, true].into_iter().all(|ordinary| {
-                        v.routes
-                            .iter()
-                            .any(|r| spec.positive(r, ordinary, check.surface))
-                    })
-            })
-        })
+    let qualified: Vec<_> = spec
+        .checks()
+        .filter(|check| observation(raw, *check).is_some_and(|v| paired_positive(spec, v)))
         .collect();
     result.proven.retain(|c| qualified.contains(c));
-    if qualified.len() != RouteCheck::required().len() {
+    if qualified.len() != spec.checks().count() {
         result.problem(crate::ControlFailure::MissingPositiveControl);
     }
 
@@ -458,6 +510,7 @@ mod fixture_tests {
     use super::*;
     fn spec() -> RouteFixtureSpec {
         RouteFixtureSpec {
+            rule_uid: None,
             session: 1,
             vpn: crate::InterfaceId {
                 name: "tun000000004001".into(),
@@ -536,6 +589,7 @@ mod fixture_tests {
                     RouteObservation {
                         check,
                         routes,
+                        rules: Vec::new(),
                         error: None,
                     }
                 })

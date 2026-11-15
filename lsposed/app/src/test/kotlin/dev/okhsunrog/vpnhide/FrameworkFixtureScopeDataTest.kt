@@ -63,13 +63,28 @@ class FrameworkFixtureScopeDataTest {
         assertFalse(env.permits(env.worker, env.boot, env.hookHash, -1))
     }
 
+    @Test fun `active network acknowledgement cannot inherit replacement from an earlier call`() {
+        val ledger = FixtureEvidenceLedger()
+        ledger.begin(FixtureTransaction.ACTIVE_NETWORK, 100)
+        ledger.recordActiveSource(20)
+        ledger.recordActiveReplacement()
+        assertTrue(ledger.snapshot().activeNetwork.replaced)
+        ledger.begin(FixtureTransaction.ACTIVE_NETWORK, 200)
+        ledger.recordActiveReplacement()
+        val latest = ledger.snapshot().activeNetwork
+        assertEquals(2, latest.calls)
+        assertEquals(200L, latest.startedNs)
+        assertNull(latest.originalHandle)
+        assertFalse(latest.replaced)
+    }
+
     @Test fun `malformed numeric phase extra key and fixture bounds deny authorization`() {
         for (bad in listOf(
             golden.replace("10123", "10123.0"),
             golden.replace("10123", "\"10123\""),
             golden.replace("\"prepared\"", "\"raw\""),
             golden.replace("1610612737", "2147483648"),
-            golden.replace("\"version\": 2", "\"extra\": true, \"version\": 2"),
+            golden.replace("\"version\": 3", "\"extra\": true, \"version\": 3"),
         )) {
             assertNull(parseFixtureAuthority(bad))
         }
