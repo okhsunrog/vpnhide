@@ -250,7 +250,14 @@ cheap and correct when such a route is present; see issue discussion.
 | `setsockopt(SO_BINDTODEVICE)` / `SO_BINDTOIFINDEX` | bind success and `getsockopt` state reveal or select a hidden iface | ✅ pre-mutation entry redirect | ✅ pre-mutation rejection | ⚠️ bionic `setsockopt` only | — | |
 | `/proc/net/tcp` | local addr hex per socket | — | — | ✅ `filter_tcp4_buf` (by VPN addr) | — | 🔒 often denied |
 | `/proc/net/tcp6` | 32-hex local addr | — | — | ✅ `filter_tcp6_buf` | — | 🔒 |
+| `/proc/net/dev` | Interface names and traffic counters | — | — | ✅ `filter_dev_buf` | — | 🔒 |
 | `/proc/net/if_inet6` | IPv6 addrs, iface last field | — | — | ✅ `filter_if_inet6_buf` | — | 🔒 |
+
+The installed Pixel Builtin before the fix exposed both proc interface
+surfaces to readers allowed by SELinux. The current Builtin integration
+filters both proc sequences with its interface and IPv6 enumeration masks.
+The [diagnostics notes](diagnostics.md#implemented-scope-and-remaining-implementation)
+record the same-UID test, the ordinary Android app denial and the rebuild gate.
 
 Since Linux 5.7, an unprivileged process can perform the first interface
 bind, so `curl --interface tun0 ...` or a raw `setsockopt` syscall is a real

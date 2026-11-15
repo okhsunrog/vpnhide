@@ -119,7 +119,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         [mode] if mode == "protected" => true,
         _ => return Err("expected raw or protected".into()),
     };
-    if protected {
+    let backend = if protected {
         let control = Path::new("/proc/vpnhide_ctl");
         let status = vpnhide_core_daemon::activation::read_status(control)?;
         let backend = match status.backend {
@@ -150,9 +150,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }],
         );
         vpnhide_core_daemon::activation::deliver_native(control, backend, &wire)?;
-    } else if Path::new("/proc/vpnhide_ctl").exists() {
-        return Err("raw oracle cannot have a native backend".into());
-    }
+        Some(backend)
+    } else {
+        if Path::new("/proc/vpnhide_ctl").exists() {
+            return Err("raw oracle cannot have a native backend".into());
+        }
+        None
+    };
     let before = routes()?;
     let fixture = TunFixture::create(0x0123_4567_89ab)?;
     println!("FIXTURE_SPEC={}", serde_json::to_string(&fixture.spec)?);
@@ -227,13 +231,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .iter()
                 .all(|c| done.filesystem.leaked.contains(c))
     };
-    // Current kernel backends do not filter these seq files. This independently
-    // tests leak detection; it is not a claim that the product hides procfs.
-    let proc_expected = done.proc_interfaces.proven.is_empty()
-        && done.proc_interfaces.controls.is_empty()
-        && ProcInterfaceCheck::required()
-            .iter()
-            .all(|c| done.proc_interfaces.leaked.contains(c));
+    let proc_expected = if backend == Some(vpnhide_core_rpc::NativeBackend::Builtin) {
+        done.proc_interfaces.complete()
+    } else {
+        done.proc_interfaces.proven.is_empty()
+            && done.proc_interfaces.controls.is_empty()
+            && ProcInterfaceCheck::required()
+                .iter()
+                .all(|c| done.proc_interfaces.leaked.contains(c))
+    };
     let addresses_expected = if protected {
         done.addresses.complete()
     } else {

@@ -778,3 +778,29 @@ _DEVINET_IOCTL_HIDE_DOT = (
 )
 for _kmi in ("android10-4.14", "android10-4.9"):
     EDITS[_kmi]["net/ipv4/devinet.c"][-1] = _DEVINET_IOCTL_HIDE_DOT
+
+# procfs enumerates the same interface and IPv6 address objects as the two
+# native netlink dumps. Reuse their per-UID masks so an existing Core config
+# also protects these files after a kernel-only upgrade.
+_PROC_DEV_SHOW = (
+    "\telse\n\t\tdev_seq_printf_stats(seq, v);\n\treturn 0;\n}",
+    "\telse if (!vpnhide_should_hide_dev(v, VPNHIDE_HID_RTNL_FILL_IFINFO))\n"
+    "\t\tdev_seq_printf_stats(seq, v);\n\treturn 0;\n}",
+)
+_IF6_SEQ_DECL = (
+    "static int if6_seq_show(struct seq_file *seq, void *v)\n"
+    "{\n\tstruct inet6_ifaddr *ifp = (struct inet6_ifaddr *)v;\n"
+)
+_PROC_IF6_SHOW = (
+    _IF6_SEQ_DECL,
+    _IF6_SEQ_DECL
+    + "\n\tif (vpnhide_should_hide_dev(ifp->idev->dev,\n"
+    "\t\t\t\t   VPNHIDE_HID_INET6_FILL_IFADDR))\n"
+    "\t\treturn 0;\n\n",
+)
+for _kmi in EDITS:
+    EDITS[_kmi]["net/core/net-procfs.c"] = [
+        ("#include <linux/netdevice.h>\n", "#include <linux/netdevice.h>\n" + VH_INCLUDE),
+        _PROC_DEV_SHOW,
+    ]
+    EDITS[_kmi]["net/ipv6/addrconf.c"].append(_PROC_IF6_SHOW)

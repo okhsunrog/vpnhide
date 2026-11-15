@@ -185,7 +185,7 @@ required to prove hiding. Traffic counters can change while the interface
 identity stays fixed. The Kmod QEMU oracle has recorded all four leaks with
 the files readable, even though address ioctls and netlink hide successfully.
 
-On the installed Pixel kernel, a process with the
+On the Pixel kernel tested before the Builtin fix, a process with the
 target app UID and zero effective capabilities could read both files from
 the KernelSU SELinux domain.
 All four vectors exposed the owned TUN in five consecutive controlled runs.
@@ -196,7 +196,10 @@ the active TUN and still saw the TUN in both proc interface files.
 On the ordinary Pixel worker, RPC44 reported EACCES at open for both files,
 both actors and both phases in all 24 runs. The final 20 consecutive current
 runs confirmed the same 17 protection groups. The Dashboard showed the
-Android restriction for Interfaces in procfs.
+Android restriction for Interfaces in procfs. The new Builtin integration
+adds filtering at both proc show callbacks and reuses the native link and
+IPv6 enumeration mask bits. The rebuilt kernel still needs Pixel runtime
+verification.
 
 The optional `SysInterfaces` group independently enumerates `/sys/class/net`,
 `/proc/sys/net/ipv4/conf` and `/proc/sys/net/ipv6/conf` through libc

@@ -753,3 +753,7 @@ use paired RPC44 and diagnostic contract11. The same RAW/protected exchange
 carries scoped IPv4 and IPv6 route and policy-rule evidence alongside optional
 sysfs/proc-sys directory and path-lookup evidence. Actual Android acceptance
 is separate from the Linux oracle.
+
+Builtin uses the existing RTNL_FILL_IFINFO and INET6_FILL_IFADDR mask bits
+for the matching proc interface records and includes those hits in the
+same counters.

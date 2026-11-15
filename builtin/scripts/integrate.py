@@ -42,6 +42,16 @@ REVIEW = {
         "Check sock lifetime, out_put cleanup, native/compat pointers, snapshot lifetime and "
         "DENY/FAULT/FROZEN handling. Match this kernel's sockptr API and option dispatch.",
     ),
+    "net/core/net-procfs.c": (
+        "Skip selected VPN rows in /proc/net/dev.",
+        "Keep SEQ_START_TOKEN on the header-only path. Check the RCU-held net_device and "
+        "that the callback returns zero for an omitted row without stopping iteration.",
+    ),
+    "net/ipv6/addrconf.c": (
+        "Filter selected VPN IPv6 addresses from netlink and /proc/net/if_inet6.",
+        "Use the iterator's RCU-held inet6_ifaddr and its existing net_device. Check that "
+        "omitting a proc row preserves iteration and ordinary IPv6 entries.",
+    ),
     "net/": (
         "Hide selected VPN interfaces and routes from targeted callers.",
         "Check which task/UID runs the hook, net namespace, RCU/RTNL context, pointer validity, "

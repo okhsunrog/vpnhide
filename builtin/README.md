@@ -72,6 +72,8 @@ stats are preserved.
 | RTNL_FILL_IFINFO (2) | `rtnl_fill_ifinfo` | `vpnhide_should_hide_dev` |
 | INET_FILL_IFADDR (3) | `inet_fill_ifaddr` | `vpnhide_should_hide_dev` |
 | INET6_FILL_IFADDR (4) | `inet6_fill_ifaddr` | `vpnhide_should_hide_dev` |
+| RTNL_FILL_IFINFO (2) | `dev_seq_show` (/proc/net/dev) | `vpnhide_should_hide_dev` |
+| INET6_FILL_IFADDR (4) | `if6_seq_show` (/proc/net/if_inet6) | `vpnhide_should_hide_dev` |
 | FIB_ROUTE_SEQ_SHOW (0) | `fib_route_seq_show` (/proc/net/route) | route/rule predicate (Phase 3b-ii) |
 | IPV6_ROUTE_SEQ_SHOW (1) | `ipv6_route_seq_show` (/proc/net/ipv6_route) | route/rule predicate (Phase 3b-ii) |
 | FIB_DUMP_INFO (7) | `fib_dump_info` (RTM_GETROUTE v4) | route/rule predicate (Phase 3b-ii) |
@@ -79,6 +81,11 @@ stats are preserved.
 | FIB_NL_FILL_RULE (9) | `fib_nl_fill_rule` (policy rules) | route/rule predicate (Phase 3b-ii) |
 | SOCKET_BIND_INTERFACE (25) | `__sys_setsockopt` (SO_BINDTODEVICE/IFINDEX) | `vpnhide_setsockopt_bind` |
 | FILESYSTEM_IFACE_PATHS (27) | `filename_lookup`/`do_filp_open`/`vfs_getattr`/`iterate_dir` | `vpnhide_should_hide_dentry` / `vpnhide_readdir_begin`/`_end` |
+
+Builtin shares the native interface and IPv6 enumeration bits between
+netlink and procfs. The same target masks and counters cover both paths;
+existing Core builds can configure the rebuilt kernel. Proc iteration retains
+its header and ordinary interface records.
 
 In-tree, the trickiest `.ko` hook — SO_BINDTODEVICE — is **simpler and more
 correct**: the patch runs at the syscall call-site in process context *before*
