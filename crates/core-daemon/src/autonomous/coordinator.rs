@@ -1,6 +1,7 @@
 //! One Core-owned bounded run. No network/VPN prerequisite, app-supplied root
 //! path, shell command, per-open restart, or inference from worker-owned PASS.
 use super::boot_time::{BootDeadline, BootInstant};
+use std::borrow::Cow;
 use std::fs;
 use std::io;
 use std::os::unix::fs::MetadataExt;
@@ -9,6 +10,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
+use vpnhide_core_rpc::ObservationFreshness;
 use vpnhide_diagnostic_model::*;
 use vpnhide_loader_ipc::image::{self, ProcessIdentity};
 
@@ -125,11 +127,17 @@ fn platform_identity() -> Option<String> {
     Some(hash(material))
 }
 fn context_digests(snapshot: &vpnhide_core_rpc::StateSnapshot) -> (String, String) {
+    let mut backend = Cow::Borrowed(&snapshot.backend);
+    // Boot publication can populate `active` while the live observer has no
+    // current evidence. Clearing that hint does not change the measured runtime.
+    if backend.observed_freshness != ObservationFreshness::Current && backend.active.is_some() {
+        backend.to_mut().active = None;
+    }
     (
         hash(serde_json::to_vec(&snapshot.config).expect("config codec")),
         hash(
             serde_json::to_vec(&(
-                &snapshot.backend,
+                backend.as_ref(),
                 &snapshot.apply_evidence,
                 &snapshot.zygisk_revocation,
                 &snapshot.held_resources,
@@ -1701,6 +1709,30 @@ mod tests {
         assert!(!state.snapshot().autonomous_diagnostics.unwrap().stale);
         state.publisher.update(|s| s.backend.applied = None);
         assert!(state.snapshot().autonomous_diagnostics.unwrap().stale);
+    }
+    #[test]
+    fn clearing_an_unconfirmed_active_hint_preserves_the_diagnostic_context() {
+        let state = state();
+        state.publisher.update(|s| {
+            s.backend.observed_freshness = ObservationFreshness::Unknown;
+            s.backend.observation_error = Some("KPM inventory unavailable".into());
+            s.backend.active = Some(NativeBackend::Builtin);
+        });
+        let before = fingerprint(&state, &state.snapshot());
+
+        state.publisher.update(|s| s.backend.active = None);
+        assert_eq!(fingerprint(&state, &state.snapshot()), before);
+
+        state.publisher.update(|s| {
+            s.backend.active = Some(NativeBackend::Builtin);
+            s.backend.observed_freshness = ObservationFreshness::Current;
+            s.backend.observation_error = None;
+        });
+        let current = fingerprint(&state, &state.snapshot());
+        assert_ne!(current, before);
+
+        state.publisher.update(|s| s.backend.active = None);
+        assert_ne!(fingerprint(&state, &state.snapshot()), current);
     }
     #[test]
     fn assessment_is_core_owned_and_changes_atomically_with_its_source_run() {

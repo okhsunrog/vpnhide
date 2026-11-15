@@ -125,8 +125,11 @@ admits a suite.
 Required/proven/leaked/unverified, infrastructure failures and cleanup are separate.
 A worker's fresh result does not prove that already-running games consumed a new
 Zygisk generation. Cache identity includes policy, runtime/platform evidence and
-loaded-generation coverage. Missing required proof remains unverified. The
-current partial implementation has no full-success assessment variant.
+loaded-generation coverage. The live observer must report a current backend
+before its active identity contributes to the fingerprint. Boot selection,
+delivery, observation freshness and backend conflicts still contribute. Missing
+required proof remains unverified. The current partial implementation has no
+full-success assessment variant.
 
 Core schedules up to two fresh runs for a timed-out or temporarily busy
 Android worker, an unstable address sample after local resampling, or an
@@ -211,9 +214,14 @@ suite PASS. Cleanup and ordinary loopback controls remain mandatory.
 
 On Pixel 8 Pro with Builtin, six runs admitted 76–162 ms after enabling
 airplane mode and disabling Wi-Fi each measured all 20 required groups with
-no leaks. Five retained a current fingerprint. The runtime fingerprint
-changed during the other run. Two runs still observed `wlan0` in their RAW
-`SIOCGIFCONF` samples.
+no leaks. Two runs still observed `wlan0` in their RAW `SIOCGIFCONF` samples.
+In one run the live backend observer cleared the active identity carried
+forward from boot while its KPM inventory observation was already unknown.
+The earlier fingerprint included that unconfirmed identity and marked the
+result stale. With the corrected fingerprint, six runs started 66–103 ms
+after switching to airplane mode with Wi-Fi off. All 20 groups retained
+current evidence in each run, including a run where the observer cleared the
+same unconfirmed identity during measurement.
 
 The `ProcInterfaces` group has four required subchecks. It reads `/proc/net/dev`
 and `/proc/net/if_inet6` through libc and direct openat/read syscalls. Before
