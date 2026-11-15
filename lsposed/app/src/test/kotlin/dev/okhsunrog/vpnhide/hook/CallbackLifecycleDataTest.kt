@@ -7,6 +7,29 @@ import org.junit.Test
 
 class CallbackLifecycleDataTest {
     @Test
+    fun `forwarding a cover still routes a nested VPN event and restores the outer delivery`() {
+        val registration = Any()
+        val forwarding = CallbackForwarding<Int>()
+        assertFalse(forwarding.matches(registration, 109))
+        forwarding.duringDelivery(registration, 109) {
+            assertTrue(forwarding.matches(registration, 109))
+            assertFalse(forwarding.matches(registration, 104))
+            assertFalse(forwarding.matches(Any(), 109))
+            val nested =
+                runCatching {
+                    forwarding.duringDelivery(registration, 111) {
+                        assertTrue(forwarding.matches(registration, 111))
+                        assertFalse(forwarding.matches(registration, 109))
+                        error("nested dispatcher failed")
+                    }
+                }
+            assertEquals("nested dispatcher failed", nested.exceptionOrNull()?.message)
+            assertTrue(forwarding.matches(registration, 109))
+        }
+        assertFalse(forwarding.matches(registration, 109))
+    }
+
+    @Test
     fun `VPN up and down over the same cover do not duplicate availability`() {
         val physical = transitionPhysicalCallback(null, 100, CallbackEventKind.Available)
         assertEquals(CallbackDelivery.Forward, physical.delivery)

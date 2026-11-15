@@ -10,6 +10,38 @@ internal data class CallbackTransition(
     val network: Int? = held,
 )
 
+/** Only the service-built delivery for the exact registration and cover skips routing. */
+internal class CallbackForwarding<T : Any> {
+    private data class Delivery<T>(
+        val registration: Any,
+        val network: T,
+    )
+
+    private val current = ThreadLocal<Delivery<T>>()
+
+    fun matches(
+        registration: Any,
+        network: T,
+    ): Boolean {
+        val delivery = current.get() ?: return false
+        return delivery.registration === registration && delivery.network == network
+    }
+
+    fun duringDelivery(
+        registration: Any,
+        network: T,
+        send: () -> Unit,
+    ) {
+        val previous = current.get()
+        current.set(Delivery(registration, network))
+        try {
+            send()
+        } finally {
+            if (previous == null) current.remove() else current.set(previous)
+        }
+    }
+}
+
 /** A registration has one visible best network. Losing the VPN is not losing its cover. */
 internal fun transitionCallback(
     held: Int?,

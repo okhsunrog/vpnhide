@@ -788,7 +788,12 @@ mod tests {
                 .contains(&crate::RequiredCheck::FrameworkDefaultNetwork)
         );
         assert!(!evaluate_framework(&evidence, false).proven.contains(&check));
-        for change in 0..8 {
+        let mut real_vpn = make();
+        for phase in &mut real_vpn[1..=2] {
+            phase.acknowledgement.active_network.original_handle = Some(104);
+        }
+        assert!(evaluate_framework(&real_vpn, true).proven.contains(&check));
+        for change in 0..10 {
             let mut evidence = make();
             match change {
                 0 => evidence[1].acknowledgement.active_network.original_handle = None,
@@ -798,7 +803,9 @@ mod tests {
                 4 => evidence[2].observation.active_network.handle = Sample::Value(None),
                 5 => evidence[2].observation.active_network.handle = Sample::Value(Some(102)),
                 6 => evidence[2].observation.active_network.transport_vpn = Sample::Value(true),
-                _ => evidence[3].observation.active_network.handle = Sample::Value(Some(12)),
+                7 => evidence[3].observation.active_network.handle = Sample::Value(Some(12)),
+                8 => evidence[2].acknowledgement.active_network.original_handle = Some(104),
+                _ => evidence[0].observation.active_network.handle = Sample::Value(Some(102)),
             }
             let result = evaluate_framework(&evidence, true);
             assert!(!result.proven.contains(&check), "change={change}");

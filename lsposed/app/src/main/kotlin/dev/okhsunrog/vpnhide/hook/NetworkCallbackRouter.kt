@@ -30,7 +30,7 @@ internal class NetworkCallbackRouter(
     private val fixtureHandled: (Network, Boolean) -> Unit,
 ) {
     private val states = WeakHashMap<Any, Int>()
-    private val forwarding = ThreadLocal<Boolean>()
+    private val forwarding = CallbackForwarding<Network>()
     private val payloads = CallbackPayloadFilter()
     private val builder =
         serviceClass.declaredMethods
@@ -55,10 +55,6 @@ internal class NetworkCallbackRouter(
     ): Boolean {
         if (param.method.name != "callCallbackForRequest") return false
         val bundle = param.args.getOrNull(2) as? Bundle
-        if (forwarding.get() == true) {
-            if (bundle != null) payloads.filter(param, bundle)
-            return true
-        }
         if (hasBundleDispatcher && bundle == null) return true
         val nri = param.args[0]
         val source =
@@ -67,6 +63,10 @@ internal class NetworkCallbackRouter(
             } else {
                 param.args.getOrNull(1)?.let { XposedHelpers.getObjectField(it, "network") as? Network }
             } ?: return true // UNAVAILABLE / RESERVED have no network.
+        if (bundle != null && forwarding.matches(nri, source)) {
+            payloads.filter(param, bundle)
+            return true
+        }
         val vpn = isVpn(param.thisObject, source)
         val type = (if (bundle != null) param.args[1] else param.args[2]) as Int
         if (isListen(request)) {
@@ -171,17 +171,15 @@ internal class NetworkCallbackRouter(
             }
 
             CallbackDelivery.Available, CallbackDelivery.Forward -> {
-                val nai = XposedHelpers.callMethod(param.thisObject, "getNetworkAgentInfoForNetwork", cover) ?: return false
+                val network = cover ?: return false
+                val nai = XposedHelpers.callMethod(param.thisObject, "getNetworkAgentInfoForNetwork", network) ?: return false
                 val method = builder ?: error("No callback builder on ${param.thisObject.javaClass.name}")
                 // Ask CS to construct/redact the entire event for the actual recipient.
                 // A new cover needs AVAILABLE (with NC+LP), even if VPN only emitted CAP_CHANGED.
                 val outputType = if (next.delivery == CallbackDelivery.Available) available else type
                 val arg1 = if (outputType == blocked || outputType == available) 0 else param.args.last()
-                forwarding.set(true)
-                try {
+                forwarding.duringDelivery(param.args[0], network) {
                     XposedBridge.invokeOriginalMethod(method, param.thisObject, arrayOf(param.args[0], nai, outputType, arg1))
-                } finally {
-                    forwarding.remove()
                 }
                 true
             }

@@ -54,6 +54,8 @@ On services with the Bundle dispatcher, the outer builder and frozen-receiver
 queue keep the original VPN identity; rewriting happens only at final delivery.
 The router asks the service to build recipient-redacted cover payloads, tracks
 one visible best handle per registration, and maps loss to that delivered handle.
+During a rebuilt delivery, only the bundle for the same registration and cover
+skips routing. Nested callbacks for other networks still go through VPN filtering.
 `LISTEN_FOR_BEST` uses that lifecycle; only an ordinary `LISTEN` suppresses VPN
 matches without replacement. On older single-dispatch services, LOST is sent
 using the platform's NetworkRequest/Network message shape. PendingIntents retain

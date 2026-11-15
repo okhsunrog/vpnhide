@@ -343,6 +343,11 @@ the original handle, then supplies the fixture VPN only to the authenticated
 worker in RAW and Protected. Core requires a timed acknowledgement for each
 phase, the VPN handle and transport in RAW, the real production replacement in
 Protected and the same ordinary default network before and after injection.
+The ordinary control is the handle returned to the worker outside the fixture.
+When a live VPN is active for the worker, the platform's original handle can
+differ from that control. Core checks the original handle independently across
+the two injected phases and compares the protected reply with the ordinary
+control.
 A missing or changing ordinary default makes the check unverified. An observed
 fixture VPN handle in both active phases remains a leak after cleanup failure.
 This uses APK/Core RPC37 and the version3 framework channel. On a Pixel 8 Pro
