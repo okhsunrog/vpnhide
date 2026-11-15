@@ -35,6 +35,7 @@ internal class FrameworkFixtureHooks {
     private val attached = Collections.newSetFromMap(IdentityHashMap<Class<*>, Boolean>())
     private val dispatches = FixtureDispatchRegistry()
     private val callbacks = FrameworkCallbackFixture()
+    private val pendingIntents = FrameworkPendingIntentFixture()
     private val guard = Any()
 
     @Volatile private var state: State? = null
@@ -282,7 +283,61 @@ internal class FrameworkFixtureHooks {
         }
     }
 
-    fun isFixtureCallbackNetwork(network: Network): Boolean = scope.get()?.callback != null && current()?.objects?.vpn == network
+    fun isFixtureCallbackNetwork(network: Network): Boolean {
+        val invocation = scope.get() ?: return false
+        return (invocation.callback != null || invocation.pendingIntent != null) && current()?.objects?.vpn == network
+    }
+
+    fun dispatchPendingIntentFixture(
+        param: XC_MethodHook.MethodHookParam,
+        uid: Int,
+    ) {
+        val active = state ?: return
+        val authority = active.authority
+        if (scope.get() != null || param.thisObject !== receiver || authority.worker.uid != uid ||
+            authority.phase !in setOf(FixturePhase.RAW, FixturePhase.PROTECTED)
+        ) {
+            return
+        }
+        runCatching {
+            val input = pendingIntents.input(param, authority.worker) ?: return
+            if (fixtureStartTicks(authority.worker.pid) != authority.worker.startTicks ||
+                input.ordinary == active.objects.vpn || input.ordinary == active.objects.ordinary
+            ) {
+                return
+            }
+            val agent = pendingIntents.detachedAgent(input.agent, active.objects) ?: return
+            synchronized(guard) {
+                if (state !== active || channel.read() != authority ||
+                    !active.evidence.beginPendingIntent(input.registration, input.ordinary.networkHandle)
+                ) {
+                    return
+                }
+                acknowledge(active)
+            }
+            val previous = scope.enter(FixtureInvocation(authority, FixtureTransaction.PENDING_INTENT, pendingIntent = input.registration))
+            try {
+                if (current() === active) pendingIntents.dispatch(param, agent)
+            } finally {
+                scope.restore(previous)
+            }
+        }.onFailure {
+            HookLog.i("VpnHide: PendingIntent fixture source unavailable: ${it.javaClass.simpleName}: ${it.message}")
+        }
+    }
+
+    fun pendingIntentHandled(
+        network: Network,
+        cover: Network?,
+    ) {
+        val registration = scope.get()?.pendingIntent ?: return
+        synchronized(guard) {
+            val active = current() ?: return
+            if (active.authority.phase != FixturePhase.PROTECTED || network != active.objects.vpn) return
+            active.evidence.recordPendingIntent(registration, cover?.networkHandle)
+            runCatching { acknowledge(active) }
+        }
+    }
 
     fun callbackHandled(
         network: Network,
@@ -382,6 +437,7 @@ internal class FrameworkFixtureHooks {
                     FixtureTransaction.LEGACY_ENUM,
                     FixtureTransaction.ACTIVE_NETWORK,
                     FixtureTransaction.CALLBACK,
+                    FixtureTransaction.PENDING_INTENT,
                     FixtureTransaction.OTHER,
                     -> return
                 },

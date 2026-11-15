@@ -3,6 +3,7 @@ use crate::{CoreDiagnosticError, CoreDiagnosticWorkerTask, CoreProbeError, CoreS
 use vpnhide_diagnostic_model::framework_callbacks::{
     CallbackEvent, CallbackObservation, CallbackRegistration,
 };
+use vpnhide_diagnostic_model::framework_pending::{PendingObservation, PendingRegistration};
 use vpnhide_diagnostic_model::{Sample, framework as model};
 macro_rules! sample {
     ($name:ident, $ty:ty) => {
@@ -148,6 +149,30 @@ pub struct CoreFrameworkObservation {
     pub legacy_enumeration: CoreLegacyInfosSample,
     pub legacy_ordinary: CoreLegacyOrdinarySample,
     pub callbacks: Vec<CoreCallbackObservation>,
+    pub pending_intents: Vec<CorePendingObservation>,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum CorePendingRegistration {
+    Listen,
+    Request,
+}
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CorePendingObservation {
+    pub registration: CorePendingRegistration,
+    pub handles: Vec<u64>,
+    pub malformed: bool,
+}
+impl From<CorePendingObservation> for PendingObservation {
+    fn from(value: CorePendingObservation) -> Self {
+        Self {
+            registration: match value.registration {
+                CorePendingRegistration::Listen => PendingRegistration::Listen,
+                CorePendingRegistration::Request => PendingRegistration::Request,
+            },
+            handles: value.handles,
+            malformed: value.malformed,
+        }
+    }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum CoreCallbackRegistration {
@@ -205,6 +230,7 @@ impl From<CoreFrameworkObservation> for model::FrameworkObservation {
             ordinary_capabilities_sha256: v.ordinary_capabilities_sha256.into(),
             ordinary_properties_sha256: v.ordinary_properties_sha256.into(),
             callbacks: v.callbacks.into_iter().map(Into::into).collect(),
+            pending_intents: v.pending_intents.into_iter().map(Into::into).collect(),
             active_network: vpnhide_diagnostic_model::framework_default::ActiveNetworkObservation {
                 window: v.active_network.window.map(Into::into),
                 handle: v.active_network.handle.into(),
@@ -246,7 +272,8 @@ simple_enum!(
     LegacyTypeVpn,
     LegacyEnumeration,
     DefaultNetwork,
-    Callbacks
+    Callbacks,
+    PendingIntent
 );
 simple_enum!(
     CoreFrameworkControlFailure,
@@ -353,6 +380,7 @@ mod tests {
     fn typed_worker_samples_keep_null_distinct_from_error_and_preserve_bounds() {
         let value = CoreFrameworkObservation {
             callbacks: vec![],
+            pending_intents: vec![],
             active_network: CoreActiveNetworkObservation {
                 window: None,
                 handle: CoreOptionalHandleSample::Value { value: None },

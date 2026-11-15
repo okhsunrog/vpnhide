@@ -25,7 +25,7 @@ internal class FrameworkCallbackFixture {
         val bundle = param.args.getOrNull(2) as? Bundle ?: return null
         val request = bundle.getParcelable<NetworkRequest>(NetworkRequest::class.java.simpleName) ?: return null
         val nri = param.args[0] ?: return null
-        if (field(nri, "mUid", "uid") != worker.uid || field(nri, "mPid", "pid") != worker.pid) return null
+        if (!fixtureRequestOwnedBy(nri, worker)) return null
         val ordinary = bundle.getParcelable<Network>(Network::class.java.simpleName) ?: return null
         val capabilities = bundle.getParcelable<NetworkCapabilities>(NetworkCapabilities::class.java.simpleName) ?: return null
         if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return null
@@ -63,11 +63,6 @@ internal class FrameworkCallbackFixture {
         val request: NetworkRequest,
     )
 
-    private fun field(
-        instance: Any,
-        vararg names: String,
-    ): Int? = names.firstNotNullOfOrNull { runCatching { XposedHelpers.getIntField(instance, it) }.getOrNull() }
-
     private fun registration(type: String?): FixtureCallbackRegistration? =
         when (type) {
             "LISTEN" -> FixtureCallbackRegistration.LISTEN
@@ -79,3 +74,15 @@ internal class FrameworkCallbackFixture {
     private fun callbackType(name: String): Int =
         runCatching { XposedHelpers.getStaticIntField(ConnectivityManager::class.java, name) }.getOrDefault(-1)
 }
+
+internal fun fixtureRequestOwnedBy(
+    requestInfo: Any,
+    worker: FixtureWorker,
+): Boolean =
+    fixtureRequestField(requestInfo, "mUid", "uid") == worker.uid &&
+        fixtureRequestField(requestInfo, "mPid", "pid") == worker.pid
+
+private fun fixtureRequestField(
+    instance: Any,
+    vararg names: String,
+): Int? = names.firstNotNullOfOrNull { runCatching { XposedHelpers.getIntField(instance, it) }.getOrNull() }

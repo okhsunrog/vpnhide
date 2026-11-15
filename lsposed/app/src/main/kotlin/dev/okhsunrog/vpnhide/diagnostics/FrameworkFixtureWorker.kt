@@ -51,7 +51,11 @@ internal suspend fun measureFrameworkFixture(
             CoreFrameworkPhase.REVOKED,
         )) {
             val next = requireNotNull(core.frameworkWorkerStep(task, BuildConfig.HOOK_SOURCE_SHA256, phase, previous))
-            previous = observeFramework(manager, next).copy(callbacks = observeFrameworkCallbacks(manager, next, handler))
+            previous =
+                observeFramework(manager, next).copy(
+                    callbacks = observeFrameworkCallbacks(manager, next, handler),
+                    pendingIntents = observeFrameworkPendingIntents(context, manager),
+                )
         }
         core.frameworkWorkerStep(task, BuildConfig.HOOK_SOURCE_SHA256, CoreFrameworkPhase.FINISHED, previous)
     } finally {
@@ -89,6 +93,7 @@ private fun observeFramework(
         legacy.type,
         legacy.enumeration,
         legacy.ordinary,
+        emptyList(),
         emptyList(),
     )
 }

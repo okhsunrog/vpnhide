@@ -5,9 +5,10 @@ use crate::{
     framework_callbacks::{CallbackObservation, CallbackSource},
     framework_default::{ActiveNetworkObservation, ActiveNetworkSource},
     framework_legacy::{LegacyObservation, LegacySourceEvidence},
+    framework_pending::{PendingObservation, PendingSource},
 };
 use serde::{Deserialize, Serialize};
-pub const FRAMEWORK_PROTOCOL: u32 = 4;
+pub const FRAMEWORK_PROTOCOL: u32 = 5;
 pub const FRAMEWORK_LEASE_MS: u64 = 25_000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -152,6 +153,7 @@ pub struct FrameworkAcknowledgement {
     pub properties_filtered: bool,
     pub active_network: ActiveNetworkSource,
     pub callbacks: Vec<CallbackSource>,
+    pub pending_intents: Vec<PendingSource>,
     pub legacy: LegacySourceEvidence,
 }
 impl FrameworkAcknowledgement {
@@ -160,6 +162,7 @@ impl FrameworkAcknowledgement {
             && self.legacy.bounded()
             && self.active_network.bounded()
             && crate::framework_callbacks::sources_bounded(&self.callbacks)
+            && crate::framework_pending::sources_bounded(&self.pending_intents)
             && self.version == FRAMEWORK_PROTOCOL
             && self.session == envelope.session
             && self.core_epoch == envelope.core_epoch
@@ -196,6 +199,7 @@ pub struct FrameworkObservation {
     pub ordinary_properties_sha256: Sample<String>,
     pub active_network: ActiveNetworkObservation,
     pub callbacks: Vec<CallbackObservation>,
+    pub pending_intents: Vec<PendingObservation>,
     pub legacy: LegacyObservation,
 }
 impl FrameworkObservation {
@@ -203,6 +207,7 @@ impl FrameworkObservation {
         self.legacy.bounded()
             && self.active_network.bounded()
             && crate::framework_callbacks::observations_bounded(&self.callbacks)
+            && crate::framework_pending::observations_bounded(&self.pending_intents)
             && self.networks.value().is_none_or(|v| {
                 v.len() <= 256
                     && v.iter().all(|&h| h != 0)
@@ -233,6 +238,7 @@ impl FrameworkObservation {
             ordinary_properties_sha256: Sample::Error(ProbeError::Unsupported),
             active_network: ActiveNetworkObservation::unavailable(),
             callbacks: vec![],
+            pending_intents: vec![],
             legacy: LegacyObservation::unavailable(),
         }
     }
@@ -248,6 +254,7 @@ pub enum FrameworkCheck {
     LegacyEnumeration,
     DefaultNetwork,
     Callbacks,
+    PendingIntent,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -372,6 +379,9 @@ fn observed_leaks(phases: &[FrameworkPhaseEvidence]) -> Vec<FrameworkCheck> {
     }
     if crate::framework_callbacks::leaked(raw, protected) {
         leaked.push(FrameworkCheck::Callbacks);
+    }
+    if crate::framework_pending::leaked(raw, protected) {
+        leaked.push(FrameworkCheck::PendingIntent);
     }
     leaked
 }
@@ -551,6 +561,11 @@ pub fn evaluate_framework(
         Ok(()) => {}
         Err(failure) => result.controls.push(failure),
     }
+    match crate::framework_pending::evaluate([prepared, raw, protected, revoked]) {
+        Ok(()) if cleanup => result.proven.push(V::PendingIntent),
+        Ok(()) => {}
+        Err(failure) => result.controls.push(failure),
+    }
     result.leaked.sort();
     result.leaked.dedup();
     result.controls.sort();
@@ -628,6 +643,7 @@ mod tests {
                     properties_filtered: protected,
                     active_network: ActiveNetworkSource::default(),
                     callbacks: vec![],
+                    pending_intents: vec![],
                     legacy: LegacySourceEvidence::default(),
                 },
                 observation: FrameworkObservation {
@@ -646,6 +662,7 @@ mod tests {
                     ordinary_properties_sha256: Sample::Value("2".repeat(64)),
                     active_network: ActiveNetworkObservation::unavailable(),
                     callbacks: vec![],
+                    pending_intents: vec![],
                     legacy: LegacyObservation::unavailable(),
                 },
             }
@@ -826,6 +843,54 @@ mod tests {
         evidence[2].observation.callbacks[0]
             .events
             .push(event(101, true));
+        let leak = evaluate_framework(&evidence[..3], false);
+        assert!(leak.leaked.contains(&check));
+        assert!(!leak.proven.contains(&check));
+    }
+
+    #[test]
+    fn pending_intents_require_one_broadcast_and_the_distinct_production_branches() {
+        use crate::framework_pending::PendingRegistration::*;
+        let mut evidence = legacy_phases();
+        for (phase, value) in evidence.iter_mut().enumerate() {
+            for registration in [Listen, Request] {
+                value.observation.pending_intents.push(PendingObservation {
+                    registration,
+                    handles: vec![if phase == 1 { 101 } else { 11 }],
+                    malformed: false,
+                });
+                if matches!(phase, 1 | 2) {
+                    value.acknowledgement.pending_intents.push(PendingSource {
+                        registration,
+                        ordinary_handle: 11,
+                        suppressed: phase == 2 && registration == Listen,
+                        cover_handle: (phase == 2 && registration == Request).then_some(11),
+                    });
+                }
+            }
+        }
+        let check = FrameworkCheck::PendingIntent;
+        let proof = evaluate_framework(&evidence, true);
+        assert!(proof.proven.contains(&check));
+        assert!(
+            crate::assessment::framework_checks(&proof.proven, true)
+                .contains(&crate::RequiredCheck::FrameworkPendingIntent)
+        );
+        for change in 0..6 {
+            let mut invalid = evidence.clone();
+            match change {
+                0 => invalid[1].observation.pending_intents[0].handles.clear(),
+                1 => invalid[2].acknowledgement.pending_intents[0].suppressed = false,
+                2 => invalid[2].acknowledgement.pending_intents[1].cover_handle = Some(12),
+                3 => invalid[2].observation.pending_intents[1].malformed = true,
+                4 => invalid[2].observation.pending_intents[1].handles.push(11),
+                _ => invalid[3].observation.pending_intents[0].handles.clear(),
+            }
+            let result = evaluate_framework(&invalid, true);
+            assert!(!result.proven.contains(&check), "case {change}");
+            assert!(result.proven.contains(&FrameworkCheck::Networks));
+        }
+        evidence[2].observation.pending_intents[0].handles.push(101);
         let leak = evaluate_framework(&evidence[..3], false);
         assert!(leak.leaked.contains(&check));
         assert!(!leak.proven.contains(&check));

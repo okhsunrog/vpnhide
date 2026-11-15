@@ -1111,7 +1111,11 @@ class HookEntry : IXposedHookLoadPackage {
                     val nri = param.args.firstOrNull() ?: return
                     rememberConnectivityService(param.thisObject)
                     val uid = extractRecipientUid(nri)
-                    frameworkFixture.dispatchCallbackFixture(param, uid)
+                    if (param.method.name == "sendPendingIntentForRequest") {
+                        frameworkFixture.dispatchPendingIntentFixture(param, uid)
+                    } else {
+                        frameworkFixture.dispatchCallbackFixture(param, uid)
+                    }
                     if (uid < 0 || !isTargetUid(uid, HookIds.Hook.LSPOSED_CONNECTIVITY_CALLBACK)) return
 
                     val request = extractNetworkRequest(nri)
@@ -1391,9 +1395,10 @@ class HookEntry : IXposedHookLoadPackage {
         if (naiIndex < 0) return
         val network = XposedHelpers.getObjectField(param.args[naiIndex], "network") as? Network ?: return
         if (!isVpnNetwork(cs, network)) return
-        rememberHiddenVpn(network.netIdOrNull())
+        if (!frameworkFixture.isFixtureCallbackNetwork(network)) rememberHiddenVpn(network.netIdOrNull())
         if (requestIsListen(request)) {
             suppressDispatch(param, uid, "VPN-listen PendingIntent")
+            frameworkFixture.pendingIntentHandled(network, null)
             return
         }
         val cover = coverNetworkFor(cs, uid)
@@ -1403,6 +1408,7 @@ class HookEntry : IXposedHookLoadPackage {
             return
         }
         param.args[naiIndex] = coverNai
+        frameworkFixture.pendingIntentHandled(network, cover)
         inCallbackDispatch.set(true)
         currentCallbackUid.set(uid)
         LsposedStats.record(uid, HookIds.Hook.LSPOSED_CONNECTIVITY_CALLBACK)

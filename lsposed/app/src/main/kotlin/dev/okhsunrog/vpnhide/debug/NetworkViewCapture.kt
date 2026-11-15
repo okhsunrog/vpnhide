@@ -19,6 +19,8 @@ import android.net.NetworkInfo
 import android.net.NetworkRequest
 import android.os.Build
 import android.os.SystemClock
+import dev.okhsunrog.vpnhide.networkBroadcastIntent
+import dev.okhsunrog.vpnhide.registerPrivateNetworkReceiver
 import java.util.concurrent.CopyOnWriteArrayList
 
 /** How a [NetworkViewSnapshot] is taken. */
@@ -325,7 +327,7 @@ private fun capturePendingIntent(
     val receiver = networkExtraReceiver(mapOf(LISTEN_INTENT_ACTION to listenNetIds, REQUEST_INTENT_ACTION to requestNetIds))
     val intents = mutableListOf<PendingIntent>()
     return try {
-        registerNotExported(
+        registerPrivateNetworkReceiver(
             context,
             receiver,
             IntentFilter().apply {
@@ -333,9 +335,9 @@ private fun capturePendingIntent(
                 addAction(REQUEST_INTENT_ACTION)
             },
         )
-        val listen = broadcastIntent(context, LISTEN_INTENT_ACTION, 0).also(intents::add)
+        val listen = networkBroadcastIntent(context, LISTEN_INTENT_ACTION, 0).also(intents::add)
         cm.registerNetworkCallback(listenAnyRequest(), listen)
-        val request = broadcastIntent(context, REQUEST_INTENT_ACTION, 1).also(intents::add)
+        val request = networkBroadcastIntent(context, REQUEST_INTENT_ACTION, 1).also(intents::add)
         cm.requestNetwork(internetAnyRequest(), request)
         Thread.sleep(captureMs)
         PendingIntentResult(registered = true, netIds = listenNetIds.distinct(), requestNetIds = requestNetIds.distinct())
@@ -373,26 +375,3 @@ private fun networkExtraReceiver(sinks: Map<String, MutableList<Int>>): Broadcas
             sinks[intent.action]?.add(netId)
         }
     }
-
-private fun broadcastIntent(
-    context: Context,
-    action: String,
-    requestCode: Int,
-): PendingIntent = PendingIntent.getBroadcast(context, requestCode, Intent(action).setPackage(context.packageName), pendingIntentFlags())
-
-private fun registerNotExported(
-    context: Context,
-    receiver: BroadcastReceiver,
-    filter: IntentFilter,
-) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-    } else {
-        context.registerReceiver(receiver, filter)
-    }
-}
-
-// ConnectivityService fills EXTRA_NETWORK into the intent, so it must be mutable.
-private fun pendingIntentFlags(): Int =
-    PendingIntent.FLAG_UPDATE_CURRENT or
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0

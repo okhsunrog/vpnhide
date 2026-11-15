@@ -159,6 +159,20 @@ internal class FrameworkFixtureChannel {
             }
         }
 
+    private fun encodePendingIntents(evidence: FixtureEvidenceSnapshot) =
+        buildJsonArray {
+            for ((kind, pending) in evidence.pendingIntents) {
+                add(
+                    buildJsonObject {
+                        put("registration", kind.name.lowercase())
+                        put("ordinary_handle", pending.ordinaryHandle)
+                        put("suppressed", pending.suppressed)
+                        put("cover_handle", pending.coverHandle)
+                    },
+                )
+            }
+        }
+
     private fun encode(
         authority: FixtureAuthority,
         objects: FrameworkFixtureObjects,
@@ -201,6 +215,7 @@ internal class FrameworkFixtureChannel {
             put("legacy", encodeLegacy(evidence))
             put("active_network", encodeActiveNetwork(evidence.activeNetwork))
             put("callbacks", encodeCallbacks(evidence))
+            put("pending_intents", encodePendingIntents(evidence))
             for (name in listOf(
                 "networks_source",
                 "capabilities_source",

@@ -82,6 +82,9 @@ pub(crate) fn framework_checks(
             FrameworkCheck::Callbacks => {
                 result.insert(RequiredCheck::FrameworkCallbacks);
             }
+            FrameworkCheck::PendingIntent => {
+                result.insert(RequiredCheck::FrameworkPendingIntent);
+            }
             FrameworkCheck::LegacyTypeVpn | FrameworkCheck::LegacyEnumeration => {
                 if !require_both_legacy
                     || [

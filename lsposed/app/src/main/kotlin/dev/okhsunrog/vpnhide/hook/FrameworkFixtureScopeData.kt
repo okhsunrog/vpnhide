@@ -8,9 +8,19 @@ import kotlinx.serialization.json.jsonObject
 
 internal enum class FixturePhase { PREPARED, RAW, PROTECTED, REVOKED }
 
-internal enum class FixtureTransaction { NETWORKS, CAPABILITIES, PROPERTIES, LEGACY_TYPE, LEGACY_ENUM, ACTIVE_NETWORK, CALLBACK, OTHER }
+internal enum class FixtureTransaction {
+    NETWORKS,
+    CAPABILITIES,
+    PROPERTIES,
+    LEGACY_TYPE,
+    LEGACY_ENUM,
+    ACTIVE_NETWORK,
+    CALLBACK,
+    PENDING_INTENT,
+    OTHER,
+}
 
-internal const val FRAMEWORK_FIXTURE_PROTOCOL = 4
+internal const val FRAMEWORK_FIXTURE_PROTOCOL = 5
 
 internal data class FixtureWorker(
     val uid: Int,
@@ -113,6 +123,7 @@ internal data class FixtureInvocation(
     val authority: FixtureAuthority,
     val transaction: FixtureTransaction,
     val callback: FixtureCallbackRegistration? = null,
+    val pendingIntent: FixturePendingRegistration? = null,
 )
 
 /** Nested untrusted Binder entries must clear the inherited RAW privilege. */
@@ -149,9 +160,18 @@ internal data class FixtureEvidenceSnapshot(
     val legacyEnumerationStartedNs: Long,
     val activeNetwork: FixtureActiveNetworkEvidence,
     val callbacks: Map<FixtureCallbackRegistration, FixtureCallbackEvidence>,
+    val pendingIntents: Map<FixturePendingRegistration, FixturePendingEvidence>,
 )
 
 internal enum class FixtureCallbackRegistration { LISTEN, DEFAULT, REQUEST }
+
+internal enum class FixturePendingRegistration { LISTEN, REQUEST }
+
+internal data class FixturePendingEvidence(
+    val ordinaryHandle: Long,
+    val suppressed: Boolean = false,
+    val coverHandle: Long? = null,
+)
 
 internal data class FixtureCallbackEvidence(
     val ordinaryHandle: Long,
@@ -181,6 +201,7 @@ internal class FixtureEvidenceLedger {
     var activeNetwork = FixtureActiveNetworkEvidence()
         private set
     private val callbacks = mutableMapOf<FixtureCallbackRegistration, FixtureCallbackEvidence>()
+    private val pendingIntents = mutableMapOf<FixturePendingRegistration, FixturePendingEvidence>()
 
     fun snapshot() =
         FixtureEvidenceSnapshot(
@@ -192,6 +213,7 @@ internal class FixtureEvidenceLedger {
             legacyEnumerationStartedNs,
             activeNetwork,
             callbacks.toMap(),
+            pendingIntents.toMap(),
         )
 
     fun begin(
@@ -237,6 +259,19 @@ internal class FixtureEvidenceLedger {
         registration: FixtureCallbackRegistration,
         ordinaryHandle: Long,
     ): Boolean = callbacks.putIfAbsent(registration, FixtureCallbackEvidence(ordinaryHandle)) == null
+
+    fun beginPendingIntent(
+        registration: FixturePendingRegistration,
+        ordinaryHandle: Long,
+    ): Boolean = pendingIntents.putIfAbsent(registration, FixturePendingEvidence(ordinaryHandle)) == null
+
+    fun recordPendingIntent(
+        registration: FixturePendingRegistration,
+        coverHandle: Long?,
+    ) {
+        val evidence = pendingIntents[registration] ?: return
+        pendingIntents[registration] = evidence.copy(suppressed = coverHandle == null, coverHandle = coverHandle)
+    }
 
     fun recordCallback(
         registration: FixtureCallbackRegistration,

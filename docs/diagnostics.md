@@ -320,9 +320,28 @@ tested Core hot-switched after the hook reload and retained the same boot and
 `system_server` generation. Both framework files and the temporary device
 helper were removed.
 
-PendingIntent still needs an
-independent dispatch scenario. Package Visibility and Ports are required only
-when enabled and still lack controlled results. See the
+The PendingIntent scenario opens independent LISTEN and REQUEST registrations
+using package-scoped broadcasts. For each authenticated worker registration,
+the first ordinary AVAILABLE enters the real PendingIntent dispatcher with a
+detached VPN fixture before the original event. RAW must deliver the fixture
+network. Protected LISTEN must suppress the fixture event and deliver the
+original ordinary event. Protected REQUEST must deliver the ordinary cover in
+`EXTRA_NETWORK`. The worker verifies that the broadcast includes a request with
+the expected INTERNET capability and unregisters both registrations and receivers.
+Core requires one delivery per registration, ordinary controls before and after
+the protected phase, and fixture cleanup. Both dispatch paths must qualify the
+group. Paired RPC39 uses framework channel version5 for this evidence.
+
+On Pixel 8 Pro with Android 17 and Builtin, PendingIntent and callbacks
+qualified in 18 consecutive runs, each confirming 15 of 20 groups. The other
+two runs in the 20-run series were a stale result and an Android worker
+deadline. An earlier post-unlock run reached both protected dispatch branches
+but did not receive the RAW broadcasts within the worker's observation window.
+No run reported a qualified leak. The framework files and registrations were
+gone after the series, and system_server's open descriptor count was unchanged.
+
+Package Visibility and Ports are required only when enabled and still lack
+controlled results. See the
 [framework fixture requirements](rfcs/0002-autonomous-diagnostics.md#74-почему-callback--главный-технический-риск).
 Android bionic, SELinux, Java callback isolation and old game-process coverage need
 real device acceptance. QEMU/static libc evidence does not replace those gates.

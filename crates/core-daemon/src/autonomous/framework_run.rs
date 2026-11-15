@@ -170,27 +170,33 @@ impl FrameworkRun {
                 self.failure_context,
             ));
         }
-        if debug
-            && requested_phase == FrameworkWorkerPhase::Finished
-            && result.is_ok()
-            && !evaluate_framework(&self.phases, true)
-                .proven
-                .contains(&FrameworkCheck::Callbacks)
-        {
-            self.log_callback_evidence();
+        if debug && requested_phase == FrameworkWorkerPhase::Finished && result.is_ok() {
+            self.log_unverified_delivery();
         }
         result
     }
 
-    fn log_callback_evidence(&self) {
+    fn log_unverified_delivery(&self) {
+        let proof = evaluate_framework(&self.phases, true).proven;
         for phase in &self.phases {
-            crate::alog::info(&format!(
-                "diagnostics: callback session={} phase={:?} sources={:?} observations={:?}",
-                self.envelope.session,
-                phase.envelope.phase,
-                phase.acknowledgement.callbacks,
-                phase.observation.callbacks,
-            ));
+            if !proof.contains(&FrameworkCheck::Callbacks) {
+                crate::alog::info(&format!(
+                    "diagnostics: callback session={} phase={:?} sources={:?} observations={:?}",
+                    self.envelope.session,
+                    phase.envelope.phase,
+                    phase.acknowledgement.callbacks,
+                    phase.observation.callbacks,
+                ));
+            }
+            if !proof.contains(&FrameworkCheck::PendingIntent) {
+                crate::alog::info(&format!(
+                    "diagnostics: PendingIntent session={} phase={:?} sources={:?} observations={:?}",
+                    self.envelope.session,
+                    phase.envelope.phase,
+                    phase.acknowledgement.pending_intents,
+                    phase.observation.pending_intents,
+                ));
+            }
         }
     }
     fn step_with(
@@ -378,6 +384,7 @@ mod tests {
             properties_filtered: false,
             active_network: Default::default(),
             callbacks: vec![],
+            pending_intents: vec![],
             legacy: Default::default(),
         }
     }
