@@ -65,11 +65,11 @@ pub(crate) fn observations_bounded(items: &[CallbackObservation]) -> bool {
 
 fn source(phase: &FrameworkPhaseEvidence, kind: CallbackRegistration) -> Option<&CallbackSource> {
     let identity = &phase.acknowledgement.sources;
-    phase.acknowledgement.callbacks.iter().find(|item| {
-        item.registration == kind
-            && item.ordinary_handle != identity.vpn_handle
-            && item.ordinary_handle != identity.ordinary_handle
-    })
+    phase
+        .acknowledgement
+        .callbacks
+        .iter()
+        .find(|item| item.registration == kind && item.ordinary_handle != identity.vpn_handle)
 }
 
 fn observation(

@@ -131,6 +131,7 @@ internal data class FixtureInvocation(
     val transaction: FixtureTransaction,
     val callback: FixtureCallbackRegistration? = null,
     val pendingIntent: FixturePendingRegistration? = null,
+    val ordinaryAgent: Any? = null,
 )
 
 /** Nested untrusted Binder entries must clear the inherited RAW privilege. */

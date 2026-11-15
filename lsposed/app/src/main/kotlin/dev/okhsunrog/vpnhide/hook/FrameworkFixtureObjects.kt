@@ -29,7 +29,10 @@ internal class FrameworkFixtureObjects(
         }
 
     private val vpnCapabilities = sourceCapabilities(NetworkCapabilities.TRANSPORT_VPN, true)
-    private val ordinaryCapabilities = sourceCapabilities(NetworkCapabilities.TRANSPORT_WIFI, false)
+    private val ordinaryCapabilities =
+        sourceCapabilities(NetworkCapabilities.TRANSPORT_WIFI, false).also {
+            XposedHelpers.callMethod(it, "addCapability", NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        }
 
     private fun sourceProperties(
         name: String,

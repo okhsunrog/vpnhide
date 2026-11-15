@@ -343,22 +343,17 @@ unshare -Urn --map-users="10000:${subuid_start}:1" sh -ec 'ip link set lo up; ca
 The rule fixture test uses the mapped UID 10000 and checks ordinary teardown,
 recovery after abrupt process exit and refusal to remove a conflicting rule.
 
-The synchronous default-network check uses the real
-`ConnectivityManager.getActiveNetwork()` Binder call. The source hook records
-the original handle, then supplies the fixture VPN only to the authenticated
-worker in RAW and Protected. Core requires a timed acknowledgement for each
-phase, the VPN handle and transport in RAW, the real production replacement in
-Protected and the same ordinary default network before and after injection.
-The ordinary control is the handle returned to the worker outside the fixture.
-When a live VPN is active for the worker, the platform's original handle can
-differ from that control. Core checks the original handle independently across
-the two injected phases and compares the protected reply with the ordinary
-control.
-A missing or changing ordinary default makes the check unverified. An observed
-fixture VPN handle in both active phases remains a leak after cleanup failure.
-This uses APK/Core RPC37 and the version3 framework channel. On a Pixel 8 Pro
-with Android 17 and Builtin, RPC37 confirmed the default-network check in two
-successive runs after reboot, using separate Android worker processes during
+The default-network check uses the real `ConnectivityManager.getActiveNetwork()`
+Binder call. The source supplies a test VPN in RAW and Protected and a test
+ordinary network in Prepared and Revoked. Only the authenticated worker receives
+these inputs. For the protected call, the resolver receives the ordinary network
+as the VPN's underlying candidate and runs its usual suitability checks. Core
+requires the test VPN in RAW, evidence of the production replacement, and the
+same test ordinary handle in the protected reply and both quiet phases.
+An observed fixture VPN handle in both active phases remains a leak after cleanup failure.
+The earlier live-network version used APK/Core RPC37 and framework channel
+version3. On a Pixel 8 Pro with Android 17 and Builtin, that version confirmed
+the default-network check in two successive runs after reboot, using separate Android worker processes during
 Direct Boot. Both runs reported 13 confirmed groups, seven unverified groups
 and zero observed leaks. The framework authority and acknowledgement were
 removed after the runs.
@@ -368,18 +363,20 @@ retained the eight confirmed native groups. The two immediate retries passed;
 the cause of the intermittent timeout was not established.
 
 The callback scenario opens independent Android LISTEN, default and REQUEST
-registrations in each phase. On frameworks with the Bundle dispatcher, the
-first real ordinary AVAILABLE for each authenticated worker registration
-triggers synthetic VPN AVAILABLE and LOST ahead of the original event.
-The two synthetic inputs go through the production router and the platform's
-Messenger delivery. RAW must receive the VPN handle, transport and interface
-marker and the original ordinary event. Protected LISTEN must suppress both
-VPN events. Protected default and REQUEST must rebuild AVAILABLE from the
-ordinary cover and keep it available when only the VPN is lost. The following
-real AVAILABLE for the same cover must not produce a duplicate.
+registrations in each phase. Once ConnectivityService has registered an
+authenticated worker request, the fixture supplies VPN AVAILABLE and LOST
+followed by ordinary AVAILABLE. The quiet phases supply ordinary AVAILABLE
+alone. The fixture uses detached network agents and the platform dispatchers
+and keeps live network events out of these worker registrations. Both test
+agents exist only in the dispatch scope. RAW must receive the VPN handle,
+transport and interface marker and the test ordinary event. Protected LISTEN
+must suppress both VPN events. Protected default and REQUEST must rebuild
+AVAILABLE from the ordinary cover and keep it available when only the VPN is
+lost. The following ordinary AVAILABLE must be deduplicated.
 Core requires all three registrations to qualify the group. Android workers
-unregister the callbacks after measurement. The paired RPC38 uses framework
-channel version4 for the new observations and dispatch acknowledgements.
+unregister the callbacks after measurement. The earlier live-network version
+introduced these observations and acknowledgements in RPC38 and framework
+channel version4.
 
 Pixel 8 Pro with Android 17 and Builtin confirmed the callback group in 29 of
 32 repeated runs. The 16 runs following the two post-unlock worker deadlines
@@ -390,11 +387,11 @@ tested Core hot-switched after the hook reload and retained the same boot and
 helper were removed.
 
 The PendingIntent scenario opens independent LISTEN and REQUEST registrations
-using package-scoped broadcasts. For each authenticated worker registration,
-the first ordinary AVAILABLE enters the real PendingIntent dispatcher with a
-detached VPN fixture before the original event. RAW must deliver the fixture
-network. Protected LISTEN must suppress the fixture event and deliver the
-original ordinary event. Protected REQUEST must deliver the ordinary cover in
+using package-scoped broadcasts. The same registration hook enters the real
+PendingIntent dispatcher with the detached VPN fixture in RAW and Protected and
+supplies the ordinary event if the one-shot registration remains available.
+RAW must deliver the fixture VPN. Protected LISTEN must suppress it and deliver
+the ordinary event. Protected REQUEST must deliver the ordinary cover in
 `EXTRA_NETWORK`. The worker overlaps the two independent broadcast waits with
 the PackageManager probes in the same phase. Android delivers the diagnostic
 broadcasts on the worker's callback handler at foreground priority. The worker
@@ -402,7 +399,8 @@ verifies that the broadcast includes a request with
 the expected INTERNET capability and unregisters both registrations and receivers.
 Core requires one delivery per registration, ordinary controls before and after
 the protected phase, and fixture cleanup. Both dispatch paths must qualify the
-group. Paired RPC39 uses framework channel version5 for this evidence.
+group. The earlier live-network version introduced this evidence in RPC39 and
+framework channel version5.
 
 On Pixel 8 Pro with Android 17 and Builtin, PendingIntent and callbacks
 qualified in 18 consecutive runs, each confirming 15 of 20 groups. The other
@@ -411,6 +409,14 @@ deadline. An earlier post-unlock run reached both protected dispatch branches
 but did not receive the RAW broadcasts within the worker's observation window.
 No run reported a qualified leak. The framework files and registrations were
 gone after the series, and system_server's open descriptor count was unchanged.
+
+On Pixel 8 Pro with Android 17 and Builtin, the detached inputs confirmed the
+default-network, callback and PendingIntent groups in four of four airplane-mode
+runs with Wi-Fi off and no Android default network. The same checks produced
+current results in three of four connected runs without a VPN and four of seven
+with a VPN. Each current result confirmed 17 of 20 groups. Across the online
+series, two workers missed the start deadline, one missed the framework deadline,
+and one report was stale. No run recorded a qualified leak.
 
 When Apps hiding is configured, Core gives the worker a short-lived authority
 for the installed Android Settings package in its own profile. The worker calls

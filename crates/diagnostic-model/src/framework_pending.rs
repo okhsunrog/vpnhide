@@ -60,11 +60,11 @@ pub(crate) fn observations_bounded(items: &[PendingObservation]) -> bool {
 
 fn source(phase: &FrameworkPhaseEvidence, mode: PendingRegistration) -> Option<&PendingSource> {
     let identity = &phase.acknowledgement.sources;
-    phase.acknowledgement.pending_intents.iter().find(|item| {
-        item.registration == mode
-            && item.ordinary_handle != identity.vpn_handle
-            && item.ordinary_handle != identity.ordinary_handle
-    })
+    phase
+        .acknowledgement
+        .pending_intents
+        .iter()
+        .find(|item| item.registration == mode && item.ordinary_handle != identity.vpn_handle)
 }
 
 fn observation(

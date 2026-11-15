@@ -1111,10 +1111,9 @@ class HookEntry : IXposedHookLoadPackage {
                     val nri = param.args.firstOrNull() ?: return
                     rememberConnectivityService(param.thisObject)
                     val uid = extractRecipientUid(nri)
-                    if (param.method.name == "sendPendingIntentForRequest") {
-                        frameworkFixture.dispatchPendingIntentFixture(param, uid)
-                    } else {
-                        frameworkFixture.dispatchCallbackFixture(param, uid)
+                    if (frameworkFixture.suppressLiveDispatch(param.thisObject, nri, uid)) {
+                        param.result = null
+                        return
                     }
                     if (uid < 0 || !isTargetUid(uid, HookIds.Hook.LSPOSED_CONNECTIVITY_CALLBACK)) return
 

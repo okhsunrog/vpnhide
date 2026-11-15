@@ -754,7 +754,7 @@ mod tests {
     }
 
     #[test]
-    fn active_network_needs_a_real_cover_and_preserves_observed_leaks() {
+    fn active_network_needs_an_independent_cover_and_preserves_observed_leaks() {
         use crate::framework_legacy::LegacyCallWindow;
 
         let make = || {
@@ -793,6 +793,17 @@ mod tests {
             phase.acknowledgement.active_network.original_handle = Some(104);
         }
         assert!(evaluate_framework(&real_vpn, true).proven.contains(&check));
+        let mut offline = make();
+        for (index, phase) in offline.iter_mut().enumerate() {
+            phase.acknowledgement.active_network.original_handle =
+                matches!(index, 1 | 2).then_some(102);
+            if index != 1 {
+                phase.observation.active_network.handle = Sample::Value(Some(102));
+            }
+        }
+        assert!(evaluate_framework(&offline, true).proven.contains(&check));
+        offline[2].observation.active_network.handle = Sample::Value(Some(11));
+        assert!(!evaluate_framework(&offline, true).proven.contains(&check));
         for change in 0..10 {
             let mut evidence = make();
             match change {
@@ -827,7 +838,7 @@ mod tests {
         let mut evidence = legacy_phases();
         for (i, phase) in evidence.iter_mut().enumerate() {
             for registration in [Listen, Default, Request] {
-                let ordinary = event(11, false);
+                let ordinary = event(102, false);
                 let events = match i {
                     1 => vec![event(101, false), event(101, true), ordinary],
                     _ => vec![ordinary],
@@ -841,7 +852,7 @@ mod tests {
                 if matches!(i, 1 | 2) {
                     phase.acknowledgement.callbacks.push(CallbackSource {
                         registration,
-                        ordinary_handle: 11,
+                        ordinary_handle: 102,
                         available_handled: i == 2,
                         lost_handled: i == 2,
                     });
@@ -865,7 +876,7 @@ mod tests {
                 2 => invalid[1].observation.callbacks[1].events.swap(0, 1),
                 3 => invalid[2].observation.callbacks[2]
                     .events
-                    .push(event(11, true)),
+                    .push(event(102, true)),
                 _ => invalid[3].observation.callbacks[0].events.clear(),
             }
             assert!(
@@ -889,15 +900,15 @@ mod tests {
             for registration in [Listen, Request] {
                 value.observation.pending_intents.push(PendingObservation {
                     registration,
-                    handles: vec![if phase == 1 { 101 } else { 11 }],
+                    handles: vec![if phase == 1 { 101 } else { 102 }],
                     malformed: false,
                 });
                 if matches!(phase, 1 | 2) {
                     value.acknowledgement.pending_intents.push(PendingSource {
                         registration,
-                        ordinary_handle: 11,
+                        ordinary_handle: 102,
                         suppressed: phase == 2 && registration == Listen,
-                        cover_handle: (phase == 2 && registration == Request).then_some(11),
+                        cover_handle: (phase == 2 && registration == Request).then_some(102),
                     });
                 }
             }
@@ -916,7 +927,7 @@ mod tests {
                 1 => invalid[2].acknowledgement.pending_intents[0].suppressed = false,
                 2 => invalid[2].acknowledgement.pending_intents[1].cover_handle = Some(12),
                 3 => invalid[2].observation.pending_intents[1].malformed = true,
-                4 => invalid[2].observation.pending_intents[1].handles.push(11),
+                4 => invalid[2].observation.pending_intents[1].handles.push(102),
                 _ => invalid[3].observation.pending_intents[0].handles.clear(),
             }
             let result = evaluate_framework(&invalid, true);

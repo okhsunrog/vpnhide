@@ -34,13 +34,13 @@ internal class FrameworkFixtureHooks {
     private val scope = FixtureInvocationScope()
     private val attached = Collections.newSetFromMap(IdentityHashMap<Class<*>, Boolean>())
     private val dispatches = FixtureDispatchRegistry()
-    private val callbacks = FrameworkCallbackFixture()
-    private val pendingIntents = FrameworkPendingIntentFixture()
     private val guard = Any()
 
     @Volatile private var state: State? = null
 
     @Volatile private var receiver: Any? = null
+
+    @Volatile private var networkDispatchInstalled = false
     private var observer: FileObserver? = null
     private var handler: Handler? = null
 
@@ -80,7 +80,48 @@ internal class FrameworkFixtureHooks {
         ).forEach { name ->
             XposedBridge.hookAllMethods(instance.javaClass, name, sourceHook(name))
         }
+        installNetworkDispatch(instance.javaClass)
     }
+
+    private fun installNetworkDispatch(type: Class<*>) {
+        val dispatch = runCatching { FrameworkNetworkDispatchFixture(type) }.getOrNull() ?: return
+        for (name in listOf("getVpnUnderlyingNetworks", "getNetworkAgentInfoForNetwork")) {
+            XposedBridge.hookAllMethods(type, name, networkInputHook(name))
+        }
+        val handles =
+            XposedBridge.hookAllMethods(
+                type,
+                "handleRegisterNetworkRequests",
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (state == null || param.hasThrowable()) return
+                        val requests = param.args.singleOrNull() as? Set<*> ?: return
+                        for (request in requests.filterNotNull()) {
+                            runCatching { dispatchRegistration(dispatch, param.thisObject, request) }.onFailure {
+                                HookLog.i("diagnostics registration fixture failed: ${it.cause ?: it}")
+                            }
+                        }
+                    }
+                },
+            )
+        networkDispatchInstalled = handles.isNotEmpty()
+    }
+
+    private fun networkInputHook(name: String): XC_MethodHook =
+        object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                val invocation = scope.get() ?: return
+                if (param.thisObject !== receiver || invocation.transaction !in networkSourceTransactions) return
+                val active = current() ?: return
+                val argument = param.args.singleOrNull()
+                if (name == "getVpnUnderlyingNetworks" && argument == active.authority.worker.uid) {
+                    param.result = arrayOf(active.objects.ordinary)
+                }
+                if (name == "getNetworkAgentInfoForNetwork" && argument == active.objects.ordinary) {
+                    invocation.ordinaryAgent?.let { param.result = it }
+                }
+            }
+        }
 
     private fun reload() {
         synchronized(guard) {
@@ -188,12 +229,16 @@ internal class FrameworkFixtureHooks {
             override fun afterHookedMethod(param: MethodHookParam) {
                 if (param.hasThrowable() || param.thisObject !== receiver) return
                 val active = current() ?: return
-                if (active.authority.phase !in setOf(FixturePhase.RAW, FixturePhase.PROTECTED)) return
+                if (name == "getActiveNetwork") {
+                    injectActiveNetwork(param, active)
+                    return
+                }
+                if (name == "getNetworkCapabilities" && param.args.firstOrNull() == active.objects.ordinary) {
+                    param.result = active.objects.capabilities(active.objects.ordinary)
+                    return
+                }
+                if (!active.authority.injectsVpn()) return
                 when (name) {
-                    "getActiveNetwork" -> {
-                        injectActiveNetwork(param, active)
-                    }
-
                     "getNetworkInfo" -> {
                         injectLegacyType(param, active)
                     }
@@ -228,12 +273,14 @@ internal class FrameworkFixtureHooks {
         active: State,
     ) {
         if (scope.get()?.transaction != FixtureTransaction.ACTIVE_NETWORK || param.args.isNotEmpty()) return
-        val original = param.result as? Network ?: return
-        if (original == active.objects.vpn || original == active.objects.ordinary) return
         synchronized(guard) {
             if (current() !== active) return
+            if (!active.authority.injectsVpn()) {
+                param.result = active.objects.ordinary
+                return
+            }
             param.result = active.objects.vpn
-            active.evidence.recordActiveSource(original.networkHandle)
+            active.evidence.recordActiveSource(active.objects.ordinary.networkHandle)
             runCatching { acknowledge(active) }
         }
     }
@@ -248,82 +295,87 @@ internal class FrameworkFixtureHooks {
         }
     }
 
-    fun dispatchCallbackFixture(
-        param: XC_MethodHook.MethodHookParam,
-        uid: Int,
+    private fun dispatchRegistration(
+        dispatch: FrameworkNetworkDispatchFixture,
+        instance: Any,
+        request: Any,
     ) {
-        val active = state ?: return
-        val authority = active.authority
-        if (scope.get() != null || param.thisObject !== receiver || authority.worker.uid != uid ||
-            authority.phase !in setOf(FixturePhase.RAW, FixturePhase.PROTECTED)
-        ) {
-            return
+        if (!networkDispatchInstalled) return
+        val active = authorizedRegistration(instance, request) ?: return
+        val worker = active.authority.worker
+        val registration = dispatch.registration(request, worker) ?: return
+        val objects = active.objects
+        val ordinary = dispatch.detachedAgent(instance, objects.ordinary, objects, worker.uid)
+        val vpn = if (active.authority.injectsVpn()) dispatch.detachedAgent(instance, objects.vpn, objects, worker.uid) else null
+        val invocation = beginDispatch(active, registration, ordinary) ?: return
+        val previous = scope.enter(invocation)
+        try {
+            dispatch.send(instance, request, registration, vpn, ordinary) { current() === active }
+        } finally {
+            scope.restore(previous)
         }
-        runCatching {
-            val input = callbacks.input(param, authority.worker) ?: return
-            if (fixtureStartTicks(authority.worker.pid) != authority.worker.startTicks ||
-                input.ordinary == active.objects.vpn || input.ordinary == active.objects.ordinary
-            ) {
-                return
-            }
-            synchronized(guard) {
-                if (state !== active || channel.read() != authority ||
-                    !active.evidence.beginCallback(input.registration, input.ordinary.networkHandle)
-                ) {
-                    return
+    }
+
+    private fun beginDispatch(
+        active: State,
+        registration: FrameworkNetworkDispatchFixture.Registration,
+        ordinary: Any,
+    ): FixtureInvocation? =
+        synchronized(guard) {
+            if (state !== active || channel.read() != active.authority) return null
+            val handle = active.objects.ordinary.networkHandle
+            val evidence = active.evidence
+            val injected = active.authority.injectsVpn()
+            val invocation =
+                when (registration) {
+                    is FrameworkNetworkDispatchFixture.Registration.Callback -> {
+                        if (injected && !evidence.beginCallback(registration.kind, handle)) return null
+                        FixtureInvocation(
+                            active.authority,
+                            FixtureTransaction.CALLBACK,
+                            callback = registration.kind,
+                            ordinaryAgent = ordinary,
+                        )
+                    }
+
+                    is FrameworkNetworkDispatchFixture.Registration.Broadcast -> {
+                        if (injected && !evidence.beginPendingIntent(registration.kind, handle)) return null
+                        FixtureInvocation(
+                            active.authority,
+                            FixtureTransaction.PENDING_INTENT,
+                            pendingIntent = registration.kind,
+                            ordinaryAgent = ordinary,
+                        )
+                    }
                 }
-                acknowledge(active)
-            }
-            val previous = scope.enter(FixtureInvocation(authority, FixtureTransaction.CALLBACK, input.registration))
-            try {
-                callbacks.dispatch(param, input, active.objects) { current() === active }
-            } finally {
-                scope.restore(previous)
-            }
+            if (injected) acknowledge(active)
+            invocation
         }
+
+    fun suppressLiveDispatch(
+        instance: Any,
+        request: Any,
+        uid: Int,
+    ): Boolean {
+        if (!networkDispatchInstalled || state?.authority?.worker?.uid != uid) return false
+        if (scope.get()?.ordinaryAgent != null) return false
+        return authorizedRegistration(instance, request) != null
+    }
+
+    private fun authorizedRegistration(
+        instance: Any,
+        request: Any,
+    ): State? {
+        val active = state ?: return null
+        val worker = active.authority.worker
+        if (instance !== receiver || !fixtureRequestOwnedBy(request, worker)) return null
+        if (fixtureStartTicks(worker.pid) != worker.startTicks || channel.read() != active.authority) return null
+        return active
     }
 
     fun isFixtureCallbackNetwork(network: Network): Boolean {
         val invocation = scope.get() ?: return false
         return (invocation.callback != null || invocation.pendingIntent != null) && current()?.objects?.vpn == network
-    }
-
-    fun dispatchPendingIntentFixture(
-        param: XC_MethodHook.MethodHookParam,
-        uid: Int,
-    ) {
-        val active = state ?: return
-        val authority = active.authority
-        if (scope.get() != null || param.thisObject !== receiver || authority.worker.uid != uid ||
-            authority.phase !in setOf(FixturePhase.RAW, FixturePhase.PROTECTED)
-        ) {
-            return
-        }
-        runCatching {
-            val input = pendingIntents.input(param, authority.worker) ?: return
-            if (fixtureStartTicks(authority.worker.pid) != authority.worker.startTicks ||
-                input.ordinary == active.objects.vpn || input.ordinary == active.objects.ordinary
-            ) {
-                return
-            }
-            val agent = pendingIntents.detachedAgent(input.agent, active.objects) ?: return
-            synchronized(guard) {
-                if (state !== active || channel.read() != authority ||
-                    !active.evidence.beginPendingIntent(input.registration, input.ordinary.networkHandle)
-                ) {
-                    return
-                }
-                acknowledge(active)
-            }
-            val previous = scope.enter(FixtureInvocation(authority, FixtureTransaction.PENDING_INTENT, pendingIntent = input.registration))
-            try {
-                if (current() === active) pendingIntents.dispatch(param, agent)
-            } finally {
-                scope.restore(previous)
-            }
-        }.onFailure {
-            HookLog.i("VpnHide: PendingIntent fixture source unavailable: ${it.javaClass.simpleName}: ${it.message}")
-        }
     }
 
     fun pendingIntentHandled(
@@ -498,4 +550,8 @@ internal class FrameworkFixtureHooks {
 
     private val scopeKey = "vpnhide.framework.fixture.previous.${System.identityHashCode(this)}"
     private val timedFixtureCalls = setOf(FixtureTransaction.LEGACY_TYPE, FixtureTransaction.LEGACY_ENUM, FixtureTransaction.ACTIVE_NETWORK)
+    private val networkSourceTransactions =
+        setOf(FixtureTransaction.ACTIVE_NETWORK, FixtureTransaction.CALLBACK, FixtureTransaction.PENDING_INTENT)
 }
+
+private fun FixtureAuthority.injectsVpn(): Boolean = phase == FixturePhase.RAW || phase == FixturePhase.PROTECTED

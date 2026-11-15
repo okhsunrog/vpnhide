@@ -58,10 +58,7 @@ fn same_call(phase: &FrameworkPhaseEvidence) -> bool {
 fn source_handle(phase: &FrameworkPhaseEvidence) -> Option<u64> {
     let ack = &phase.acknowledgement;
     let handle = ack.active_network.original_handle?;
-    (ack.active_network.calls > 0
-        && same_call(phase)
-        && handle != ack.sources.vpn_handle
-        && handle != ack.sources.ordinary_handle)
+    (ack.active_network.calls > 0 && same_call(phase) && handle != ack.sources.vpn_handle)
         .then_some(handle)
 }
 
@@ -119,8 +116,11 @@ pub(crate) fn evaluate(phases: [&FrameworkPhaseEvidence; 4]) -> Result<(), Failu
     }
     // The platform may route this UID through a real VPN. The two quiet calls
     // observe the normal filtered reply, which can have a different handle.
+    let fixture_ordinary = raw.acknowledgement.sources.ordinary_handle;
     let expected = handle(prepared)
-        .filter(|&handle| handle != issued && handle != raw.acknowledgement.sources.ordinary_handle)
+        .filter(|&handle| {
+            handle != issued && (handle == fixture_ordinary) == (original == fixture_ordinary)
+        })
         .ok_or(Failure::MissingNegativeControl)?;
     if handle(revoked) != Some(expected) || source_handle(protected) != Some(original) {
         return Err(Failure::OrdinaryObjectsChanged);
