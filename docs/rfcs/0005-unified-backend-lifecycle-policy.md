@@ -254,3 +254,17 @@ continuity from module presence. The ordinary updater retains its refusal for
 incidental legacy retirement; recognized separate legacy adoption is explicitly
 warned. Production callsites and focused crash/ownership fixtures are present;
 final-file qualification and actual phone/provider acceptance remain separate.
+
+## Same-boot worker readiness — 15 November 2026
+
+The maintainer agreed to separate the supervisor's readiness check from the
+app-facing RPC version. The supervisor should confirm that the verified child
+owns the new service, can serve requests, has recovered its journal, and has
+applied the expected backend through a small stable, private protocol.
+The app must still pair with a compatible worker RPC version. Keep the image,
+boot, provider and journal rollback checks for same-boot replacement.
+
+The currently installed supervisor checks readiness through the app RPC and
+requires the staged worker to use the same version. The separate readiness
+protocol is an accepted design decision. Implementation and the first rollout
+of a supervisor that supports it remain open.
