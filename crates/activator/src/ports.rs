@@ -341,3 +341,35 @@ mod ownership_tests {
         let _ = fs::remove_dir_all(&dir);
     }
 }
+
+pub const DIAGNOSTIC_PORTS_CHAIN: &str = "vpnhide_diag_ports";
+
+/// Append a worker-only diagnostic branch to the same path as production Ports.
+pub fn diagnostic_ports_ruleset(ipv6: bool, uid: u32, tcp: u16, udp: u16) -> String {
+    let (parent, loopback, reject) = if ipv6 {
+        (PORTS_CHAIN6, "::1/128", "icmp6-port-unreachable")
+    } else {
+        (PORTS_CHAIN4, "127.0.0.0/8", "icmp-port-unreachable")
+    };
+    let rules = [(tcp, PortProtocol::Tcp), (udp, PortProtocol::Udp)]
+        .into_iter()
+        .map(|(start, protocol)| PortRule {
+            start,
+            end: None,
+            protocol,
+        })
+        .collect();
+    let targets = BTreeMap::from([(
+        uid,
+        PortUidPolicy {
+            all_ports: false,
+            rules,
+        },
+    )]);
+    let mut script = build_ports_ruleset(DIAGNOSTIC_PORTS_CHAIN, loopback, reject, &targets);
+    script.truncate(script.len() - "COMMIT\n".len());
+    script.push_str(&format!(
+        "-I {parent} 1 -j {DIAGNOSTIC_PORTS_CHAIN}\nCOMMIT\n"
+    ));
+    script
+}

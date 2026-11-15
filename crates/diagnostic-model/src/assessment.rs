@@ -303,6 +303,21 @@ impl DiagnosticRun {
         } else {
             Vec::new()
         };
+        if required.contains(&Ports)
+            && let Some(result) = &self.ports
+        {
+            if result.complete() {
+                proven.insert(Ports);
+            }
+            if !result.leaked.is_empty() {
+                leaked.insert(Ports);
+            }
+            for control in &result.controls {
+                if !native_controls.contains(control) {
+                    native_controls.push(*control);
+                }
+            }
+        }
         proven.retain(|check| !leaked.contains(check));
         let unverified = required
             .iter()
@@ -351,6 +366,7 @@ pub(crate) mod tests {
     }
     fn run(native: ScopedNativeResult) -> DiagnosticRun {
         DiagnosticRun {
+            ports: None,
             native_raw: Some(paired_receipt()),
             routes: None,
             filesystem: None,

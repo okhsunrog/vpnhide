@@ -71,6 +71,12 @@ Other read/write errors propagate. Peer authorization remains required in every 
 | RPC writer queue wait | 2 seconds before start; expired/cancelled commands cannot execute later |
 | Diagnostic collections | 2 forensic; standalone read-only RootSnapshot has 1 active + 1 pending request. Pending admission respects its RPC deadline and the shared snapshot runtime cap. At most 32 probes and 4 workers per collection. |
 
+Core accepts the Ports phase sequence only from the live, admitted diagnostics
+process with the current session and epoch after its native report. The worker
+submits fixed-size observations. Core chooses all four loopback endpoints and
+derives the firewall UID from the peer. The app supplies neither rules nor a
+target UID.
+
 ## APK connection and save path
 
 - One process-retained UniFFI `CoreSession` owns a shared multiplexed connection.

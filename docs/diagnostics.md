@@ -386,13 +386,48 @@ first automatic run after unlocking confirmed 16 groups in 13 seconds.
 All 20 subsequent steady-state runs confirmed the same groups with no leaks
 or infrastructure failures.
 
-Ports still lacks controlled results when enabled. See the
-[framework fixture requirements](rfcs/0002-autonomous-diagnostics.md#74-почему-callback--главный-технический-риск).
 Android bionic, SELinux, Java callback isolation and old game-process coverage need
 real device acceptance. QEMU/static libc evidence does not replace those gates.
 The [roadmap](../ROADMAP.md) separates these
 open code tasks from device/signing/publication requirements. See
 [RFC2](rfcs/0002-autonomous-diagnostics.md) for the full contract.
+
+### Scoped Ports evidence
+
+When the diagnostic plan requires Ports, Core opens ephemeral IPv4 and IPv6
+loopback sockets for TCP and UDP. The admitted Android worker must echo a
+run-local challenge on all four endpoints before Core installs the fixture.
+The normal Ports rule renderer generates worker-UID and destination-port
+matches under the existing Ports OUTPUT chains. Core verifies reachability
+from root while the rule is live and checks that the fixture is still attached
+before accepting the worker's protected sample. Core reads the packet counters
+for the exact rules before and after the worker uses them. The worker repeats
+the echo after Core removes the rules.
+
+Each transport and family requires the live root and pre/post worker echoes
+and an increase in the matching REJECT rule's packet counter. TCP also
+requires a connection refusal. A UDP rejection can surface as `EPERM` on
+send, so the matched rule and absent echo establish protection together. An
+absent echo without a rule hit is unverified. Core retains a qualified echo
+under protection as a leak even if a subsequent control fails. Core publishes the per-vector verdict with the run and adds
+Ports to the assessment only when required. The fixture uses a fixed,
+authenticated RPC41 sequence. The saved app policy is not edited.
+
+Core syncs a private boot/network-namespace receipt before changing either
+table. It removes the dedicated chain in each family and verifies absence on
+normal completion, worker failure and cleanup after restart. A reboot retires
+the old receipt after verifying the boot ID changed. The fixture exercises
+the production loopback filtering path under a controlled rule. It leaves
+the selection and port policy of real target apps outside the proof.
+
+On Pixel 8 Pro with Android 17 and Builtin, a same-boot KernelSU update
+activated the Core with the completed Ports fixture. All four vectors
+qualified in 25 repeated measurements with no leaks. Two early results
+became stale as runtime evidence changed after the update. The final 20
+consecutive results stayed current and confirmed 17 of 20 required groups.
+Both fixture chains and the cleanup receipt were absent after the series.
+The saved configuration and the production IPv4 and IPv6 rules matched
+their pre-series checksums.
 
 ## Worker ABI coverage
 

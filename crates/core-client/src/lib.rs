@@ -172,6 +172,12 @@ impl CoreClient {
         CALL_DEADLINE
     );
     call!(
+        ports_worker_step(
+            request: PortsWorkerRequest,
+        ) -> Result<Option<PortsFixtureSpec>, DiagnosticError>,
+        CALL_DEADLINE
+    );
+    call!(
         native_worker_step(
             request: NativeWorkerRequest,
         ) -> Result<NativeWorkerInstruction, DiagnosticError>,

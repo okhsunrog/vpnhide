@@ -155,6 +155,8 @@ pub enum DiagnosticOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiagnosticRun {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ports: Option<crate::ScopedPortsResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routes: Option<crate::ScopedRouteResult>,
     #[serde(default)]
     pub filesystem: Option<crate::ScopedFilesystemResult>,
@@ -176,6 +178,11 @@ pub struct DiagnosticRun {
     pub stale: bool,
 }
 impl DiagnosticRun {
+    pub fn record_ports(&mut self, ports: crate::ScopedPortsResult) {
+        self.ports = Some(ports);
+        self.refresh_missing();
+    }
+
     pub fn record_routes(&mut self, routes: crate::ScopedRouteResult) {
         self.routes = Some(routes);
         self.refresh_missing();
@@ -261,6 +268,7 @@ mod tests {
     #[test]
     fn four_native_successes_never_replace_the_supported_contract() {
         let mut run = DiagnosticRun {
+            ports: None,
             native_raw: Some(crate::assessment::tests::paired_receipt()),
             routes: None,
             filesystem: None,

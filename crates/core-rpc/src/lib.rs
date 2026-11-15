@@ -73,7 +73,7 @@ pub use logcat::{
 pub mod recovery;
 pub use vpnhide_diagnostic_model::{
     DiagnosticError, DiagnosticRun, DiagnosticWorkerReport, DiagnosticWorkerTask,
-    NativeWorkerInstruction, NativeWorkerRequest,
+    NativeWorkerInstruction, NativeWorkerRequest, PortsFixtureSpec, PortsWorkerRequest,
 };
 
 pub use vpnhide_diagnostic_model::framework::{FrameworkWorkerRequest, FrameworkWorkerTask};
@@ -694,6 +694,9 @@ pub trait VpnhideCore {
     async fn framework_worker_step(
         request: FrameworkWorkerRequest,
     ) -> Result<Option<FrameworkWorkerTask>, DiagnosticError>;
+    async fn ports_worker_step(
+        request: PortsWorkerRequest,
+    ) -> Result<Option<PortsFixtureSpec>, DiagnosticError>;
     async fn native_worker_step(
         request: NativeWorkerRequest,
     ) -> Result<NativeWorkerInstruction, DiagnosticError>;
@@ -872,6 +875,10 @@ mod tests {
                 },
             ] {
                 let run = DiagnosticRun {
+                    ports: Some(vpnhide_diagnostic_model::ScopedPortsResult {
+                        proven: vpnhide_diagnostic_model::PortsVector::ALL.to_vec(),
+                        ..Default::default()
+                    }),
                     native_raw: None,
                     routes: None,
                     filesystem: None,
@@ -902,6 +909,32 @@ mod tests {
                 };
                 assert_eq!(survives("diagnostic publication", &snapshot), snapshot);
             }
+        }
+
+        #[test]
+        fn ports_worker_steps_and_fixture_round_trip() {
+            use vpnhide_diagnostic_model::{PortsSample::*, PortsWorkerPhase::*};
+            for phase in [
+                Prepared,
+                Protected { before: [Echo; 4] },
+                Revoked {
+                    protected: [Refused, Echo, Unavailable, Refused],
+                },
+                Finished { revoked: [Echo; 4] },
+            ] {
+                let request = PortsWorkerRequest {
+                    session: 9,
+                    core_epoch: 11,
+                    phase,
+                };
+                assert_eq!(survives("Ports worker phase", &request), request);
+            }
+            let result: Result<Option<PortsFixtureSpec>, DiagnosticError> =
+                Ok(Some(PortsFixtureSpec {
+                    ports: [49152, 49153, 49154, 49155],
+                    challenge: [17; 16],
+                }));
+            assert_eq!(survives("Ports fixture", &result), result);
         }
 
         #[test]

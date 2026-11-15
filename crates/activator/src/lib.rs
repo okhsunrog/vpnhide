@@ -128,9 +128,9 @@ pub use ownership::{
     config_owned_by_core, core_marker_path, native_owned_by_core, zygisk_owned_by_core,
 };
 pub use ports::{
-    PORTS_OWNER_MARKER_ENV, PortsApplyResult, PortsChainPresence, PortsFamilyResult,
-    apply_ports_rules_families, inspect_ports_chains, ports_owned_by_core, ports_owner_marker_path,
-    write_ports_core_owner_marker,
+    DIAGNOSTIC_PORTS_CHAIN, PORTS_OWNER_MARKER_ENV, PortsApplyResult, PortsChainPresence,
+    PortsFamilyResult, apply_ports_rules_families, diagnostic_ports_ruleset, inspect_ports_chains,
+    ports_owned_by_core, ports_owner_marker_path, write_ports_core_owner_marker,
 };
 
 // --- core-2.0 (§4): the persistent root core absorbs the activator, linking these instead

@@ -8,6 +8,7 @@ pub mod fixture;
 mod generated;
 pub mod netlink_read;
 pub mod netlink_wire;
+pub mod ports_fixture;
 pub mod proc_interfaces;
 mod proc_read;
 pub mod route;

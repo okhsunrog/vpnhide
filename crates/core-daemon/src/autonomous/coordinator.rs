@@ -13,6 +13,7 @@ use vpnhide_loader_ipc::image::{self, ProcessIdentity};
 
 use super::framework_run::FrameworkRun;
 use super::native_fixture::TunFixture;
+use super::ports_fixture::{self, PortsRun};
 use super::route_fixture::{RouteCleanupPlan, RouteFixture};
 use crate::{CoreState, auth::PeerCred};
 use vpnhide_diagnostic_model::framework::{FrameworkWorkerRequest, FrameworkWorkerTask};
@@ -54,6 +55,7 @@ struct Active {
     finished: bool,
     minimum_birth_ticks: Option<u64>,
     framework: Option<Arc<Mutex<FrameworkRun>>>,
+    ports: Option<Arc<Mutex<PortsRun>>>,
 }
 #[derive(Default)]
 struct Inner {
@@ -306,6 +308,7 @@ impl Coordinator {
             && let Some(dir) = state.diagnostic_rule_dir()
         {
             RouteFixture::recover_rules(dir).map_err(|_| DiagnosticError::Busy)?;
+            ports_fixture::recover(dir).map_err(|_| DiagnosticError::Busy)?;
         }
         if let Some(last) = inner.last.as_ref() {
             if inner.active.is_some() {
@@ -340,6 +343,7 @@ impl Coordinator {
         inner.retry_at = None;
         inner.next = inner.next.checked_add(1).ok_or(DiagnosticError::Expired)?;
         let run = DiagnosticRun {
+            ports: None,
             native_raw: None,
             routes: None,
             filesystem: None,
@@ -365,6 +369,7 @@ impl Coordinator {
             finished: false,
             minimum_birth_ticks: None,
             framework: None,
+            ports: None,
         });
         inner.last = Some(run.clone());
         state
@@ -409,13 +414,15 @@ impl Coordinator {
                 cleanup_confirmed: Some(true),
             })),
         };
-        let framework = self
+        let (framework, ports) = self
             .inner
             .lock()
             .expect("diagnostic coordinator")
             .active
             .as_ref()
-            .and_then(|a| a.framework.clone());
+            .map(|active| (active.framework.clone(), active.ports.clone()))
+            .unwrap_or_default();
+        let ports = ports.map(|run| run.lock().expect("Ports run").cleanup(debug));
         let pending_framework = framework.clone();
         let framework = framework.map(|run| run.lock().expect("framework run").cleanup());
         trace(debug, session, "framework_cleanup_done");
@@ -474,6 +481,9 @@ impl Coordinator {
         }
         if let Some((framework, _)) = framework {
             run.record_framework(framework);
+        }
+        if let Some(ports) = ports {
+            run.record_ports(ports);
         }
         // Do not reattribute a run if policy, loaded images or platform changed.
         // Retain its evidence as stale rather than rewriting its fingerprint.
@@ -824,12 +834,16 @@ impl Coordinator {
             // Only recover a receipt when no live run can own it.
             if inner.active.is_none()
                 && let Some(dir) = state.diagnostic_rule_dir()
-                && let Err(error) = RouteFixture::recover_rules(dir)
-                && state.snapshot().config.is_some_and(|config| config.debug)
             {
-                crate::alog::info(&format!(
-                    "diagnostics: orphan rule cleanup deferred: {error}"
-                ));
+                let routes = RouteFixture::recover_rules(dir).map(drop);
+                let ports = ports_fixture::recover(dir);
+                if state.snapshot().config.is_some_and(|config| config.debug) {
+                    for error in [routes, ports].into_iter().filter_map(Result::err) {
+                        crate::alog::info(&format!(
+                            "diagnostics: orphan rule cleanup deferred: {error}"
+                        ));
+                    }
+                }
             }
         }
         let coordinator = self.clone();
@@ -882,6 +896,61 @@ impl Coordinator {
             self.changed.notify_all();
         }
         Ok(task)
+    }
+
+    pub fn ports_step(
+        &self,
+        peer: PeerCred,
+        request: PortsWorkerRequest,
+        dir: Option<&Path>,
+        debug: bool,
+    ) -> Result<Option<PortsFixtureSpec>, DiagnosticError> {
+        let run = {
+            let mut inner = self.inner.lock().expect("diagnostic coordinator");
+            let identity = worker_identity(
+                Path::new("/proc"),
+                inner.app_dir.as_ref().ok_or(DiagnosticError::Disabled)?,
+                peer,
+            )?;
+            if inner.cancelled {
+                return Err(DiagnosticError::Expired);
+            }
+            let required = inner.last.as_ref().is_some_and(|run| {
+                run.session == request.session && run.plan.required.contains(&RequiredCheck::Ports)
+            });
+            let active = inner.active.as_mut().ok_or(DiagnosticError::StaleSession)?;
+            let task = active.task.as_ref().ok_or(DiagnosticError::StaleSession)?;
+            if active.worker != Some(identity) {
+                return Err(DiagnosticError::WrongProcess);
+            }
+            if task.session != request.session
+                || task.core_epoch != request.core_epoch
+                || active.finished
+                || active.report.is_none()
+            {
+                return Err(DiagnosticError::StaleSession);
+            }
+            if !required {
+                return Ok(None);
+            }
+            if !crate::ports::ports_enabled_from_env() {
+                return Err(DiagnosticError::Disabled);
+            }
+            if active.ports.is_none() {
+                if request.phase != PortsWorkerPhase::Prepared {
+                    return Err(DiagnosticError::StaleSession);
+                }
+                let dir = dir.ok_or(DiagnosticError::Disabled)?;
+                active.ports = Some(Arc::new(Mutex::new(PortsRun::new(
+                    dir.to_path_buf(),
+                    identity.uid,
+                    active.deadline,
+                ))));
+            }
+            active.ports.as_ref().expect("Ports run reserved").clone()
+        };
+        let mut run = run.try_lock().map_err(|_| DiagnosticError::Busy)?;
+        run.step(request.phase, debug)
     }
 
     pub fn framework_step(
@@ -1175,6 +1244,7 @@ mod tests {
             finished: false,
             minimum_birth_ticks: Some(25),
             framework: None,
+            ports: None,
         };
         // No claim before fresh-process preparation has completed.
         assert_eq!(active.claim(identity(30), now), Ok(None));
@@ -1267,6 +1337,7 @@ mod tests {
             finished: false,
             minimum_birth_ticks: Some(25),
             framework: None,
+            ports: None,
         };
         assert_eq!(
             active.finish(identity(30), 7, 9, now, |_| Ok(())),
@@ -1358,6 +1429,7 @@ mod tests {
         coordinator.configure(PathBuf::from("/nonexistent-app"));
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
+            ports: None,
             native_raw: None,
             routes: None,
             filesystem: None,
@@ -1391,6 +1463,7 @@ mod tests {
         let state = state();
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
+            ports: None,
             native_raw: None,
             routes: None,
             filesystem: None,
@@ -1430,6 +1503,7 @@ mod tests {
         let state = state();
         let snapshot = state.snapshot();
         let run = DiagnosticRun {
+            ports: None,
             native_raw: None,
             routes: None,
             filesystem: None,

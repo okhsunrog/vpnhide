@@ -10,7 +10,7 @@ pub struct Environment {
     namespace: (u64, u64),
 }
 impl Environment {
-    pub(super) fn valid(&self) -> bool {
+    pub(in crate::autonomous) fn valid(&self) -> bool {
         self.boot_id.len() == 36
             && self.boot_id.bytes().enumerate().all(|(i, b)| {
                 if [8, 13, 18, 23].contains(&i) {
@@ -26,7 +26,7 @@ impl Environment {
             && self.namespace.0 != 0
             && self.namespace.1 != 0
     }
-    pub(super) fn same_boot(&self, other: &Self) -> bool {
+    pub(in crate::autonomous) fn same_boot(&self, other: &Self) -> bool {
         self.boot_id == other.boot_id
     }
     fn observe_in(root: &Path) -> io::Result<Self> {
@@ -43,7 +43,7 @@ impl Environment {
         }
         Ok(identity)
     }
-    pub(super) fn observe() -> io::Result<Self> {
+    pub(in crate::autonomous) fn observe() -> io::Result<Self> {
         Self::observe_in(Path::new("/proc"))
     }
     pub(super) fn current(&self) -> bool {

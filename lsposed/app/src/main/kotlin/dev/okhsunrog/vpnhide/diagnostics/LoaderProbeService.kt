@@ -92,6 +92,7 @@ class LoaderProbeService : Service() {
                 // Retain native evidence BEFORE Java work: process death during
                 // framework observations must not erase an already measured leak.
                 workerStage("native-report-${task.session}") { core.reportDiagnosticWorker(task, observations) }
+                measurePortsFixture(core, task)
                 measureFrameworkFixture(this, core, task)
             } finally {
                 workerStage("finish-${task.session}") { core.finishDiagnosticWorker(task) }

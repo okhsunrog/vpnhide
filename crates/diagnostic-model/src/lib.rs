@@ -13,6 +13,8 @@ mod route;
 pub use route::*;
 mod rule;
 pub use rule::*;
+mod ports_fixture;
+pub use ports_fixture::*;
 mod proc_interfaces;
 pub use proc_interfaces::*;
 mod sys_interfaces;

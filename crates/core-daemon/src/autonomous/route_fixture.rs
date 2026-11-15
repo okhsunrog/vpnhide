@@ -2,7 +2,7 @@
 //! Existing DOWN fixtures are consumed into a distinct UP owner, never assessed
 //! through the old DOWN contract. Nonpersistent TUN descriptor lifetime owns all
 //! addresses/routes; no default route, global rule, packet IO or delete-by-name.
-mod identity;
+pub(super) mod identity;
 mod rules;
 use super::native_fixture::{TunFixture, UpTun};
 pub use identity::RouteCleanupPlan;

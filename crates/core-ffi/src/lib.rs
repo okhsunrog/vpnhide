@@ -20,6 +20,7 @@ pub use attachment_policy::*;
 mod port_policy;
 pub use port_policy::*;
 mod framework;
+mod ports_fixture;
 pub use framework::*;
 mod autonomous;
 pub use autonomous::*;
