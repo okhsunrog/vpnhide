@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.okhsunrog.vpnhide.R
@@ -30,17 +31,20 @@ internal fun AutonomousDiagnosticStatusCard(
     val retry by DiagnosticsCache.retryState.collectAsStateWithLifecycle()
     val running = snapshot.current && assessment?.phase == "running"
     val hasLeaks = assessment?.leaked?.isNotEmpty() == true
+    val allVerified = assessment?.phase == "incomplete" && assessment.required.isNotEmpty() && assessment.unverified.isEmpty() && !hasLeaks
     val title =
         when {
             snapshot.availability == AutonomousAvailability.Initializing || running -> R.string.autonomous_running
             !snapshot.current -> R.string.autonomous_unavailable
             hasLeaks -> R.string.autonomous_leaks
             assessment?.phase == "infrastructure" -> R.string.autonomous_unavailable
+            allVerified -> R.string.autonomous_all_verified
             else -> R.string.autonomous_incomplete
         }
     val color =
         when {
             snapshot.current && hasLeaks -> StatusColors.errorContainer()
+            snapshot.current && allVerified -> StatusColors.successContainer()
             snapshot.current && assessment?.phase == "incomplete" -> StatusColors.warningContainer()
             else -> StatusColors.neutralContainer()
         }
@@ -91,7 +95,7 @@ internal fun AutonomousDiagnosticRows(snapshot: AutonomousDiagnosticSnapshot) {
                 }
 
                 id in assessment.proven -> {
-                    R.string.autonomous_verified
+                    if (deniedByAndroid) R.string.autonomous_kernel_verified else R.string.autonomous_verified
                 }
 
                 deniedByAndroid -> {
@@ -104,7 +108,14 @@ internal fun AutonomousDiagnosticRows(snapshot: AutonomousDiagnosticSnapshot) {
             }
         Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
             Text(stringResource(diagnosticVectorLabel(id)), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            Text(stringResource(status), style = MaterialTheme.typography.bodySmall)
+            val summary = stringResource(status)
+            val detail =
+                if (deniedByAndroid && status != R.string.autonomous_blocked_by_android) {
+                    "$summary\n${stringResource(R.string.autonomous_blocked_by_android)}"
+                } else {
+                    summary
+                }
+            Text(detail, textAlign = TextAlign.End, style = MaterialTheme.typography.bodySmall)
         }
     }
 }

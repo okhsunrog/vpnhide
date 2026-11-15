@@ -230,6 +230,7 @@ fn worker_identity(
     })
 }
 struct NativeEvidence {
+    kernel_filters: Option<KernelFilterResult>,
     link_request_denial: Option<LinkRequestDenial>,
     routes: ScopedRouteResult,
     filesystem: vpnhide_diagnostic_model::ScopedFilesystemResult,
@@ -240,6 +241,7 @@ struct NativeEvidence {
     binding: ScopedBindResult,
 }
 struct MeasurementFailure {
+    kernel_filters: Option<KernelFilterResult>,
     link_request_denial: Option<LinkRequestDenial>,
     routes: Option<ScopedRouteResult>,
     filesystem: Option<vpnhide_diagnostic_model::ScopedFilesystemResult>,
@@ -345,6 +347,7 @@ impl Coordinator {
         inner.retry_at = None;
         inner.next = inner.next.checked_add(1).ok_or(DiagnosticError::Expired)?;
         let run = DiagnosticRun {
+            kernel_filters: None,
             link_request_denial: None,
             ports: None,
             native_raw: None,
@@ -406,6 +409,7 @@ impl Coordinator {
         let result = match &worker_lease {
             Ok(_) => self.measure(&state, session),
             Err(detail) => Err(Box::new(MeasurementFailure {
+                kernel_filters: None,
                 link_request_denial: None,
                 routes: None,
                 filesystem: None,
@@ -461,6 +465,7 @@ impl Coordinator {
         run.native_raw = raw_receipt;
         match result {
             Ok(evidence) => {
+                run.kernel_filters = evidence.kernel_filters;
                 run.link_request_denial = evidence.link_request_denial;
                 run.record_routes(evidence.routes);
                 run.record_filesystem(evidence.filesystem);
@@ -471,6 +476,7 @@ impl Coordinator {
                 run.record_binding(evidence.binding);
             }
             Err(failure) => {
+                run.kernel_filters = failure.kernel_filters;
                 run.link_request_denial = failure.link_request_denial;
                 run.routes = failure.routes;
                 run.filesystem = failure.filesystem;
@@ -516,7 +522,7 @@ impl Coordinator {
         // Keep both route interfaces present throughout the primary fixture's
         // negative, start, end and cleanup samples of the interface population.
         let mut routes = self.prepare_route_fixture(session, debug);
-        let fixture = match TunFixture::create_detailed(session) {
+        let mut fixture = match TunFixture::create_detailed(session) {
             Ok(fixture) => fixture,
             Err(failure) => {
                 let cleaned = failure.cleanup.as_ref().map(|(_, cleaned)| *cleaned);
@@ -529,8 +535,10 @@ impl Coordinator {
                     }
                 }
                 let unavailable = NativeMeasurement::unavailable(ProbeError::Unsupported);
-                let (_, route_cleaned) = self.finish_route_fixture(routes, &unavailable, None);
+                let (_, route_cleaned) =
+                    self.finish_route_fixture(routes, &unavailable, None, None);
                 return Err(Box::new(MeasurementFailure {
+                    kernel_filters: None,
                     link_request_denial: None,
                     routes: None,
                     filesystem: None,
@@ -544,18 +552,25 @@ impl Coordinator {
                 }));
             }
         };
+        let app_dir = self
+            .inner
+            .lock()
+            .expect("diagnostic coordinator")
+            .app_dir
+            .clone();
+        let kernel_pair = self.observe_kernel_filters(
+            state,
+            app_dir.as_deref(),
+            routes.as_ref().ok().map(|routes| &routes.spec),
+            session,
+            debug,
+        );
         let report = (|| -> Result<NativeMeasurement, String> {
-            let app_dir = self
-                .inner
-                .lock()
-                .expect("diagnostic coordinator")
-                .app_dir
-                .clone()
-                .ok_or("diagnostic adapter disabled")?;
+            let app_dir = app_dir.as_deref().ok_or("diagnostic adapter disabled")?;
             if let (Ok(fixture), Some(dir), Ok(owner)) = (
                 &mut routes,
                 state.diagnostic_rule_dir(),
-                fs::metadata(&app_dir),
+                fs::metadata(app_dir),
             ) && let Err(error) = fixture.enable_rules(dir, owner.uid())
                 && debug
             {
@@ -564,7 +579,7 @@ impl Coordinator {
                 ));
             }
             trace(debug, session, "worker_prepare_start");
-            super::android_worker::prepare_fresh(&app_dir)?;
+            super::android_worker::prepare_fresh(app_dir)?;
             trace(debug, session, "worker_prepare_done");
             let minimum_birth_ticks = boot_ticks()?
                 .checked_add(1)
@@ -664,6 +679,26 @@ impl Coordinator {
             .or(early_report.as_ref())
             .unwrap_or(&unavailable);
         let completion = fixture.finish_paired(protected, app_raw);
+        let mut kernel_filters = kernel_pair.as_ref().map(|pair| {
+            let [netlink_links, proc_interfaces] = evaluate_kernel_interfaces(
+                &spec,
+                [
+                    &fixture.negative,
+                    &fixture.root_start,
+                    &pair.protected,
+                    &completion.root_end,
+                    &completion.cleanup,
+                ],
+                &pair.raw,
+            );
+            KernelFilterResult {
+                identity: pair.identity,
+                selinux_context: pair.selinux_context.clone(),
+                netlink_links,
+                proc_interfaces,
+                proc_routes: KernelFilterStatus::Unverified,
+            }
+        });
         let native_clean = cleanup_confirmed(&spec, &completion.cleanup);
         if !native_clean {
             self.inner
@@ -671,10 +706,16 @@ impl Coordinator {
                 .expect("diagnostic coordinator")
                 .pending_cleanup = Some(spec.clone());
         }
-        let (routes, route_clean) = self.finish_route_fixture(routes, protected, app_raw);
+        let (routes, route_clean) = self.finish_route_fixture(
+            routes,
+            protected,
+            app_raw,
+            kernel_pair.as_ref().zip(kernel_filters.as_mut()),
+        );
         let cleaned = native_clean && route_clean;
         match report {
             Ok(_) if cleaned => Ok(NativeEvidence {
+                kernel_filters,
                 link_request_denial: completion.link_request_denial,
                 routes,
                 filesystem: completion.filesystem,
@@ -685,6 +726,7 @@ impl Coordinator {
                 binding: completion.binding,
             }),
             Ok(_) => Err(Box::new(MeasurementFailure {
+                kernel_filters,
                 link_request_denial: completion.link_request_denial,
                 routes: Some(routes),
                 filesystem: Some(completion.filesystem),
@@ -702,6 +744,7 @@ impl Coordinator {
                 cleanup_confirmed: Some(false),
             })),
             Err(detail) => Err(Box::new(MeasurementFailure {
+                kernel_filters,
                 link_request_denial: completion.link_request_denial,
                 routes: Some(routes),
                 filesystem: Some(completion.filesystem),
@@ -714,6 +757,32 @@ impl Coordinator {
                 cleanup_confirmed: Some(cleaned),
             })),
         }
+    }
+
+    fn observe_kernel_filters(
+        &self,
+        state: &CoreState,
+        app_dir: Option<&Path>,
+        routes: Option<&RouteFixtureSpec>,
+        session: u64,
+        debug: bool,
+    ) -> Option<super::kernel_worker::KernelPair> {
+        let backend = super::raw_backend(state.snapshot().backend.applied)?;
+        let owner = fs::symlink_metadata(app_dir?).ok()?;
+        if !owner.is_dir() {
+            return None;
+        }
+        trace(debug, session, "kernel_worker_start");
+        let result = super::kernel_worker::observe(backend, owner.uid(), owner.gid(), routes);
+        if let Err(error) = &result
+            && debug
+        {
+            crate::alog::info(&format!(
+                "diagnostics: kernel worker session={session}: {error}"
+            ));
+        }
+        trace(debug, session, "kernel_worker_done");
+        result.ok()
     }
 
     // Route setup is independent of the DOWN interface fixture. A missing
@@ -743,6 +812,7 @@ impl Coordinator {
         fixture: Result<RouteFixture, bool>,
         protected: &NativeMeasurement,
         app_raw: Option<&NativeMeasurement>,
+        kernel: Option<(&super::kernel_worker::KernelPair, &mut KernelFilterResult)>,
     ) -> (ScopedRouteResult, bool) {
         let fixture = match fixture {
             Ok(fixture) => fixture,
@@ -762,12 +832,35 @@ impl Coordinator {
             }
         };
         let plan = fixture.cleanup_plan();
+        let kernel_baseline = kernel.as_ref().map(|_| {
+            (
+                fixture.spec.clone(),
+                fixture.negative.clone(),
+                fixture.start.clone(),
+            )
+        });
         let unavailable = RouteMeasurement::unavailable(ProbeError::Unsupported);
         let result = fixture.finish(
             protected.routes.as_ref().unwrap_or(&unavailable),
             app_raw.and_then(|sample| sample.routes.as_ref()),
             true,
         );
+        if let Some(((pair, kernel), (spec, negative, start))) = kernel.zip(kernel_baseline)
+            && let (Some(raw), Some(protected)) = (&pair.raw.routes, &pair.protected.routes)
+        {
+            kernel.proc_routes = evaluate_kernel_proc_routes(
+                &spec,
+                [
+                    Some(&negative),
+                    Some(&start),
+                    Some(protected),
+                    Some(&result.end),
+                    Some(&result.cleanup),
+                ],
+                raw,
+                result.interfaces_clean,
+            );
+        }
         if !result.interfaces_clean {
             self.inner
                 .lock()
@@ -1439,6 +1532,7 @@ mod tests {
         coordinator.configure(PathBuf::from("/nonexistent-app"));
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
+            kernel_filters: None,
             link_request_denial: None,
             ports: None,
             native_raw: None,
@@ -1474,6 +1568,7 @@ mod tests {
         let state = state();
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
+            kernel_filters: None,
             link_request_denial: None,
             ports: None,
             native_raw: None,
@@ -1515,6 +1610,7 @@ mod tests {
         let state = state();
         let snapshot = state.snapshot();
         let run = DiagnosticRun {
+            kernel_filters: None,
             link_request_denial: None,
             ports: None,
             native_raw: None,

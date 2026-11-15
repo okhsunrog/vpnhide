@@ -3177,15 +3177,7 @@ impl VpnhideCore for CoreServer {
             .map_err(|_| vpnhide_core_rpc::DiagnosticError::Busy)?;
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            let backend = match self.state.snapshot().backend.applied {
-                Some(vpnhide_core_rpc::NativeBackend::Kmod) => {
-                    Some(vpnhide_protocol::hook_ids::Backend::Kmod as u32)
-                }
-                Some(vpnhide_core_rpc::NativeBackend::Builtin) => {
-                    Some(vpnhide_protocol::hook_ids::Backend::Builtin as u32)
-                }
-                _ => None,
-            };
+            let backend = crate::autonomous::raw_backend(self.state.snapshot().backend.applied);
             self.state.diagnostics.native_step(peer, backend, request)
         })
         .await

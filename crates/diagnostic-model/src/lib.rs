@@ -9,6 +9,8 @@ mod address;
 pub use address::*;
 mod assessment;
 pub use assessment::*;
+mod kernel_filters;
+pub use kernel_filters::*;
 mod route;
 pub use route::*;
 mod rule;

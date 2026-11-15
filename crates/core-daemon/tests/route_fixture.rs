@@ -21,7 +21,7 @@ fn production_route_fixture_coexists_with_native_fixture_and_reclaims_both() -> 
     let before = vpnhide_checks::route::observe();
     let session = 0x0123_4567_89b2;
     let routes = RouteFixture::create_detailed(session).map_err(|failure| failure.error)?;
-    let native = TunFixture::create_detailed(session).map_err(|failure| failure.error)?;
+    let mut native = TunFixture::create_detailed(session).map_err(|failure| failure.error)?;
     let issued = routes.spec.clone();
     assert_ne!(native.spec.interface, issued.vpn);
     assert_ne!(native.spec.interface, issued.ordinary);

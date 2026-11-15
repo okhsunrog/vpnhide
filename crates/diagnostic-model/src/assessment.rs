@@ -334,11 +334,35 @@ impl DiagnosticRun {
                 }
             }
         }
-        if self.link_request_denial.is_some()
-            && !proven.contains(&NetlinkLinks)
-            && !leaked.contains(&NetlinkLinks)
-        {
+        if self.link_request_denial.is_some() {
             native_controls.push(ControlFailure::NetlinkLinkRequestDenied);
+        }
+        if let Some(kernel) = &self.kernel_filters {
+            for (check, denial, status) in [
+                (
+                    NetlinkLinks,
+                    ControlFailure::NetlinkLinkRequestDenied,
+                    kernel.netlink_links,
+                ),
+                (
+                    ProcRoutes,
+                    ControlFailure::ProcRouteRequestDenied,
+                    kernel.proc_routes,
+                ),
+                (
+                    ProcInterfaces,
+                    ControlFailure::ProcInterfaceRequestDenied,
+                    kernel.proc_interfaces,
+                ),
+            ] {
+                if status == crate::KernelFilterStatus::Proven && native_controls.contains(&denial)
+                {
+                    proven.insert(check);
+                }
+                if status == crate::KernelFilterStatus::Leaked {
+                    leaked.insert(check);
+                }
+            }
         }
         proven.retain(|check| !leaked.contains(check));
         let unverified = required
@@ -386,8 +410,44 @@ pub(crate) mod tests {
             sample: crate::native_pair::tests::fixture().2,
         }
     }
+    #[test]
+    fn kernel_link_coverage_retains_android_denial_and_prioritizes_a_leak() {
+        use crate::KernelFilterStatus::*;
+        use RequiredCheck::NetlinkLinks;
+        let mut run = run(ScopedNativeResult::Proven { checks: vec![] });
+        run.kernel_filters = Some(crate::KernelFilterResult {
+            identity: thread_identity(),
+            selinux_context: "u:r:ksu:s0".into(),
+            netlink_links: Proven,
+            proc_interfaces: Unverified,
+            proc_routes: Unverified,
+        });
+        assert!(!run.assessment().proven.contains(&NetlinkLinks));
+        run.link_request_denial = Some(crate::LinkRequestDenial {
+            raw_errno: 13,
+            protected_errno: 13,
+        });
+        let assessment = run.assessment();
+        assert!(assessment.proven.contains(&NetlinkLinks));
+        assert!(
+            assessment
+                .native_controls
+                .contains(&ControlFailure::NetlinkLinkRequestDenied)
+        );
+        run.kernel_filters.as_mut().unwrap().netlink_links = Leaked;
+        let assessment = run.assessment();
+        assert!(assessment.leaked.contains(&NetlinkLinks));
+        assert!(!assessment.proven.contains(&NetlinkLinks));
+        assert!(
+            assessment
+                .native_controls
+                .contains(&ControlFailure::NetlinkLinkRequestDenied)
+        );
+    }
+
     fn run(native: ScopedNativeResult) -> DiagnosticRun {
         DiagnosticRun {
+            kernel_filters: None,
             link_request_denial: None,
             ports: None,
             native_raw: Some(paired_receipt()),

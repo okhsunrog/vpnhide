@@ -190,7 +190,7 @@ impl LinkDump {
     }
 }
 
-fn links() -> Result<Vec<ObservedInterface>, ProbeError> {
+pub fn links() -> Result<Vec<ObservedInterface>, ProbeError> {
     let mut dump = LinkDump::default();
     crate::netlink_read::dump(
         crate::netlink_read::DumpKind::Links,

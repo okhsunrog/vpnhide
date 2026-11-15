@@ -238,12 +238,16 @@ fn proc_rows(
     Ok(())
 }
 pub fn observe() -> RouteMeasurement {
-    observe_before(Instant::now() + Duration::from_secs(1))
+    observe_before(Instant::now() + Duration::from_secs(1), false)
+}
+
+pub fn observe_proc() -> RouteMeasurement {
+    observe_before(Instant::now() + Duration::from_secs(1), true)
 }
 
 pub fn observe_worker(with_rules: bool) -> RouteMeasurement {
     let deadline = Instant::now() + Duration::from_secs(1);
-    let mut sample = observe_before(deadline);
+    let mut sample = observe_before(deadline, false);
     if with_rules {
         sample
             .observations
@@ -252,10 +256,11 @@ pub fn observe_worker(with_rules: bool) -> RouteMeasurement {
     sample
 }
 
-fn observe_before(deadline: Instant) -> RouteMeasurement {
+fn observe_before(deadline: Instant, proc_only: bool) -> RouteMeasurement {
     RouteMeasurement {
         observations: RouteCheck::required()
             .into_iter()
+            .filter(|check| !proc_only || check.surface.proc_route())
             .map(|check| {
                 let (routes, error) = match check.surface {
                     RouteSurface::NetlinkIpv4 | RouteSurface::NetlinkIpv6 => {

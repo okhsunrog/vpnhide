@@ -77,6 +77,14 @@ submits fixed-size observations. Core chooses all four loopback endpoints and
 derives the firewall UID from the peer. The app supplies neither rules nor a
 target UID.
 
+Core's kernel-only diagnostic collector uses an inherited private socket pair.
+Core derives its UID and GID from the diagnostic app's private directory and
+checks its birth, single-thread identity, credentials, SELinux context and
+network namespace before granting and revoking RAW. This child has zero
+effective, permitted, inheritable and ambient capabilities and
+`no_new_privs`. The Android worker still uses its authenticated RPC and its own
+RAW lease to report what the app can access.
+
 ## APK connection and save path
 
 - One process-retained UniFFI `CoreSession` owns a shared multiplexed connection.

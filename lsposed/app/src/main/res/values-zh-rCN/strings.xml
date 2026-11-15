@@ -553,6 +553,8 @@
     <string name="autonomous_cleanup_unknown">无法确认测试环境已清理</string>
     <string name="autonomous_retry_rejected">暂时无法开始新检查</string>
     <string name="autonomous_verified">已验证</string>
+    <string name="autonomous_all_verified">所有防护检查均已通过</string>
+    <string name="autonomous_kernel_verified">内核过滤已验证</string>
     <string name="autonomous_vector_flags">接口标志</string>
     <string name="autonomous_vector_mtu">接口 MTU</string>
     <string name="autonomous_vector_ifaddrs">接口枚举</string>

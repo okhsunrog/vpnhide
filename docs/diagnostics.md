@@ -78,6 +78,24 @@ restore protection. The separate root-only proc endpoint and ioctl handshake do
 not change control2/telemetry1 or require broader app SELinux proc access.
 Absent kernel helpers leave this optional capability unavailable without changing
 backend health or triggering fallback.
+
+With Builtin or Kmod, Core starts a short-lived process on the existing TUN
+fixtures before launching the Android worker. It keeps Core's SELinux context,
+uses the APK's UID and GID, clears effective, permitted, inheritable and ambient
+capabilities, and runs with `no_new_privs`. Core checks the process birth,
+network namespace, credentials and SELinux context through procfs at each
+handoff. The same thread reads RTM_GETLINK and both procfs groups in RAW and
+after verified revocation. The evaluators require positive RAW stimulus,
+ordinary loopback or ordinary routes, and the independent fixture controls.
+The result records the process identity alongside kernel evidence for these
+three groups. The app worker's paired Android denials remain visible even when
+the kernel filters are proven. Unknown helper status withholds kernel proof.
+On Pixel 8 Pro with Android 17 and Builtin, Core started one automatic run
+after hot activation. It and five subsequent runs confirmed all 20 required
+groups without leaks. Each retained all three Android-access restrictions.
+Core measured 26–40 ms for its kernel collector. The final readback recorded
+the same app UID for both collectors and the KernelSU context for the Core
+child, with EACCES still observed by the Android worker in both phases.
 The Linux adapters compile shared atomics inline, without compiler-rt helpers.
 The `.ko` calls its dynamically resolved PID/clock helpers through narrow,
 non-inlined `__nocfi` boundaries: kallsyms addresses are not canonical jump-table
@@ -291,7 +309,8 @@ denial for each actor and family only when the same worker is denied in both
 RAW and protected phases and the root route controls qualify. The Dashboard
 shows the Android restriction when all four vectors qualify as denied. The
 assessment still records a leak if a failed read returned a fixture route before
-the error. Proc routes remain unverified as a hiding result. [Android SELinux proc labels](https://android.googlesource.com/platform/system/sepolicy/+/android16-qpr2-release/private/genfs_contexts)
+the error. Kernel proof uses the capability-free process described above.
+[Android SELinux proc labels](https://android.googlesource.com/platform/system/sepolicy/+/android16-qpr2-release/private/genfs_contexts)
 
 On Pixel 8 Pro, the RPC43 pair reported EACCES at open for both proc route
 files, both read actors and both worker phases in 20 consecutive Direct Boot
@@ -309,9 +328,8 @@ separate access test on that Pixel used ordinary app processes targeting SDK
 24, 27, 28, 29, 30 and 36. All six received `EACCES` from an unbound
 `RTM_GETLINK` dump and from `/proc/net/{dev,if_inet6,route,ipv6_route}`.
 Changing the diagnostic APK's target SDK would not recover those controls on
-this ROM. Test them on a build that grants ordinary apps the relevant reads,
-or in the existing isolated Linux oracles for kernel-only evidence. The
-earlier [KMOD proc-interface run](archive/2026-11-03-proc-interface-fixture-qualification.md)
+this ROM. For kernel-only evidence, Core uses the separate collector described
+above. The earlier [KMOD proc-interface run](archive/2026-11-03-proc-interface-fixture-qualification.md)
 observed all four proc-interface leaks when the guest permitted those reads.
 [Android route netlink policy](https://android.googlesource.com/platform/system/sepolicy/+/android16-release/private/net.te)
 

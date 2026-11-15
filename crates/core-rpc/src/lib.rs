@@ -875,6 +875,7 @@ mod tests {
                 },
             ] {
                 let run = DiagnosticRun {
+                    kernel_filters: None,
                     link_request_denial: Some(vpnhide_diagnostic_model::LinkRequestDenial {
                         raw_errno: 13,
                         protected_errno: 13,

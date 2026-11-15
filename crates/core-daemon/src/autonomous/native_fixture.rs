@@ -292,7 +292,7 @@ impl TunFixture {
     /// Production path: a root-only positive control cannot substitute for the
     /// admitted collector's positively observed RAW visibility.
     pub fn finish_paired(
-        mut self,
+        &mut self,
         worker: &NativeMeasurement,
         app_raw: Option<&NativeMeasurement>,
     ) -> NativeCompletion {

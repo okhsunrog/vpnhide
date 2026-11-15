@@ -25,6 +25,13 @@ const DEFAULT_CTL: &str = "/proc/vpnhide_ctl";
 
 fn main() {
     let all: Vec<String> = std::env::args().skip(1).collect();
+    if all == [vpnhide_core_daemon::autonomous::kernel_worker::MODE] {
+        if let Err(error) = vpnhide_core_daemon::autonomous::kernel_worker::worker() {
+            eprintln!("kernel diagnostic worker: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if let Some(code) = vpnhide_core_daemon::probe_cli::run(&all) {
         std::process::exit(code);
     }
