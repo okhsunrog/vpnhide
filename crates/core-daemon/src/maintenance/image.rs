@@ -280,6 +280,9 @@ impl ImageFence {
         // running ABI's daemon bytes; the ABI selector is unused in this case.
         Self::inspect(root, None, Abi::Arm64, 0)
     }
+    pub(crate) fn capture_manager_stage(root: &Path) -> io::Result<Self> {
+        Self::inspect_layout(root, None, Abi::Arm64, 0, true)
+    }
     pub fn verify_replacement(
         root: &Path,
         descriptor: &VerifiedDescriptor,

@@ -59,6 +59,18 @@ Java hook, runtime and contract changes have separate lifecycle requirements.
 A compatible APK-only change requires no device reboot. Preparing a backend is
 separate from rebooting; Core never reboots the device automatically.
 
+For a standard KernelSU manager install, a Core supervisor with live activation
+support can start the new worker directly from `modules_update/vpnhide_core`.
+The root installer records the exact staged image and the previous manager
+update marker. The supervisor waits for the marker to change, the installed
+metadata to match, and KernelSU to remove the customization script. Live
+activation is limited to a confirmed Builtin session with matching RPC and
+journal versions, unchanged service and SELinux files, and no outstanding
+managed replacement or Zygisk lifecycle. The supervisor drains its original
+worker, verifies the staged bytes again and starts the pinned executable.
+Failure to reach readiness returns to the original executable in the same boot.
+KernelSU still owns module promotion on the next boot.
+
 ## Disable and removal
 
 A manager-disabled Core may no longer start. Existing kernel hooks, process hooks

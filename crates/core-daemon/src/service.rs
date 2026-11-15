@@ -5,14 +5,22 @@
 //! location (`MODDIR`).
 
 use std::ffi::CString;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command};
 use std::time::{Duration, Instant};
+
+mod live_update;
+
+pub fn record_manager_install(path: &Path) {
+    if let Err(error) = live_update::record(path) {
+        eprintln!("Core live activation unavailable: {error}");
+    }
+}
 
 /// Core's private state dir (journal, markers, boot status, log).
 pub const PERSIST_DIR: &str = "/data/adb/vpnhide/core";
@@ -171,28 +179,45 @@ pub fn supervise() -> i32 {
             return 73;
         }
     };
-    let exe = match std::env::current_exe() {
+    let exe = match File::open("/proc/self/exe") {
         Ok(exe) => exe,
         Err(error) => {
             eprintln!("core: cannot locate worker: {error}");
             return 1;
         }
     };
-    let module = exe.parent().unwrap_or_else(|| Path::new("."));
-    supervise_worker(module, persist, Duration::from_secs(1), || {
-        let mut command = Command::new(&exe);
-        command.arg("service-worker");
-        command
-    })
+    let paths = live_update::paths();
+    supervise_worker(
+        &paths.active(),
+        persist,
+        Duration::from_secs(1),
+        Some(&paths),
+        || worker_command(&exe),
+    )
+}
+
+fn worker_command(exe: &File) -> Command {
+    let mut command = Command::new(format!("/proc/self/fd/{}", exe.as_raw_fd()));
+    command.arg("service-worker");
+    command
+}
+
+fn terminate(child: &Child) {
+    // The supervisor retains the unreaped child, so the PID cannot be reused.
+    unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
 }
 
 fn supervise_worker(
     module: &Path,
     persist: &Path,
     initial_backoff: Duration,
+    update_paths: Option<&crate::maintenance::replacement::ReplacementPaths>,
     mut command: impl FnMut() -> Command,
 ) -> i32 {
     let mut backoff = initial_backoff;
+    let mut handled = Vec::new();
+    let mut staged: Option<live_update::Candidate> = None;
+    let mut pending: Option<Vec<u8>> = None;
     loop {
         if !module.is_dir() || module.join("disable").exists() || module.join("remove").exists() {
             let _ = fs::write(
@@ -201,8 +226,23 @@ fn supervise_worker(
             );
             return 0;
         }
+        if let Some(receipt) = pending.take() {
+            staged = update_paths.and_then(|paths| {
+                live_update::Candidate::open(paths, &receipt).unwrap_or_else(|error| {
+                    eprintln!("Core live activation cancelled after shutdown: {error}");
+                    None
+                })
+            });
+        }
+        if let (Some(candidate), Some(paths)) = (&staged, update_paths)
+            && candidate.image.require_unchanged(&paths.staged()).is_err()
+        {
+            staged = None;
+        }
         let started = Instant::now();
-        let mut command = command();
+        let mut command = staged
+            .as_ref()
+            .map_or_else(&mut command, |c| worker_command(&c.file));
         let parent = unsafe { libc::getpid() };
         // SAFETY: only async-signal-safe syscalls in the fork child. The worker
         // terminates with its supervisor, including the fork/prctl race window.
@@ -217,13 +257,74 @@ fn supervise_worker(
                 Ok(())
             });
         }
+        let mut stage_ready = staged.is_none();
         let result = command.spawn().and_then(|mut child| {
             let _ = fs::write(
                 persist.join("supervisor_status"),
                 format!("running=1 pid={}\n", child.id()),
             );
-            child.wait()
+            let Some(paths) = update_paths else {
+                return child.wait();
+            };
+            if !stage_ready {
+                let runtime = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(runtime) => runtime,
+                    Err(error) => {
+                        terminate(&child);
+                        child.wait()?;
+                        return Err(error);
+                    }
+                };
+                while started.elapsed() < Duration::from_secs(35) {
+                    if let Some(status) = child.try_wait()? {
+                        return Ok(status);
+                    }
+                    if live_update::ready(&runtime, paths) {
+                        stage_ready = true;
+                        eprintln!("core: verified staged worker ready pid={}", child.id());
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+                if !stage_ready {
+                    terminate(&child);
+                    return child.wait();
+                }
+            }
+            loop {
+                if let Some(status) = child.try_wait()? {
+                    return Ok(status);
+                }
+                if let Ok(receipt) = live_update::receipt(paths)
+                    && receipt != handled
+                    && let Ok(Some(candidate)) = live_update::Candidate::open(paths, &receipt)
+                {
+                    handled = receipt;
+                    let running = File::open(format!("/proc/{}/exe", child.id()));
+                    if !running.is_ok_and(|file| candidate.image.require_running(&file).is_ok()) {
+                        eprintln!("core: switching to the verified KernelSU staged worker");
+                        pending = Some(handled.clone());
+                        terminate(&child);
+                        return child.wait();
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
         });
+        if pending.is_some() {
+            backoff = initial_backoff;
+            continue;
+        }
+        if !stage_ready {
+            eprintln!(
+                "core: staged worker failed readiness ({result:?}); restoring original worker"
+            );
+            staged = None;
+            continue;
+        }
         if result
             .as_ref()
             .is_ok_and(|status| status.success() || status.code() == Some(73))
@@ -303,18 +404,30 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join("crash-marker");
         let mut starts = 0;
-        let code = supervise_worker(dir.path(), dir.path(), Duration::from_millis(1), || {
-            starts += 1;
-            fixture_command(&marker, "crash_once")
-        });
+        let code = supervise_worker(
+            dir.path(),
+            dir.path(),
+            Duration::from_millis(1),
+            None,
+            || {
+                starts += 1;
+                fixture_command(&marker, "crash_once")
+            },
+        );
         assert_eq!(code, 0);
         assert_eq!(starts, 2);
         assert!(marker.exists());
         starts = 0;
-        let code = supervise_worker(dir.path(), dir.path(), Duration::from_millis(1), || {
-            starts += 1;
-            fixture_command(&marker, "owner_refusal")
-        });
+        let code = supervise_worker(
+            dir.path(),
+            dir.path(),
+            Duration::from_millis(1),
+            None,
+            || {
+                starts += 1;
+                fixture_command(&marker, "owner_refusal")
+            },
+        );
         assert_eq!(code, 73);
         assert_eq!(starts, 1);
         assert!(
@@ -329,9 +442,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("disable"), "").unwrap();
         assert_eq!(
-            supervise_worker(dir.path(), dir.path(), Duration::from_millis(1), || panic!(
-                "disabled module launched"
-            )),
+            supervise_worker(
+                dir.path(),
+                dir.path(),
+                Duration::from_millis(1),
+                None,
+                || panic!("disabled module launched")
+            ),
             0
         );
     }

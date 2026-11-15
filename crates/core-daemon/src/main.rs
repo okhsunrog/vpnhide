@@ -31,7 +31,10 @@ fn main() {
     if all.first().map(String::as_str) == Some("install-handoff") {
         let result = match all.as_slice() {
             [_, path] => {
-                vpnhide_core_daemon::maintenance::zygisk_projection::install::run(Path::new(path))
+                let path = Path::new(path);
+                vpnhide_core_daemon::maintenance::zygisk_projection::install::run(path).map(|()| {
+                    vpnhide_core_daemon::service::record_manager_install(path);
+                })
             }
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
