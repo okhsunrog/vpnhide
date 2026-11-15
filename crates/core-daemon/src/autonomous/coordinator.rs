@@ -716,6 +716,7 @@ impl Coordinator {
         &self,
         peer: PeerCred,
         request: FrameworkWorkerRequest,
+        debug: bool,
     ) -> Result<Option<FrameworkWorkerTask>, DiagnosticError> {
         let framework = {
             let mut inner = self.inner.lock().expect("diagnostic coordinator");
@@ -769,7 +770,7 @@ impl Coordinator {
                 .clone()
         };
         let mut framework = framework.try_lock().map_err(|_| DiagnosticError::Busy)?;
-        framework.step(request)
+        framework.step(request, debug)
     }
 
     pub fn report(

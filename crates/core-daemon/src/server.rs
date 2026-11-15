@@ -3122,7 +3122,8 @@ impl VpnhideCore for CoreServer {
             .map_err(|_| vpnhide_core_rpc::DiagnosticError::Busy)?;
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            self.state.diagnostics.framework_step(peer, request)
+            let debug = self.state.current_debug().is_some_and(|(debug, _)| debug);
+            self.state.diagnostics.framework_step(peer, request, debug)
         })
         .await
         .unwrap_or(Err(vpnhide_core_rpc::DiagnosticError::Disabled))

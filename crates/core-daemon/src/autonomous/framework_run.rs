@@ -19,6 +19,8 @@ pub(super) struct FrameworkRun {
     last: Option<FrameworkWorkerRequest>,
     finished: bool,
     closed: bool,
+    failure_context: &'static str,
+    failure_logged: bool,
 }
 fn failed(_: impl std::fmt::Display) -> DiagnosticError {
     DiagnosticError::Disabled
@@ -98,25 +100,32 @@ impl FrameworkRun {
             last: None,
             finished: false,
             closed: false,
+            failure_context: "worker request",
+            failure_logged: false,
         })
     }
     fn acknowledgement(
-        &self,
+        &mut self,
         store: &FrameworkStore,
         validate: fn(&FrameworkAcknowledgement) -> bool,
     ) -> Result<FrameworkAcknowledgement, DiagnosticError> {
         let until = BootDeadline::from_now(Duration::from_millis(800)).map_err(failed)?;
         loop {
+            self.failure_context = "framework deadline";
             if boot_ms().map_err(failed)? >= self.envelope.expires_boot_ms {
                 return Err(DiagnosticError::Expired);
             }
+            self.failure_context = "read fixture authority";
             if store.current().map_err(failed)?.as_ref() != Some(&self.envelope) {
                 return Err(DiagnosticError::StaleSession);
             }
+            self.failure_context = "read system_server acknowledgement";
             if let Some(ack) = store.acknowledgement(&self.envelope).map_err(failed)? {
+                self.failure_context = "verify system_server identity";
                 if !validate(&ack) {
                     return Err(DiagnosticError::WrongProcess);
                 }
+                self.failure_context = "compare framework source identity";
                 if self.phases.first().is_some_and(|first| {
                     first.acknowledgement.sources != ack.sources
                         || first.acknowledgement.system_server_pid != ack.system_server_pid
@@ -125,11 +134,13 @@ impl FrameworkRun {
                 }) {
                     return Err(DiagnosticError::StaleSession);
                 }
+                self.failure_context = "framework deadline";
                 if boot_ms().map_err(failed)? >= self.envelope.expires_boot_ms {
                     return Err(DiagnosticError::Expired);
                 }
                 return Ok(ack);
             }
+            self.failure_context = "timed out waiting for system_server acknowledgement";
             if until.expired(BootInstant::now().map_err(failed)?) {
                 return Err(DiagnosticError::Disabled);
             }
@@ -139,9 +150,27 @@ impl FrameworkRun {
     pub fn step(
         &mut self,
         request: FrameworkWorkerRequest,
+        debug: bool,
     ) -> Result<Option<FrameworkWorkerTask>, DiagnosticError> {
-        let store = FrameworkStore::production().map_err(failed)?;
-        self.step_with(request, &store, system_server)
+        let requested_phase = request.phase;
+        self.failure_context = "open framework fixture store";
+        let result = FrameworkStore::production()
+            .map_err(failed)
+            .and_then(|store| self.step_with(request, &store, system_server));
+        if debug
+            && !self.failure_logged
+            && let Err(error) = &result
+        {
+            self.failure_logged = true;
+            crate::alog::info(&format!(
+                "diagnostics: framework session={} requested={requested_phase:?} phase={:?} samples={} failure={error:?} detail={}",
+                self.envelope.session,
+                self.envelope.phase,
+                self.phases.len(),
+                self.failure_context,
+            ));
+        }
+        result
     }
     fn step_with(
         &mut self,
@@ -149,6 +178,7 @@ impl FrameworkRun {
         store: &FrameworkStore,
         validate: fn(&FrameworkAcknowledgement) -> bool,
     ) -> Result<Option<FrameworkWorkerTask>, DiagnosticError> {
+        self.failure_context = "validate worker request";
         if self.closed {
             return if self.finished && self.last.as_ref() == Some(&request) {
                 Ok(None)
@@ -204,6 +234,7 @@ impl FrameworkRun {
             if self.last.is_some() || request.previous.is_some() {
                 return Err(DiagnosticError::StaleSession);
             }
+            self.failure_context = "reconcile previous framework fixture";
             store
                 .reconcile_orphan(
                     self.envelope.core_epoch,
@@ -211,6 +242,7 @@ impl FrameworkRun {
                     boot_ms().map_err(failed)?,
                 )
                 .map_err(failed)?;
+            self.failure_context = "publish initial framework fixture";
             store.publish(None, &self.envelope).map_err(failed)?;
         } else {
             if self.last.is_none() || ordinal != self.envelope.generation + 1 {
@@ -225,9 +257,11 @@ impl FrameworkRun {
             };
             if let Some(phase) = request.phase.authority_phase() {
                 let next = self.envelope.for_phase(phase);
+                self.failure_context = "publish next framework phase";
                 store.publish(Some(&self.envelope), &next).map_err(failed)?;
                 self.envelope = next;
             } else {
+                self.failure_context = "revoke framework fixture";
                 store.revoke(&self.envelope).map_err(failed)?;
                 self.finished = true;
             }
@@ -281,6 +315,8 @@ mod tests {
             last: None,
             finished: false,
             closed: false,
+            failure_context: "worker request",
+            failure_logged: false,
         }
     }
     fn request(run: &FrameworkRun, phase: FrameworkWorkerPhase) -> FrameworkWorkerRequest {

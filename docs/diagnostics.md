@@ -101,6 +101,11 @@ Zygisk generation. Cache identity includes policy, runtime/platform evidence and
 loaded-generation coverage. Missing required proof remains unverified. The
 current partial implementation has no full-success assessment variant.
 
+With Debug logging enabled, Core logs the first failed step of each admitted
+framework run. The line includes the run ID, requested phase, active phase,
+number of accepted samples, and failing operation. The assessment and IPC
+contracts stay the same.
+
 Core prepares its managed diagnostic target during production boot, after PM
 readiness and before backend policy is frozen, without waiting for the APK to
 open. Preparation uses the durable writer and source-checked legacy bootstrap;
