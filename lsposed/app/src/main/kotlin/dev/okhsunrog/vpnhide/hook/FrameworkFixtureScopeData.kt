@@ -8,9 +8,9 @@ import kotlinx.serialization.json.jsonObject
 
 internal enum class FixturePhase { PREPARED, RAW, PROTECTED, REVOKED }
 
-internal enum class FixtureTransaction { NETWORKS, CAPABILITIES, PROPERTIES, LEGACY_TYPE, LEGACY_ENUM, ACTIVE_NETWORK, OTHER }
+internal enum class FixtureTransaction { NETWORKS, CAPABILITIES, PROPERTIES, LEGACY_TYPE, LEGACY_ENUM, ACTIVE_NETWORK, CALLBACK, OTHER }
 
-internal const val FRAMEWORK_FIXTURE_PROTOCOL = 3
+internal const val FRAMEWORK_FIXTURE_PROTOCOL = 4
 
 internal data class FixtureWorker(
     val uid: Int,
@@ -112,6 +112,7 @@ internal fun parseFixtureAuthority(bytes: String): FixtureAuthority? =
 internal data class FixtureInvocation(
     val authority: FixtureAuthority,
     val transaction: FixtureTransaction,
+    val callback: FixtureCallbackRegistration? = null,
 )
 
 /** Nested untrusted Binder entries must clear the inherited RAW privilege. */
@@ -147,6 +148,15 @@ internal data class FixtureEvidenceSnapshot(
     val legacyTypeStartedNs: Long,
     val legacyEnumerationStartedNs: Long,
     val activeNetwork: FixtureActiveNetworkEvidence,
+    val callbacks: Map<FixtureCallbackRegistration, FixtureCallbackEvidence>,
+)
+
+internal enum class FixtureCallbackRegistration { LISTEN, DEFAULT, REQUEST }
+
+internal data class FixtureCallbackEvidence(
+    val ordinaryHandle: Long,
+    val availableHandled: Boolean = false,
+    val lostHandled: Boolean = false,
 )
 
 internal data class FixtureActiveNetworkEvidence(
@@ -170,6 +180,7 @@ internal class FixtureEvidenceLedger {
         private set
     var activeNetwork = FixtureActiveNetworkEvidence()
         private set
+    private val callbacks = mutableMapOf<FixtureCallbackRegistration, FixtureCallbackEvidence>()
 
     fun snapshot() =
         FixtureEvidenceSnapshot(
@@ -180,6 +191,7 @@ internal class FixtureEvidenceLedger {
             legacyTypeStartedNs,
             legacyEnumerationStartedNs,
             activeNetwork,
+            callbacks.toMap(),
         )
 
     fun begin(
@@ -219,6 +231,19 @@ internal class FixtureEvidenceLedger {
         if (activeNetwork.originalHandle != null) {
             activeNetwork = activeNetwork.copy(replaced = true)
         }
+    }
+
+    fun beginCallback(
+        registration: FixtureCallbackRegistration,
+        ordinaryHandle: Long,
+    ): Boolean = callbacks.putIfAbsent(registration, FixtureCallbackEvidence(ordinaryHandle)) == null
+
+    fun recordCallback(
+        registration: FixtureCallbackRegistration,
+        lost: Boolean,
+    ) {
+        val evidence = callbacks[registration] ?: return
+        callbacks[registration] = if (lost) evidence.copy(lostHandled = true) else evidence.copy(availableHandled = true)
     }
 
     fun record(

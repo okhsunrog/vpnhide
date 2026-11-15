@@ -1,5 +1,8 @@
 //! Typed framework observations only. All admission, authority and verdicts are Core-owned.
 use crate::{CoreDiagnosticError, CoreDiagnosticWorkerTask, CoreProbeError, CoreSession};
+use vpnhide_diagnostic_model::framework_callbacks::{
+    CallbackEvent, CallbackObservation, CallbackRegistration,
+};
 use vpnhide_diagnostic_model::{Sample, framework as model};
 macro_rules! sample {
     ($name:ident, $ty:ty) => {
@@ -144,6 +147,46 @@ pub struct CoreFrameworkObservation {
     pub legacy_type: CoreLegacyInfoSample,
     pub legacy_enumeration: CoreLegacyInfosSample,
     pub legacy_ordinary: CoreLegacyOrdinarySample,
+    pub callbacks: Vec<CoreCallbackObservation>,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum CoreCallbackRegistration {
+    Listen,
+    Default,
+    Request,
+}
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CoreCallbackEvent {
+    pub handle: u64,
+    pub lost: bool,
+}
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CoreCallbackObservation {
+    pub registration: CoreCallbackRegistration,
+    pub events: Vec<CoreCallbackEvent>,
+    pub vpn_transport: bool,
+    pub vpn_properties: bool,
+}
+impl From<CoreCallbackObservation> for CallbackObservation {
+    fn from(value: CoreCallbackObservation) -> Self {
+        Self {
+            registration: match value.registration {
+                CoreCallbackRegistration::Listen => CallbackRegistration::Listen,
+                CoreCallbackRegistration::Default => CallbackRegistration::Default,
+                CoreCallbackRegistration::Request => CallbackRegistration::Request,
+            },
+            events: value
+                .events
+                .into_iter()
+                .map(|event| CallbackEvent {
+                    handle: event.handle,
+                    lost: event.lost,
+                })
+                .collect(),
+            vpn_transport: value.vpn_transport,
+            vpn_properties: value.vpn_properties,
+        }
+    }
 }
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreActiveNetworkObservation {
@@ -161,6 +204,7 @@ impl From<CoreFrameworkObservation> for model::FrameworkObservation {
             vpn_interface: v.vpn_interface.into(),
             ordinary_capabilities_sha256: v.ordinary_capabilities_sha256.into(),
             ordinary_properties_sha256: v.ordinary_properties_sha256.into(),
+            callbacks: v.callbacks.into_iter().map(Into::into).collect(),
             active_network: vpnhide_diagnostic_model::framework_default::ActiveNetworkObservation {
                 window: v.active_network.window.map(Into::into),
                 handle: v.active_network.handle.into(),
@@ -201,7 +245,8 @@ simple_enum!(
     LinkProperties,
     LegacyTypeVpn,
     LegacyEnumeration,
-    DefaultNetwork
+    DefaultNetwork,
+    Callbacks
 );
 simple_enum!(
     CoreFrameworkControlFailure,
@@ -307,6 +352,7 @@ mod tests {
     #[test]
     fn typed_worker_samples_keep_null_distinct_from_error_and_preserve_bounds() {
         let value = CoreFrameworkObservation {
+            callbacks: vec![],
             active_network: CoreActiveNetworkObservation {
                 window: None,
                 handle: CoreOptionalHandleSample::Value { value: None },

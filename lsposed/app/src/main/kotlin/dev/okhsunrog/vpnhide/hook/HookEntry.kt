@@ -1095,11 +1095,12 @@ class HookEntry : IXposedHookLoadPackage {
                     val vpn =
                         caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true ||
                             (caps == null && isHiddenVpn(network.netIdOrNull()))
-                    if (vpn) rememberHiddenVpn(network.netIdOrNull())
+                    if (vpn && !frameworkFixture.isFixtureCallbackNetwork(network)) rememberHiddenVpn(network.netIdOrNull())
                     vpn
                 },
                 coverFor = ::coverNetworkFor,
                 isListen = ::requestIsListen,
+                fixtureHandled = frameworkFixture::callbackHandled,
             )
 
         // Both methods take the NetworkRequestInfo as their first arg, so the
@@ -1110,6 +1111,7 @@ class HookEntry : IXposedHookLoadPackage {
                     val nri = param.args.firstOrNull() ?: return
                     rememberConnectivityService(param.thisObject)
                     val uid = extractRecipientUid(nri)
+                    frameworkFixture.dispatchCallbackFixture(param, uid)
                     if (uid < 0 || !isTargetUid(uid, HookIds.Hook.LSPOSED_CONNECTIVITY_CALLBACK)) return
 
                     val request = extractNetworkRequest(nri)

@@ -298,10 +298,32 @@ One run reached the Android worker deadline during framework collection and
 retained the eight confirmed native groups. The two immediate retries passed;
 the cause of the intermittent timeout was not established.
 
-Callback and PendingIntent checks need their own dispatch controls. Package Visibility and Ports are
-required only when enabled in the configuration and still lack controlled
-behavioral results. Use the [RFC's fixture requirements](rfcs/0002-autonomous-diagnostics.md#74-почему-callback--главный-технический-риск)
-for the framework checks.
+The callback scenario opens independent Android LISTEN, default and REQUEST
+registrations in each phase. On frameworks with the Bundle dispatcher, the
+first real ordinary AVAILABLE for each authenticated worker registration
+triggers synthetic VPN AVAILABLE and LOST ahead of the original event.
+The two synthetic inputs go through the production router and the platform's
+Messenger delivery. RAW must receive the VPN handle, transport and interface
+marker and the original ordinary event. Protected LISTEN must suppress both
+VPN events. Protected default and REQUEST must rebuild AVAILABLE from the
+ordinary cover and keep it available when only the VPN is lost. The following
+real AVAILABLE for the same cover must not produce a duplicate.
+Core requires all three registrations to qualify the group. Android workers
+unregister the callbacks after measurement. The paired RPC38 uses framework
+channel version4 for the new observations and dispatch acknowledgements.
+
+Pixel 8 Pro with Android 17 and Builtin confirmed the callback group in 29 of
+32 repeated runs. The 16 runs following the two post-unlock worker deadlines
+all confirmed 14 groups. A later run lost the framework acknowledgement in
+RAW and retained eight native groups. No run reported a qualified leak. The
+tested Core hot-switched after the hook reload and retained the same boot and
+`system_server` generation. Both framework files and the temporary device
+helper were removed.
+
+PendingIntent still needs an
+independent dispatch scenario. Package Visibility and Ports are required only
+when enabled and still lack controlled results. See the
+[framework fixture requirements](rfcs/0002-autonomous-diagnostics.md#74-почему-callback--главный-технический-риск).
 Android bionic, SELinux, Java callback isolation and old game-process coverage need
 real device acceptance. QEMU/static libc evidence does not replace those gates.
 The [roadmap](../ROADMAP.md) separates these

@@ -27,6 +27,7 @@ internal class NetworkCallbackRouter(
     private val isVpn: (Any, Network) -> Boolean,
     private val coverFor: (Any, Int) -> Network?,
     private val isListen: (NetworkRequest?) -> Boolean,
+    private val fixtureHandled: (Network, Boolean) -> Unit,
 ) {
     private val states = WeakHashMap<Any, Int>()
     private val forwarding = ThreadLocal<Boolean>()
@@ -67,11 +68,14 @@ internal class NetworkCallbackRouter(
                 param.args.getOrNull(1)?.let { XposedHelpers.getObjectField(it, "network") as? Network }
             } ?: return true // UNAVAILABLE / RESERVED have no network.
         val vpn = isVpn(param.thisObject, source)
+        val type = (if (bundle != null) param.args[1] else param.args[2]) as Int
         if (isListen(request)) {
-            if (vpn) param.result = null
+            if (vpn) {
+                param.result = null
+                recordFixtureDelivery(source, type)
+            }
             return true
         }
-        val type = (if (bundle != null) param.args[1] else param.args[2]) as Int
         val held = synchronized(states) { states[nri] }
         val event = eventKind(type)
         if (!vpn) {
@@ -91,8 +95,30 @@ internal class NetworkCallbackRouter(
                 transition
             }
         if (!deliver(param, request, next, cover, type, bundle)) return true
+        recordTrackedFixtureDelivery(source, type, next, cover)
         remember(nri, next)
         return true
+    }
+
+    private fun recordTrackedFixtureDelivery(
+        source: Network,
+        type: Int,
+        next: CallbackTransition,
+        cover: Network?,
+    ) {
+        if (type == available && (next.delivery == CallbackDelivery.Available || next.delivery == CallbackDelivery.Forward)) {
+            fixtureHandled(source, false)
+        }
+        if (type == lost && cover != null && next.held == netId(cover) && next.delivery == CallbackDelivery.Suppress) {
+            fixtureHandled(source, true)
+        }
+    }
+
+    private fun recordFixtureDelivery(
+        source: Network,
+        type: Int,
+    ) {
+        if (type == available || type == lost) fixtureHandled(source, type == lost)
     }
 
     private fun filterPhysical(

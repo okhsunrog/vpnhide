@@ -6,6 +6,8 @@ import android.system.Os
 import android.system.OsConstants
 import dev.okhsunrog.vpnhide.BuildConfig
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.File
@@ -143,6 +145,20 @@ internal class FrameworkFixtureChannel {
             put("replaced", evidence.replaced)
         }
 
+    private fun encodeCallbacks(evidence: FixtureEvidenceSnapshot) =
+        buildJsonArray {
+            for ((kind, callback) in evidence.callbacks) {
+                add(
+                    buildJsonObject {
+                        put("registration", kind.name.lowercase())
+                        put("ordinary_handle", callback.ordinaryHandle)
+                        put("available_handled", callback.availableHandled)
+                        put("lost_handled", callback.lostHandled)
+                    },
+                )
+            }
+        }
+
     private fun encode(
         authority: FixtureAuthority,
         objects: FrameworkFixtureObjects,
@@ -184,6 +200,7 @@ internal class FrameworkFixtureChannel {
             )
             put("legacy", encodeLegacy(evidence))
             put("active_network", encodeActiveNetwork(evidence.activeNetwork))
+            put("callbacks", encodeCallbacks(evidence))
             for (name in listOf(
                 "networks_source",
                 "capabilities_source",

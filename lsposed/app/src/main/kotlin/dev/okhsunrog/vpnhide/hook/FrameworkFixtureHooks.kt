@@ -34,6 +34,7 @@ internal class FrameworkFixtureHooks {
     private val scope = FixtureInvocationScope()
     private val attached = Collections.newSetFromMap(IdentityHashMap<Class<*>, Boolean>())
     private val dispatches = FixtureDispatchRegistry()
+    private val callbacks = FrameworkCallbackFixture()
     private val guard = Any()
 
     @Volatile private var state: State? = null
@@ -246,6 +247,56 @@ internal class FrameworkFixtureHooks {
         }
     }
 
+    fun dispatchCallbackFixture(
+        param: XC_MethodHook.MethodHookParam,
+        uid: Int,
+    ) {
+        val active = state ?: return
+        val authority = active.authority
+        if (scope.get() != null || param.thisObject !== receiver || authority.worker.uid != uid ||
+            authority.phase !in setOf(FixturePhase.RAW, FixturePhase.PROTECTED)
+        ) {
+            return
+        }
+        runCatching {
+            val input = callbacks.input(param, authority.worker) ?: return
+            if (fixtureStartTicks(authority.worker.pid) != authority.worker.startTicks ||
+                input.ordinary == active.objects.vpn || input.ordinary == active.objects.ordinary
+            ) {
+                return
+            }
+            synchronized(guard) {
+                if (state !== active || channel.read() != authority ||
+                    !active.evidence.beginCallback(input.registration, input.ordinary.networkHandle)
+                ) {
+                    return
+                }
+                acknowledge(active)
+            }
+            val previous = scope.enter(FixtureInvocation(authority, FixtureTransaction.CALLBACK, input.registration))
+            try {
+                callbacks.dispatch(param, input, active.objects) { current() === active }
+            } finally {
+                scope.restore(previous)
+            }
+        }
+    }
+
+    fun isFixtureCallbackNetwork(network: Network): Boolean = scope.get()?.callback != null && current()?.objects?.vpn == network
+
+    fun callbackHandled(
+        network: Network,
+        lost: Boolean,
+    ) {
+        val registration = scope.get()?.callback ?: return
+        synchronized(guard) {
+            val active = current() ?: return
+            if (active.authority.phase != FixturePhase.PROTECTED || network != active.objects.vpn) return
+            active.evidence.recordCallback(registration, lost)
+            runCatching { acknowledge(active) }
+        }
+    }
+
     @Suppress("DEPRECATION")
     private fun injectLegacyType(
         param: XC_MethodHook.MethodHookParam,
@@ -330,6 +381,7 @@ internal class FrameworkFixtureHooks {
                     FixtureTransaction.LEGACY_TYPE,
                     FixtureTransaction.LEGACY_ENUM,
                     FixtureTransaction.ACTIVE_NETWORK,
+                    FixtureTransaction.CALLBACK,
                     FixtureTransaction.OTHER,
                     -> return
                 },

@@ -79,6 +79,9 @@ pub(crate) fn framework_checks(
             FrameworkCheck::DefaultNetwork => {
                 result.insert(RequiredCheck::FrameworkDefaultNetwork);
             }
+            FrameworkCheck::Callbacks => {
+                result.insert(RequiredCheck::FrameworkCallbacks);
+            }
             FrameworkCheck::LegacyTypeVpn | FrameworkCheck::LegacyEnumeration => {
                 if !require_both_legacy
                     || [

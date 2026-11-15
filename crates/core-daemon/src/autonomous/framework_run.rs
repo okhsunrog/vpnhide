@@ -170,7 +170,28 @@ impl FrameworkRun {
                 self.failure_context,
             ));
         }
+        if debug
+            && requested_phase == FrameworkWorkerPhase::Finished
+            && result.is_ok()
+            && !evaluate_framework(&self.phases, true)
+                .proven
+                .contains(&FrameworkCheck::Callbacks)
+        {
+            self.log_callback_evidence();
+        }
         result
+    }
+
+    fn log_callback_evidence(&self) {
+        for phase in &self.phases {
+            crate::alog::info(&format!(
+                "diagnostics: callback session={} phase={:?} sources={:?} observations={:?}",
+                self.envelope.session,
+                phase.envelope.phase,
+                phase.acknowledgement.callbacks,
+                phase.observation.callbacks,
+            ));
+        }
     }
     fn step_with(
         &mut self,
@@ -356,6 +377,7 @@ mod tests {
             capabilities_filtered: false,
             properties_filtered: false,
             active_network: Default::default(),
+            callbacks: vec![],
             legacy: Default::default(),
         }
     }

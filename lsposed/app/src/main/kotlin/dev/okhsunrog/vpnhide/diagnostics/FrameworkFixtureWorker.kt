@@ -5,6 +5,8 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkInfo
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.Parcel
 import android.os.Parcelable
 import android.os.SystemClock
@@ -38,12 +40,23 @@ internal suspend fun measureFrameworkFixture(
     task: CoreDiagnosticWorkerTask,
 ) {
     val manager = context.getSystemService(ConnectivityManager::class.java)
-    var previous: CoreFrameworkObservation? = null
-    for (phase in listOf(CoreFrameworkPhase.PREPARED, CoreFrameworkPhase.RAW, CoreFrameworkPhase.PROTECTED, CoreFrameworkPhase.REVOKED)) {
-        val next = requireNotNull(core.frameworkWorkerStep(task, BuildConfig.HOOK_SOURCE_SHA256, phase, previous))
-        previous = observeFramework(manager, next)
+    val callbackThread = HandlerThread("vpnhide-diagnostic-callbacks").apply { start() }
+    try {
+        val handler = Handler(callbackThread.looper)
+        var previous: CoreFrameworkObservation? = null
+        for (phase in listOf(
+            CoreFrameworkPhase.PREPARED,
+            CoreFrameworkPhase.RAW,
+            CoreFrameworkPhase.PROTECTED,
+            CoreFrameworkPhase.REVOKED,
+        )) {
+            val next = requireNotNull(core.frameworkWorkerStep(task, BuildConfig.HOOK_SOURCE_SHA256, phase, previous))
+            previous = observeFramework(manager, next).copy(callbacks = observeFrameworkCallbacks(manager, next, handler))
+        }
+        core.frameworkWorkerStep(task, BuildConfig.HOOK_SOURCE_SHA256, CoreFrameworkPhase.FINISHED, previous)
+    } finally {
+        callbackThread.quitSafely()
     }
-    core.frameworkWorkerStep(task, BuildConfig.HOOK_SOURCE_SHA256, CoreFrameworkPhase.FINISHED, previous)
 }
 
 @Suppress("DEPRECATION") // getAllNetworks remains a supported detection surface.
@@ -76,6 +89,7 @@ private fun observeFramework(
         legacy.type,
         legacy.enumeration,
         legacy.ordinary,
+        emptyList(),
     )
 }
 

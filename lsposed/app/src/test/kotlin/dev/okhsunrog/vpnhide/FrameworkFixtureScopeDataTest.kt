@@ -84,7 +84,7 @@ class FrameworkFixtureScopeDataTest {
             golden.replace("10123", "\"10123\""),
             golden.replace("\"prepared\"", "\"raw\""),
             golden.replace("1610612737", "2147483648"),
-            golden.replace("\"version\": 3", "\"extra\": true, \"version\": 3"),
+            golden.replace("\"version\": 4", "\"extra\": true, \"version\": 4"),
         )) {
             assertNull(parseFixtureAuthority(bad))
         }

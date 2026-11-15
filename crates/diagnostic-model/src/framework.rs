@@ -2,11 +2,12 @@
 //! both phases; only the production hiding path may change protected observations.
 use crate::{
     ProbeError, Sample,
+    framework_callbacks::{CallbackObservation, CallbackSource},
     framework_default::{ActiveNetworkObservation, ActiveNetworkSource},
     framework_legacy::{LegacyObservation, LegacySourceEvidence},
 };
 use serde::{Deserialize, Serialize};
-pub const FRAMEWORK_PROTOCOL: u32 = 3;
+pub const FRAMEWORK_PROTOCOL: u32 = 4;
 pub const FRAMEWORK_LEASE_MS: u64 = 25_000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -150,6 +151,7 @@ pub struct FrameworkAcknowledgement {
     pub capabilities_filtered: bool,
     pub properties_filtered: bool,
     pub active_network: ActiveNetworkSource,
+    pub callbacks: Vec<CallbackSource>,
     pub legacy: LegacySourceEvidence,
 }
 impl FrameworkAcknowledgement {
@@ -157,6 +159,7 @@ impl FrameworkAcknowledgement {
         envelope.valid()
             && self.legacy.bounded()
             && self.active_network.bounded()
+            && crate::framework_callbacks::sources_bounded(&self.callbacks)
             && self.version == FRAMEWORK_PROTOCOL
             && self.session == envelope.session
             && self.core_epoch == envelope.core_epoch
@@ -192,12 +195,14 @@ pub struct FrameworkObservation {
     pub ordinary_capabilities_sha256: Sample<String>,
     pub ordinary_properties_sha256: Sample<String>,
     pub active_network: ActiveNetworkObservation,
+    pub callbacks: Vec<CallbackObservation>,
     pub legacy: LegacyObservation,
 }
 impl FrameworkObservation {
     pub fn bounded(&self) -> bool {
         self.legacy.bounded()
             && self.active_network.bounded()
+            && crate::framework_callbacks::observations_bounded(&self.callbacks)
             && self.networks.value().is_none_or(|v| {
                 v.len() <= 256
                     && v.iter().all(|&h| h != 0)
@@ -227,6 +232,7 @@ impl FrameworkObservation {
             ordinary_capabilities_sha256: Sample::Error(ProbeError::Unsupported),
             ordinary_properties_sha256: Sample::Error(ProbeError::Unsupported),
             active_network: ActiveNetworkObservation::unavailable(),
+            callbacks: vec![],
             legacy: LegacyObservation::unavailable(),
         }
     }
@@ -241,6 +247,7 @@ pub enum FrameworkCheck {
     LegacyTypeVpn,
     LegacyEnumeration,
     DefaultNetwork,
+    Callbacks,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -362,6 +369,9 @@ fn observed_leaks(phases: &[FrameworkPhaseEvidence]) -> Vec<FrameworkCheck> {
     leaked.extend(crate::framework_legacy::observed_leaks(raw, protected));
     if crate::framework_default::leaked(raw, protected) {
         leaked.push(FrameworkCheck::DefaultNetwork);
+    }
+    if crate::framework_callbacks::leaked(raw, protected) {
+        leaked.push(FrameworkCheck::Callbacks);
     }
     leaked
 }
@@ -536,6 +546,11 @@ pub fn evaluate_framework(
         Ok(()) => {}
         Err(failure) => result.controls.push(failure),
     }
+    match crate::framework_callbacks::evaluate([prepared, raw, protected, revoked]) {
+        Ok(()) if cleanup => result.proven.push(V::Callbacks),
+        Ok(()) => {}
+        Err(failure) => result.controls.push(failure),
+    }
     result.leaked.sort();
     result.leaked.dedup();
     result.controls.sort();
@@ -612,6 +627,7 @@ mod tests {
                     capabilities_filtered: protected,
                     properties_filtered: protected,
                     active_network: ActiveNetworkSource::default(),
+                    callbacks: vec![],
                     legacy: LegacySourceEvidence::default(),
                 },
                 observation: FrameworkObservation {
@@ -629,6 +645,7 @@ mod tests {
                     ordinary_capabilities_sha256: Sample::Value("1".repeat(64)),
                     ordinary_properties_sha256: Sample::Value("2".repeat(64)),
                     active_network: ActiveNetworkObservation::unavailable(),
+                    callbacks: vec![],
                     legacy: LegacyObservation::unavailable(),
                 },
             }
@@ -753,13 +770,77 @@ mod tests {
         assert!(!fails.proven.contains(&check));
     }
     #[test]
+    fn callbacks_require_all_registrations_and_real_delivery_in_both_phases() {
+        use crate::framework_callbacks::{CallbackEvent, CallbackRegistration::*};
+
+        let event = |handle, lost| CallbackEvent { handle, lost };
+        let mut evidence = legacy_phases();
+        for (i, phase) in evidence.iter_mut().enumerate() {
+            for registration in [Listen, Default, Request] {
+                let ordinary = event(11, false);
+                let events = match i {
+                    1 => vec![event(101, false), event(101, true), ordinary],
+                    _ => vec![ordinary],
+                };
+                phase.observation.callbacks.push(CallbackObservation {
+                    registration,
+                    events,
+                    vpn_transport: i == 1,
+                    vpn_properties: i == 1,
+                });
+                if matches!(i, 1 | 2) {
+                    phase.acknowledgement.callbacks.push(CallbackSource {
+                        registration,
+                        ordinary_handle: 11,
+                        available_handled: i == 2,
+                        lost_handled: i == 2,
+                    });
+                }
+            }
+        }
+        let check = FrameworkCheck::Callbacks;
+        let passes = evaluate_framework(&evidence, true);
+        assert!(passes.proven.contains(&check));
+        assert!(
+            crate::assessment::framework_checks(&passes.proven, true)
+                .contains(&crate::RequiredCheck::FrameworkCallbacks)
+        );
+        for change in 0..5 {
+            let mut invalid = evidence.clone();
+            match change {
+                0 => {
+                    invalid[1].acknowledgement.callbacks.pop();
+                }
+                1 => invalid[2].acknowledgement.callbacks[0].available_handled = false,
+                2 => invalid[1].observation.callbacks[1].events.swap(0, 1),
+                3 => invalid[2].observation.callbacks[2]
+                    .events
+                    .push(event(11, true)),
+                _ => invalid[3].observation.callbacks[0].events.clear(),
+            }
+            assert!(
+                !evaluate_framework(&invalid, true).proven.contains(&check),
+                "case {change}"
+            );
+        }
+        evidence[2].observation.callbacks[0]
+            .events
+            .push(event(101, true));
+        let leak = evaluate_framework(&evidence[..3], false);
+        assert!(leak.leaked.contains(&check));
+        assert!(!leak.proven.contains(&check));
+    }
+    #[test]
     fn legacy_apis_require_both_production_paths_and_per_invocation_preservation() {
         use FrameworkCheck as V;
         let phases = legacy_phases();
         let result = evaluate_framework(&phases, true);
         assert_eq!(
             result.controls,
-            vec![FrameworkControlFailure::MissingNegativeControl]
+            vec![
+                FrameworkControlFailure::MissingNegativeControl,
+                FrameworkControlFailure::MissingPositiveControl,
+            ]
         );
         assert_eq!(
             result.proven,
@@ -982,7 +1063,10 @@ mod tests {
         assert!(result.leaked.is_empty());
         assert_eq!(
             result.controls,
-            vec![FrameworkControlFailure::MissingNegativeControl]
+            vec![
+                FrameworkControlFailure::MissingNegativeControl,
+                FrameworkControlFailure::MissingPositiveControl,
+            ]
         );
         let plan = crate::DiagnosticPlan::supported(false, false, false);
         for missing in [
