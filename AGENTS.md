@@ -85,6 +85,9 @@ These short files cover everything specific to this repo. Skipping them leads to
 
 ## Documentation maintenance
 
+- Before changing user-facing behavior in 2.x, compare it with the latest 1.x
+  release in a separate worktree and discuss the difference with the maintainer.
+  Follow [the contribution process](CONTRIBUTING.md#changes-to-existing-behavior).
 - Keep [ROADMAP.md](ROADMAP.md) as the sole current feature/work index, with bounded
   status, next steps and links to decisions. Separate remaining code from actual
   device, signing or publication gates; a helper/model/test is not a completed flow.

@@ -7,7 +7,7 @@ Implementation progress and verification belong in the corresponding tracked pla
 | RFC | Status | Topic |
 | --- | --- | --- |
 | [0001](0001-automatic-gki-kmi-selection.md) | Accepted for implementation | Automatic GKI/KMI selection from the unified Core payload catalog |
-| [0002](0002-autonomous-diagnostics.md) | Accepted for implementation | Autonomous native and Java diagnostics without relying on a third-party VPN |
+| [0002](0002-autonomous-diagnostics.md) | Accepted for autonomous diagnostics, with expanded policy checks under review | Autonomous native and Java diagnostics without relying on a third-party VPN |
 | [0003](0003-conditional-zygisk-publication.md) | Policy superseded by0005 | Zygisk packaging/projection constraints retained; approved continuity decision in0005 |
 | [0004](0004-core-attention-notifications.md) | Accepted for implementation | Core active attention,update scheduling and native Android notification channels |
 | [0005](0005-unified-backend-lifecycle-policy.md) | Accepted for implementation and verified main publication | Working-backend continuity, fresh Builtin/KMOD preference, explicit Zygisk and no inter-family automatic fallback |
@@ -28,7 +28,8 @@ not override the document's status or authorize experiments by themselves.
 
 The initial imports preserve the submitted text and original status metadata.
 Later maintainer approval authorizes implementing RFC0001 and RFC0002 in this
-cycle; their separate kernel/device evidence gates remain mandatory. Neither
+cycle. RFC0002 records the scope reopened for review. Their separate
+kernel/device evidence gates remain mandatory. Neither
 acceptance nor this index enables experimental production admission. RFC0003's
 newer pause overrides its earlier implementation approval.
 

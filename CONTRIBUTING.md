@@ -7,6 +7,18 @@ Thanks for your interest. This file covers the contribution **process**; for bui
 - For non-trivial changes, open an issue first to discuss the approach.
 - Make sure your change builds locally and passes the CI lints listed in [docs/development.md](docs/development.md#ci-lints-run-before-pushing).
 
+## Changes to existing behavior
+
+Use the latest published 1.x release as the reference for existing user-facing
+behavior during 2.x development. Keep that tag in a separate worktree and record the
+tag and the relevant source paths or reproduction when comparing behavior.
+Preserve the released behavior by default. Discuss intentional differences and
+their user impact with the maintainer, who decides which changes to adopt.
+
+Record those decisions in the relevant [RFC](docs/rfcs/README.md) as the work
+progresses. Preserve the original proposal and update the current docs when the
+agreed behavior changes in code.
+
 ## Commits
 
 Use conventional-style prefixes, matching the existing history:
