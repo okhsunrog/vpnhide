@@ -82,10 +82,12 @@ fn checked(program: &str, args: &[&str]) -> io::Result<Vec<u8>> {
     Ok(c.output.stdout)
 }
 fn read_pseudo(path: &str, limit: u64) -> io::Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    fs::File::open(path)?
-        .take(limit + 1)
-        .read_to_end(&mut bytes)?;
+    let mut file = fs::File::open(path)?;
+    // Small initial reads can replay rows in the Linux 4.9 IPv6 proc iterator.
+    let mut bytes = vec![0; (limit + 1) as usize];
+    let read = file.read(&mut bytes)?;
+    bytes.truncate(read);
+    file.take(limit + 1 - read as u64).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > limit {
         return Err(io::Error::other("kernel observation exceeds budget"));
     }

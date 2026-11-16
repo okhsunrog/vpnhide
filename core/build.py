@@ -10,9 +10,9 @@ Requirements:
 Output: core/target/vpnhide-core.zip is the daemon-only assembly input. CI names
 it vpnhide-core-base.zip, then the shared Rust host tool adds verified payloads
 to the final unified ZIP. The base ships one daemon binary per ABI under
-`bin/<manager $ARCH>/vpnhide-core`; customize.sh keeps the binary the manager names for the device, then enters
-the Rust install-handoff guard before manager replacement. All boot logic is the binary's own
-`vpnhide-core service`; `service.sh` is a single exec of it.
+`bin/<manager $ARCH>/vpnhide-core`. The installer keeps the binary for the device,
+then enters the Rust install-handoff guard before manager replacement. All boot
+logic is in `vpnhide-core service`, which `service.sh` runs with a single exec.
 """
 
 from __future__ import annotations

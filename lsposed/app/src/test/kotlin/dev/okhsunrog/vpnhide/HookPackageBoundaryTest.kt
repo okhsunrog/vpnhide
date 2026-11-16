@@ -28,8 +28,11 @@ class HookPackageBoundaryTest {
 
     private fun uiOffenders(files: List<File>): List<String> {
         val forbidden = listOf("androidx.", "android.app.", "android.content.Context", "dev.okhsunrog.vpnhide.ui.")
+        // PendingIntent is used by the system_server dispatch hook for Binder delivery.
         return files.flatMap { file ->
-            imports(file).filter { imp -> forbidden.any(imp::startsWith) }.map { "${file.name}: $it" }
+            imports(file)
+                .filter { imp -> imp != "android.app.PendingIntent" && forbidden.any(imp::startsWith) }
+                .map { "${file.name}: $it" }
         }
     }
 

@@ -793,8 +793,7 @@ _IF6_SEQ_DECL = (
 )
 _PROC_IF6_SHOW = (
     _IF6_SEQ_DECL,
-    _IF6_SEQ_DECL
-    + "\n\tif (vpnhide_should_hide_dev(ifp->idev->dev,\n"
+    _IF6_SEQ_DECL + "\n\tif (vpnhide_should_hide_dev(ifp->idev->dev,\n"
     "\t\t\t\t   VPNHIDE_HID_INET6_FILL_IFADDR))\n"
     "\t\treturn 0;\n\n",
 )

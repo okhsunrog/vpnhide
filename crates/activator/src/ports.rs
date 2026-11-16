@@ -314,34 +314,6 @@ fn append_output_stream(log: &mut String, label: &str, bytes: &[u8]) {
     log.push('\n');
 }
 
-#[cfg(test)]
-mod ownership_tests {
-    use super::*;
-    use std::sync::Mutex;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    #[test]
-    fn owner_marker_roundtrip() {
-        let _g = ENV_LOCK.lock().unwrap();
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!("vpnhide-ports-owner-{nanos}"));
-        fs::create_dir_all(&dir).unwrap();
-        let marker = dir.join("owned");
-        // SAFETY: ENV_LOCK held.
-        unsafe { std::env::set_var(PORTS_OWNER_MARKER_ENV, &marker) };
-        assert!(!ports_owned_by_core());
-        write_ports_core_owner_marker().unwrap();
-        assert!(ports_owned_by_core());
-        unsafe { std::env::remove_var(PORTS_OWNER_MARKER_ENV) };
-        let _ = fs::remove_dir_all(&dir);
-    }
-}
-
 pub const DIAGNOSTIC_PORTS_CHAIN: &str = "vpnhide_diag_ports";
 
 /// Append a worker-only diagnostic branch to the same path as production Ports.
@@ -372,4 +344,32 @@ pub fn diagnostic_ports_ruleset(ipv6: bool, uid: u32, tcp: u16, udp: u16) -> Str
         "-I {parent} 1 -j {DIAGNOSTIC_PORTS_CHAIN}\nCOMMIT\n"
     ));
     script
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::*;
+    use std::sync::Mutex;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn owner_marker_roundtrip() {
+        let _g = ENV_LOCK.lock().unwrap();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("vpnhide-ports-owner-{nanos}"));
+        fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("owned");
+        // SAFETY: ENV_LOCK held.
+        unsafe { std::env::set_var(PORTS_OWNER_MARKER_ENV, &marker) };
+        assert!(!ports_owned_by_core());
+        write_ports_core_owner_marker().unwrap();
+        assert!(ports_owned_by_core());
+        unsafe { std::env::remove_var(PORTS_OWNER_MARKER_ENV) };
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
