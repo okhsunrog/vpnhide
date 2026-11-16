@@ -1242,7 +1242,7 @@ mod tests {
                 FrameworkControlFailure::MissingPositiveControl,
             ]
         );
-        let plan = crate::DiagnosticPlan::supported(false, false, false);
+        let plan = crate::DiagnosticPlan::supported(false);
         for missing in [
             crate::RequiredCheck::FrameworkCallbacks,
             crate::RequiredCheck::FrameworkPendingIntent,

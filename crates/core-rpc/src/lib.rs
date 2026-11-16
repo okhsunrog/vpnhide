@@ -861,7 +861,7 @@ mod tests {
                         checks: vec![NativeCheck::IoctlFlags],
                         incomplete: vec![ControlFailure::CleanupUnconfirmed],
                     },
-                    missing: DiagnosticPlan::supported(true, true, true).required.clone(),
+                    missing: DiagnosticPlan::supported(true).required.clone(),
                 },
                 DiagnosticOutcome::Incomplete {
                     native: ScopedNativeResult::Unverified {
@@ -905,7 +905,7 @@ mod tests {
                         loaded_generations_sha256: None,
                         loaded_generations_complete: false,
                     },
-                    plan: DiagnosticPlan::supported(true, true, true),
+                    plan: DiagnosticPlan::supported(true),
                     outcome,
                     stale: true,
                 };

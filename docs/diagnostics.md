@@ -22,14 +22,14 @@ controls remain. An obsolete CLI request is refused before daemon/socket setup.
 
 ## Evidence and ownership
 
-The required plan comes from the supported contract and enabled features, not
-from the installed hook mask. Diagnostic contract11 requires SysInterfaces and
-Filesystem only when the desired `filesystem_iface_paths` feature is enabled,
-matching RFC0002's optional-filesystem scope. Default route/proc-interface and
-framework requirements remain. Previous or truncated plans cannot be reused as
-current proof; the plan is not narrowed to successfully observed stimuli. Every
-required vector must have positive RAW stimulus, a protected observation, attribution and ordinary-object preservation
-controls. Empty enumerations and clean Java replies alone cannot prove hiding.
+Diagnostic contract 12 requires Package Visibility and Ports even with empty
+user target lists. SysInterfaces and Filesystem are required only when the
+desired `filesystem_iface_paths` feature is enabled, matching RFC0002's
+optional-filesystem scope. Missing installed hooks leave their checks required.
+Previous or truncated plans cannot be reused as current proof. Every required
+vector must have positive RAW stimulus, a protected observation, attribution and
+ordinary-object preservation controls. Empty enumerations and clean Java replies
+alone cannot prove hiding.
 A leak remains evidence under incomplete controls, worker death or cleanup failure.
 After a vector's negative/start controls qualify the worker's observed leak,
 an unavailable or malformed end/cleanup read, or a missing later component,
@@ -200,7 +200,7 @@ generation or previously running app processes have consumed it.
 
 ## Implemented scope and remaining implementation
 
-The base required plan has eighteen vectors. Native interface-only TUN stimuli
+The base required plan has twenty groups. Native interface-only TUN stimuli
 and attributed framework capability/link plus two legacy NetworkInfo scenarios
 have executable cloud coverage. Legacy TYPE_VPN and enumeration require separate
 controls and per-invocation CLOCK_BOOTTIME windows; ordinary duplicates and each
@@ -493,7 +493,7 @@ with a VPN. Each current result confirmed 17 of 20 groups. Across the online
 series, two workers missed the start deadline, one missed the framework deadline,
 and one report was stale. No run recorded a qualified leak.
 
-When Apps hiding is configured, Core gives the worker a short-lived authority
+Core gives the worker a short-lived authority
 for the installed Android Settings package in its own profile. The worker calls
 `getPackageInfo`, `getApplicationInfo`, `getInstalledPackages` and
 `getInstalledApplications` through Android PackageManager. The package must be
@@ -536,9 +536,9 @@ open code tasks from device/signing/publication requirements. See
 
 ### Scoped Ports evidence
 
-When the diagnostic plan requires Ports, Core opens ephemeral IPv4 and IPv6
-loopback sockets for TCP and UDP. The admitted Android worker must echo a
-run-local challenge on all four endpoints before Core installs the fixture.
+Core opens ephemeral IPv4 and IPv6 loopback sockets for TCP and UDP. The
+admitted Android worker must echo a run-local challenge on all four endpoints
+before Core installs the fixture.
 The normal Ports rule renderer generates worker-UID and destination-port
 matches under the existing Ports OUTPUT chains. Core verifies reachability
 from root while the rule is live and checks that the fixture is still attached
@@ -551,9 +551,9 @@ and an increase in the matching REJECT rule's packet counter. TCP also
 requires a connection refusal. A UDP rejection can surface as `EPERM` on
 send, so the matched rule and absent echo establish protection together. An
 absent echo without a rule hit is unverified. Core retains a qualified echo
-under protection as a leak even if a subsequent control fails. Core publishes the per-vector verdict with the run and adds
-Ports to the assessment only when required. The fixture uses a fixed,
-authenticated RPC41 sequence. The saved app policy is not edited.
+under protection as a leak even if a subsequent control fails. Core publishes
+the per-vector verdict with the run. The fixture uses a fixed, authenticated
+RPC41 sequence. The saved app policy is not edited.
 
 Core syncs a private boot/network-namespace receipt before changing either
 table. It removes the dedicated chain in each family and verifies absence on

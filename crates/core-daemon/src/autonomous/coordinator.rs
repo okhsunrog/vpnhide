@@ -135,8 +135,7 @@ fn policy_digest(snapshot: &vpnhide_core_rpc::StateSnapshot) -> String {
             || config.settings.auto_hide_excluded_packages.contains(target)
     }) {
         let config = config.to_mut().as_mut().expect("existing config");
-        // This package is the test stimulus, not the observer. The test owns
-        // its visibility. Feature enablement still comes from the actual plan.
+        // The test owns the visibility of this fixture package.
         config.apps.remove(target);
         config.settings.auto_hidden_packages.remove(target);
         config.settings.auto_hide_excluded_packages.remove(target);
@@ -261,17 +260,12 @@ fn fingerprint(
     }
 }
 fn plan(snapshot: &vpnhide_core_rpc::StateSnapshot) -> DiagnosticPlan {
-    let config = snapshot.config.as_ref();
-    DiagnosticPlan::supported(
-        config.is_some_and(|config| {
-            config
-                .settings
-                .optional_features
-                .contains("filesystem_iface_paths")
-        }),
-        config.is_some_and(|config| config.apps.values().any(|a| a.app_hiding)),
-        config.is_some_and(|config| config.apps.values().any(|a| a.ports)),
-    )
+    DiagnosticPlan::supported(snapshot.config.as_ref().is_some_and(|config| {
+        config
+            .settings
+            .optional_features
+            .contains("filesystem_iface_paths")
+    }))
 }
 fn namespace_identity(path: &Path) -> Result<(u64, u64), DiagnosticError> {
     let metadata = fs::metadata(path).map_err(|_| DiagnosticError::WrongProcess)?;
@@ -1186,9 +1180,6 @@ impl Coordinator {
             if inner.cancelled {
                 return Err(DiagnosticError::Expired);
             }
-            let required = inner.last.as_ref().is_some_and(|run| {
-                run.session == request.session && run.plan.required.contains(&RequiredCheck::Ports)
-            });
             let active = inner.active.as_mut().ok_or(DiagnosticError::StaleSession)?;
             let task = active.task.as_ref().ok_or(DiagnosticError::StaleSession)?;
             if active.worker != Some(identity) {
@@ -1200,9 +1191,6 @@ impl Coordinator {
                 || active.report.is_none()
             {
                 return Err(DiagnosticError::StaleSession);
-            }
-            if !required {
-                return Ok(None);
             }
             if !crate::ports::ports_enabled_from_env() {
                 return Err(DiagnosticError::Disabled);
@@ -1240,13 +1228,6 @@ impl Coordinator {
             if inner.cancelled {
                 return Err(DiagnosticError::Expired);
             }
-            let package_visibility = inner.last.as_ref().is_some_and(|run| {
-                run.session == request.session
-                    && run
-                        .plan
-                        .required
-                        .contains(&vpnhide_diagnostic_model::RequiredCheck::PackageVisibility)
-            });
             let active = inner.active.as_mut().ok_or(DiagnosticError::StaleSession)?;
             let task = active.task.as_ref().ok_or(DiagnosticError::StaleSession)?;
             if active
@@ -1280,7 +1261,6 @@ impl Coordinator {
                     ),
                     request.hook_sha256.clone(),
                     active.deadline,
-                    package_visibility,
                 )?)));
             }
             active
@@ -1820,11 +1800,19 @@ mod tests {
     }
 
     #[test]
-    fn fixture_target_roles_are_independent_from_the_plan_and_observer_policy() {
+    fn package_visibility_and_ports_stay_required_without_configured_targets() {
         use vpnhide_core_rpc::AppConfig;
         let state = state();
         let mut snapshot = state.snapshot();
-        let fixture = vpnhide_diagnostic_model::framework_packages::PACKAGE_VISIBILITY_TARGET;
+        snapshot.config = Some(CanonicalConfig::default());
+        let base_plan = plan(&snapshot);
+        assert!(
+            base_plan
+                .required
+                .contains(&RequiredCheck::PackageVisibility)
+        );
+        assert!(base_plan.required.contains(&RequiredCheck::Ports));
+        let base_policy = policy_digest(&snapshot);
         let user_target = "com.example.observer";
         snapshot.config.as_mut().unwrap().apps.insert(
             user_target.into(),
@@ -1834,7 +1822,13 @@ mod tests {
                 ..Default::default()
             },
         );
-        let before = policy_digest(&snapshot);
+        assert_eq!(plan(&snapshot), base_plan);
+        assert_ne!(policy_digest(&snapshot), base_policy);
+        snapshot.config.as_mut().unwrap().apps.remove(user_target);
+        assert_eq!(plan(&snapshot), base_plan);
+        assert_eq!(policy_digest(&snapshot), base_policy);
+
+        let fixture = vpnhide_diagnostic_model::framework_packages::PACKAGE_VISIBILITY_TARGET;
         let mut fixture_app = AppConfig {
             java: true,
             app_hiding: true,
@@ -1850,12 +1844,8 @@ mod tests {
             .settings
             .auto_hide_excluded_packages
             .insert(fixture.into());
-        assert_eq!(policy_digest(&snapshot), before);
-
-        snapshot.config.as_mut().unwrap().apps.remove(user_target);
-        let before = policy_digest(&snapshot);
-        snapshot.config.as_mut().unwrap().apps.remove(fixture);
-        assert_ne!(policy_digest(&snapshot), before);
+        assert_eq!(plan(&snapshot), base_plan);
+        assert_eq!(policy_digest(&snapshot), base_policy);
     }
 
     #[test]

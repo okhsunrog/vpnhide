@@ -107,12 +107,7 @@ pub(crate) fn framework_checks(
 impl DiagnosticRun {
     pub fn assessment(&self) -> DiagnosticAssessment {
         use RequiredCheck::*;
-        let required = DiagnosticPlan::supported(
-            self.plan.required.contains(&Filesystem),
-            self.plan.required.contains(&PackageVisibility),
-            self.plan.required.contains(&Ports),
-        )
-        .required;
+        let required = DiagnosticPlan::supported(self.plan.required.contains(&Filesystem)).required;
         let mut reuse_blockers = Vec::new();
         if self.stale {
             reuse_blockers.push(ReuseBlocker::ConditionsChanged);
@@ -467,7 +462,7 @@ pub(crate) mod tests {
                 loaded_generations_sha256: None,
                 loaded_generations_complete: false,
             },
-            plan: DiagnosticPlan::supported(false, false, false),
+            plan: DiagnosticPlan::supported(false),
             stale: false,
             framework: None,
             outcome: DiagnosticOutcome::Incomplete {
@@ -543,7 +538,7 @@ pub(crate) mod tests {
                 .proven
                 .contains(&RequiredCheck::SysInterfaces)
         );
-        run.plan = DiagnosticPlan::supported(true, false, false);
+        run.plan = DiagnosticPlan::supported(true);
         assert!(
             run.assessment()
                 .proven
@@ -570,7 +565,7 @@ pub(crate) mod tests {
                 .leaked
                 .contains(&RequiredCheck::SysInterfaces)
         );
-        run.plan = DiagnosticPlan::supported(false, false, false);
+        run.plan = DiagnosticPlan::supported(false);
         assert!(
             !run.assessment()
                 .leaked
@@ -585,7 +580,7 @@ pub(crate) mod tests {
             ..Default::default()
         });
         assert!(!run.assessment().proven.contains(&RequiredCheck::Filesystem));
-        run.plan = DiagnosticPlan::supported(true, false, false);
+        run.plan = DiagnosticPlan::supported(true);
         assert!(run.assessment().proven.contains(&RequiredCheck::Filesystem));
         assert!(
             run.assessment()
@@ -600,7 +595,7 @@ pub(crate) mod tests {
             .leaked
             .push(crate::FilesystemCheck::required()[0]);
         assert!(run.assessment().leaked.contains(&RequiredCheck::Filesystem));
-        run.plan = DiagnosticPlan::supported(false, false, false);
+        run.plan = DiagnosticPlan::supported(false);
         assert!(!run.assessment().leaked.contains(&RequiredCheck::Filesystem));
     }
     #[test]
@@ -637,17 +632,27 @@ pub(crate) mod tests {
         }
     }
     #[test]
-    fn previous_or_truncated_optional_plan_cannot_be_reused_as_current_proof() {
+    fn previous_or_truncated_plan_cannot_be_reused_as_current_proof() {
         let mut evidence = run(ScopedNativeResult::Proven { checks: vec![] });
         evidence.plan.contract = DIAGNOSTIC_CONTRACT - 1;
-        evidence.plan.required.push(RequiredCheck::SysInterfaces);
+        evidence
+            .plan
+            .required
+            .retain(|c| !matches!(c, RequiredCheck::PackageVisibility | RequiredCheck::Ports));
         assert!(
             evidence
                 .assessment()
                 .reuse_blockers
                 .contains(&ReuseBlocker::UnsupportedPlan)
         );
-        evidence.plan = DiagnosticPlan::supported(true, false, false);
+        let assessment = evidence.assessment();
+        assert!(
+            assessment
+                .unverified
+                .contains(&RequiredCheck::PackageVisibility)
+        );
+        assert!(assessment.unverified.contains(&RequiredCheck::Ports));
+        evidence.plan = DiagnosticPlan::supported(true);
         evidence
             .plan
             .required
@@ -722,7 +727,7 @@ pub(crate) mod tests {
         let a = run.assessment();
         assert_eq!(a.phase, AssessmentPhase::Incomplete);
         assert_eq!(a.proven.len(), 6);
-        assert_eq!(a.unverified.len(), 12);
+        assert_eq!(a.unverified.len(), 14);
         assert!(!a.required.contains(&RequiredCheck::SysInterfaces));
         assert!(a.unverified.contains(&RequiredCheck::Getifaddrs));
         assert!(
@@ -732,7 +737,7 @@ pub(crate) mod tests {
         assert!(!a.reuse_blockers.contains(&ReuseBlocker::ConditionsChanged));
         run.plan.required.clear();
         let a = run.assessment();
-        assert_eq!(a.required.len(), 18);
+        assert_eq!(a.required.len(), 20);
         assert!(a.reuse_blockers.contains(&ReuseBlocker::UnsupportedPlan));
     }
     #[test]

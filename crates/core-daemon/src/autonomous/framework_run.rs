@@ -53,7 +53,6 @@ impl FrameworkRun {
         worker: (u32, u32, u64),
         hash: String,
         deadline: BootDeadline,
-        package_visibility: bool,
     ) -> Result<Self, DiagnosticError> {
         if deadline.expired(BootInstant::now().map_err(failed)?) {
             return Err(DiagnosticError::Expired);
@@ -88,9 +87,9 @@ impl FrameworkRun {
                 mtu: task.fixture.mtu,
                 ordinary_interface_name: format!("ipsec{:010x}", task.session & 0xff_ffff_ffff),
                 ordinary_mtu: 1519,
-                package_visibility: package_visibility.then(|| {
-                    vpnhide_diagnostic_model::framework_packages::PACKAGE_VISIBILITY_TARGET.into()
-                }),
+                package_visibility: Some(
+                    vpnhide_diagnostic_model::framework_packages::PACKAGE_VISIBILITY_TARGET.into(),
+                ),
             },
         };
         if !envelope.valid() {
@@ -452,15 +451,18 @@ mod tests {
             },
         };
         let deadline = BootDeadline::from_now(Duration::from_secs(5)).unwrap();
-        let mut run =
-            FrameworkRun::new(&task, (10123, 456, 30), "a".repeat(64), deadline, false).unwrap();
+        let mut run = FrameworkRun::new(&task, (10123, 456, 30), "a".repeat(64), deadline).unwrap();
+        assert_eq!(
+            run.envelope.fixture.package_visibility.as_deref(),
+            Some(vpnhide_diagnostic_model::framework_packages::PACKAGE_VISIBILITY_TARGET)
+        );
         assert_eq!(
             run.envelope.expires_boot_ms,
             deadline.expires_millis().unwrap()
         );
         let expired = BootInstant::at(0).after(Duration::ZERO).unwrap();
         assert!(matches!(
-            FrameworkRun::new(&task, (10123, 456, 30), "a".repeat(64), expired, false),
+            FrameworkRun::new(&task, (10123, 456, 30), "a".repeat(64), expired),
             Err(DiagnosticError::Expired)
         ));
         run.envelope.expires_boot_ms = boot_ms().unwrap().saturating_sub(1);
