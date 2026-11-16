@@ -428,6 +428,7 @@ lost. The following ordinary AVAILABLE must be deduplicated.
 Core requires all three registrations to qualify the group. The worker overlaps
 their independent observation windows within one phase. Each registration has
 its own timeout, late-event window and cleanup before the next phase.
+ConnectivityManager queries run while the callback handler receives events.
 The earlier live-network version
 introduced these observations and acknowledgements in RPC38 and framework
 channel version4.

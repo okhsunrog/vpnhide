@@ -58,10 +58,14 @@ internal suspend fun measureFrameworkFixture(
                 workerStage("$stage-advance") {
                     requireNotNull(core.frameworkWorkerStep(task, BuildConfig.HOOK_SOURCE_SHA256, phase, previous))
                 }
-            val network = workerStage("$stage-queries") { observeFramework(manager, next) }
-            val callbacks = workerStage("$stage-callbacks") { observeFrameworkCallbacks(manager, next, handler) }
             previous =
                 coroutineScope {
+                    val observingCallbacks =
+                        async(start = CoroutineStart.UNDISPATCHED) {
+                            workerStage("$stage-callbacks") { observeFrameworkCallbacks(manager, next, handler) }
+                        }
+                    val network = workerStage("$stage-queries") { observeFramework(manager, next) }
+                    val callbacks = observingCallbacks.await()
                     // Broadcasts arrive on the handler while the collector
                     // runs the independent PackageManager probes in this phase.
                     val pending =
