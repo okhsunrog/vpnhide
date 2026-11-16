@@ -27,4 +27,20 @@ class SystemServerConfigCacheTest {
 
         assertEquals(true, config.shouldHidePackageForCallerAppId("com.missing", callerAppId = 10_501))
     }
+
+    @Test
+    fun `diagnostic phase alone decides which package the worker filter hides`() {
+        val target = "com.android.settings"
+        val ordinary = "com.example.other"
+        for (hidden in listOf(setOf(ordinary), setOf(ordinary, target))) {
+            val config = SystemServerConfig(observerAppIds = setOf(10_501), hiddenPackages = hidden)
+            val raw = config.forPackageFixture(FixturePackageCall(target, protect = false) {})
+            val protected = config.forPackageFixture(FixturePackageCall(target, protect = true) {})
+
+            assertEquals(false, raw.shouldHidePackageForCallerAppId(target, callerAppId = 10_501))
+            assertEquals(true, protected.shouldHidePackageForCallerAppId(target, callerAppId = 10_501))
+            assertEquals(false, protected.shouldHidePackageForCallerAppId(ordinary, callerAppId = 10_501))
+            assertEquals(hidden, config.hiddenPackages)
+        }
+    }
 }

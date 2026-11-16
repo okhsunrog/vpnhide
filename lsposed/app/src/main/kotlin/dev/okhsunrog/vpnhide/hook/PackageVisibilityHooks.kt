@@ -125,12 +125,8 @@ internal object PackageVisibilityHooks {
         if (uid == Process.myUid()) return null
         val appId = SystemServerConfigCache.appId(uid)
         val config = SystemServerConfigCache.load()
-        val observer = appId in config.observerAppIds
-        val scoped = fixture?.takeUnless { it.packageName in config.hiddenPackages }
-        if (scoped == null) return if (observer) ObserverCaller(uid, appId, config, null) else null
-        val hidden = if (observer) config.hiddenPackages else emptySet()
-        val observed = if (scoped.protect) hidden + scoped.packageName else hidden
-        return ObserverCaller(uid, appId, config.copy(hiddenPackages = observed), scoped)
+        if (fixture != null) return ObserverCaller(uid, appId, config.forPackageFixture(fixture), fixture)
+        return if (appId in config.observerAppIds) ObserverCaller(uid, appId, config, null) else null
     }
 
     private fun ObserverCaller.shouldHidePackage(packageName: String): Boolean = config.shouldHidePackageForCallerAppId(packageName, appId)

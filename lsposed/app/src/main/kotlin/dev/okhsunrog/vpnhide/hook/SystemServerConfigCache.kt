@@ -21,6 +21,10 @@ internal data class SystemServerConfig(
     val javaTargetAppIds: Set<Int>
         get() = javaTargetHookMasksByAppId.keys
 
+    /** Used only after a PackageManager call has been bound to the diagnostic worker and phase. */
+    fun forPackageFixture(fixture: FixturePackageCall): SystemServerConfig =
+        copy(hiddenPackages = if (fixture.protect) setOf(fixture.packageName) else emptySet())
+
     fun shouldHidePackageForCallerAppId(
         packageName: String,
         callerAppId: Int,

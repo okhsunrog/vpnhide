@@ -136,6 +136,13 @@ delivery, observation freshness and backend conflicts still contribute. Missing
 required proof remains unverified. The current partial implementation has no
 full-success assessment variant.
 
+The fingerprint tracks the full required plan. Choosing or removing the
+Package Visibility fixture in user app settings does not by itself invalidate
+the worker's evidence. Equivalent successful reapplications preserve the
+fingerprint across new receipt IDs, timestamps and Ports target counts.
+Delivery failures, uncertain effects and changed IPv4/IPv6 apply outcomes
+still invalidate it.
+
 A KPM observation failure does not invalidate evidence for a still-current
 kernel backend. A confirmed competing backend invalidates the retained context
 and holds new diagnostic admission until the conflict is resolved.
@@ -490,9 +497,10 @@ When Apps hiding is configured, Core gives the worker a short-lived authority
 for the installed Android Settings package in its own profile. The worker calls
 `getPackageInfo`, `getApplicationInfo`, `getInstalledPackages` and
 `getInstalledApplications` through Android PackageManager. The package must be
-visible in the prepared, RAW and revoked phases. For the protected phase,
-system_server adds only the fixture package to the worker's policy and applies
-the same production filters. Core requires evidence that each filter saw the
+visible in the prepared, RAW and revoked phases. For these authenticated
+PackageManager calls the fixture defines the worker's hidden-package list.
+The list contains only the fixture in the protected phase. The same production
+filters apply it. Core requires evidence that each filter saw the
 real package and removed it, the worker still sees its own package, and both
 lists preserve the same remaining package names. Each direct probe uses a
 distinct phase-specific cache key and requires a system_server receipt to exclude

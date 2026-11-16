@@ -1,6 +1,7 @@
 //! One Core-owned bounded run. No network/VPN prerequisite, app-supplied root
 //! path, shell command, per-open restart, or inference from worker-owned PASS.
 use super::boot_time::{BootDeadline, BootInstant};
+use std::borrow::Cow;
 use std::fs;
 use std::io;
 use std::os::unix::fs::MetadataExt;
@@ -9,7 +10,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
-use vpnhide_core_rpc::ObservationFreshness;
+use vpnhide_core_rpc::{ObservationFreshness, PhaseOutcome};
 use vpnhide_diagnostic_model::*;
 use vpnhide_loader_ipc::image::{self, ProcessIdentity};
 
@@ -125,6 +126,24 @@ fn platform_identity() -> Option<String> {
     material.extend_from_slice(&manifest);
     Some(hash(material))
 }
+fn policy_digest(snapshot: &vpnhide_core_rpc::StateSnapshot) -> String {
+    let target = vpnhide_diagnostic_model::framework_packages::PACKAGE_VISIBILITY_TARGET;
+    let mut config = Cow::Borrowed(&snapshot.config);
+    if snapshot.config.as_ref().is_some_and(|config| {
+        config.apps.contains_key(target)
+            || config.settings.auto_hidden_packages.contains(target)
+            || config.settings.auto_hide_excluded_packages.contains(target)
+    }) {
+        let config = config.to_mut().as_mut().expect("existing config");
+        // This package is the test stimulus, not the observer. The test owns
+        // its visibility. Feature enablement still comes from the actual plan.
+        config.apps.remove(target);
+        config.settings.auto_hidden_packages.remove(target);
+        config.settings.auto_hide_excluded_packages.remove(target);
+    }
+    hash(serde_json::to_vec(&(config.as_ref(), plan(snapshot))).expect("config codec"))
+}
+
 fn context_digests(snapshot: &vpnhide_core_rpc::StateSnapshot) -> (String, String) {
     let backend = &snapshot.backend;
     // Boot publication can populate `active` while the live observer has no
@@ -134,6 +153,23 @@ fn context_digests(snapshot: &vpnhide_core_rpc::StateSnapshot) -> (String, Strin
         .flatten();
     // KPM read errors are reported separately. They do not withdraw a current
     // kernel observation. A confirmed conflict does affect attribution.
+    let boot = backend.boot.as_ref().map(|boot| {
+        (
+            &boot.boot_id,
+            boot.decided_epoch,
+            boot.decided_at_ms,
+            &boot.outcome,
+            &boot.installed,
+            &boot.live,
+            &boot.staged,
+            &boot.kmod,
+            &boot.zygisk_targets,
+            &boot.obsolete_modules,
+            &boot.selection_evidence,
+            &boot.selection_conflict,
+            boot.ports.as_ref().map(|ports| (ports.ipv4, ports.ipv6)),
+        )
+    });
     let runtime = (
         backend.runtime_conflict,
         backend.observed_freshness,
@@ -143,14 +179,27 @@ fn context_digests(snapshot: &vpnhide_core_rpc::StateSnapshot) -> (String, Strin
         backend.applied,
         active,
         &backend.installed,
-        &backend.boot,
+        boot,
     );
+    // An equivalent successful reapply can have new receipt IDs and run dates.
+    // Preserve failure and uncertainty so a failed reapply withdraws old proof.
+    let apply_failures: Vec<_> = snapshot
+        .apply_evidence
+        .iter()
+        .filter(|phase| {
+            matches!(
+                phase.outcome,
+                PhaseOutcome::FailedKnown | PhaseOutcome::Unknown
+            )
+        })
+        .map(|phase| (phase.phase, phase.outcome))
+        .collect();
     (
-        hash(serde_json::to_vec(&snapshot.config).expect("config codec")),
+        policy_digest(snapshot),
         hash(
             serde_json::to_vec(&(
                 runtime,
-                &snapshot.apply_evidence,
+                apply_failures,
                 &snapshot.zygisk_revocation,
                 &snapshot.held_resources,
                 snapshot.mutation_held,
@@ -212,14 +261,16 @@ fn fingerprint(
     }
 }
 fn plan(snapshot: &vpnhide_core_rpc::StateSnapshot) -> DiagnosticPlan {
-    let config = snapshot.config.clone().unwrap_or_default();
+    let config = snapshot.config.as_ref();
     DiagnosticPlan::supported(
-        config
-            .settings
-            .optional_features
-            .contains("filesystem_iface_paths"),
-        config.apps.values().any(|a| a.app_hiding),
-        config.apps.values().any(|a| a.ports),
+        config.is_some_and(|config| {
+            config
+                .settings
+                .optional_features
+                .contains("filesystem_iface_paths")
+        }),
+        config.is_some_and(|config| config.apps.values().any(|a| a.app_hiding)),
+        config.is_some_and(|config| config.apps.values().any(|a| a.ports)),
     )
 }
 fn namespace_identity(path: &Path) -> Result<(u64, u64), DiagnosticError> {
@@ -1766,6 +1817,63 @@ mod tests {
 
         state.publisher.update(|s| s.backend.active = None);
         assert_ne!(fingerprint(&state, &state.snapshot()), current);
+    }
+
+    #[test]
+    fn fixture_target_roles_are_independent_from_the_plan_and_observer_policy() {
+        use vpnhide_core_rpc::AppConfig;
+        let state = state();
+        let mut snapshot = state.snapshot();
+        let fixture = vpnhide_diagnostic_model::framework_packages::PACKAGE_VISIBILITY_TARGET;
+        let user_target = "com.example.observer";
+        snapshot.config.as_mut().unwrap().apps.insert(
+            user_target.into(),
+            AppConfig {
+                app_hiding: true,
+                ports: true,
+                ..Default::default()
+            },
+        );
+        let before = policy_digest(&snapshot);
+        let mut fixture_app = AppConfig {
+            java: true,
+            app_hiding: true,
+            ports: true,
+            hidden: true,
+            ..Default::default()
+        };
+        fixture_app.native.enabled = true;
+        let config = snapshot.config.as_mut().unwrap();
+        config.apps.insert(fixture.into(), fixture_app);
+        config.settings.auto_hidden_packages.insert(fixture.into());
+        config
+            .settings
+            .auto_hide_excluded_packages
+            .insert(fixture.into());
+        assert_eq!(policy_digest(&snapshot), before);
+
+        snapshot.config.as_mut().unwrap().apps.remove(user_target);
+        let before = policy_digest(&snapshot);
+        snapshot.config.as_mut().unwrap().apps.remove(fixture);
+        assert_ne!(policy_digest(&snapshot), before);
+    }
+
+    #[test]
+    fn new_successful_receipts_preserve_context_but_failed_delivery_does_not() {
+        use vpnhide_core_rpc::{ApplyEvidence, ConfigPhase, OperationId};
+        let mut snapshot = state().snapshot();
+        let before = context_digests(&snapshot);
+        snapshot.apply_evidence = vec![ApplyEvidence {
+            phase: ConfigPhase::Native,
+            desired_revision: 2,
+            op: OperationId(3),
+            outcome: PhaseOutcome::Running,
+        }];
+        assert_eq!(context_digests(&snapshot), before);
+        snapshot.apply_evidence[0].outcome = PhaseOutcome::Confirmed;
+        assert_eq!(context_digests(&snapshot), before);
+        snapshot.apply_evidence[0].outcome = PhaseOutcome::FailedKnown;
+        assert_ne!(context_digests(&snapshot), before);
     }
 
     #[test]
