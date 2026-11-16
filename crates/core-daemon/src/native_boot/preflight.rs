@@ -177,7 +177,7 @@ impl Controls {
         for path in [
             "/proc/vpnhide_ctl",
             "/proc/vpnhide_diag",
-            vpnhide_protocol::diagnostic_raw::NODE,
+            vpnhide_protocol::diagnostic_raw::LEGACY_NODE,
         ] {
             if !matches!(std::fs::symlink_metadata(path), Err(e) if e.kind() == io::ErrorKind::NotFound)
             {

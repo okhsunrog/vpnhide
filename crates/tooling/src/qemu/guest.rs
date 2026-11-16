@@ -355,7 +355,7 @@ fn preflight(plan: &Plan, report: &mut Report) -> io::Result<()> {
         [
             "/proc/vpnhide_ctl",
             "/proc/vpnhide_diag",
-            vpnhide_protocol::diagnostic_raw::NODE,
+            vpnhide_protocol::diagnostic_raw::LEGACY_NODE,
             "/sys/module/vpnhide_kmod",
         ]
         .iter()
@@ -720,6 +720,7 @@ pub fn run() -> io::Result<()> {
                 false,
             )?;
             io::stdout().write_all(&c.output.stdout)?;
+            io::stderr().write_all(&c.output.stderr)?;
             report.rows.push(ResultRow::new(
                 "native_fixture",
                 if success(&c) {

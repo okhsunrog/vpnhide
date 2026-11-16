@@ -10,6 +10,9 @@ description = "Projection and delivery libraries for vpnhide backends (linked by
 [lib]
 name = "vpnhide_activator"
 
+[features]
+fixture-oracle = []
+
 [dependencies]
 vpnhide_bounded_process = { path = "../bounded-process" }
 libc = "0.2"

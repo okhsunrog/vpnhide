@@ -94,6 +94,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if unsafe { libc::geteuid() } != 0 {
         return Err("native oracle parent is not root".into());
     }
+    if let [mode, key] = args.as_slice()
+        && matches!(mode.as_str(), "kpm-raw-v3" | "kpm-raw-unsupported")
+    {
+        let fixture = TunFixture::create(0x0123_4567_89ab)?;
+        return raw_control::verify_kpm(&fixture.spec, key, mode == "kpm-raw-v3");
+    }
     if args.as_slice() == ["preflight-catalog"] {
         return preflight_control::run();
     }
@@ -162,7 +168,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         serde_json::to_string(&fixture.root_start)?
     );
     if protected {
-        raw_control::verify(&fixture.spec)?;
+        raw_control::verify(&fixture.spec, None)?;
     }
     let mut command = Command::new(std::env::current_exe()?);
     command

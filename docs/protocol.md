@@ -727,34 +727,63 @@ autoload remain disabled pending journaled transition checks. An authorization
 only governs new process launches; it does not remove hooks from existing processes.
 
 
-### Private diagnostic-thread RAW wire
+### Diagnostic RAW control v3
 
-`vpnhide_protocol::diagnostic_raw` owns this separate version1 protocol, limits
-and generated C header. The `.ko`/builtin root-only `/proc/vpnhide_diag_raw` accepts
-one bounded `v1 arm <tid> <uid> <16-lowercase-hex-nonce> <duration-ms>`,
-`v1 activate <nonce>` or `v1 revoke <nonce>` command, with a terminating newline.
-Its status starts `vpnhide diagnostic-raw 1`, followed by exactly one each of
-`backend`, `max_ms`, `phase`, `tid`, `uid`, `nonce`, `remaining_ms`. Live phases
-require positive remaining time; released status retains only the last nonce.
-Malformed/unknown/oversized frames, wrong provider identity and BUSY are not
-inactive proof. Native helpers must be available in the actual running kernel;
-package provenance alone does not authorize sending a command.
+RAW uses the existing privileged backend channel. `/proc/vpnhide_ctl` accepts
+config v2 and RAW v3 writes. A read returns status v1, the RAW state block, then
+stats v1. KPM uses the same RAW command and result bytes over `ctl0`; successful
+commands return their state via `out_msg`. `status` is a read-only RAW command
+on either channel. The ordinary KPM status advertises `raw 0x3` when the provider
+and its runtime support RAW. See the [KPM runtime contract](../kmod/kpm/README.md#diagnostic-raw).
 
-A 16-byte input name on loopback `SIOCGIFNAME` carries the little-endian nonce,
-seven-byte registration marker and final NUL. The ioctl's ordinary result stays
-unchanged. Kernel current UID/TID must match the arm; the first retained PID
-identity cannot be replaced by a reused numeric TID. Root must independently
-revalidate the admitted Android process/thread before activating it. The fixed
-CLOCK_BOOTTIME lease is at most 5000ms; idempotent requests never extend it.
-Revoke/released readback precedes protected observation. This capability does not
-alter the frozen control2/telemetry1 or the persistent journal schema. KPM/Zygisk
-adapters remain code work. The Android thread handshake and paired assessment
-use paired RPC44 and diagnostic contract 12. The same RAW/protected exchange
-carries scoped IPv4 and IPv6 route and policy-rule evidence alongside optional
-sysfs/proc-sys directory and path-lookup evidence. Actual Android acceptance
-is separate from the Linux oracle.
+Each request is ASCII, at most 128 bytes, and contains exactly one command and
+its final newline. Numeric UID, TID, duration and sequence are unsigned decimal.
+Nonces are exactly 16 lowercase hex digits. The previous nonce is zero before
+the first grant. Core picks a different nonzero nonce for each new grant.
 
-Builtin, `.ko` and KPM use the existing RTNL_FILL_IFINFO and
-INET6_FILL_IFADDR selection bits for `/proc/net/dev` and `/proc/net/if_inet6`,
-respectively, and count filtered rows under those same hooks. The `.ko` and
-KPM `hooks` status bits for netlink still describe netlink registration.
+```text
+vpnhide 3 raw
+arm <tid> <uid> <nonce> <window_ms> <previous_nonce>
+```
+
+Replace the command line with `activate <nonce>`, `renew <nonce> <sequence>`,
+`revoke <nonce>`, or `status`. A successful state response is at most 1024
+bytes and ends with `end` and a newline. Failure has the same header and backend, followed by
+`result invalid|busy|stale|unsupported` and `end` and a newline. Proc writes report failures
+with errno. Scope fields are TID, UID, nonce and remaining milliseconds.
+
+```text
+vpnhide 3 raw-state
+backend 0x4
+max_ms 5000
+phase active
+scope 3421 10234 8e42f6b5a139cc20 3460
+renewal 1
+end
+```
+
+The state machine has one slot per provider. `arm` compares the previous
+nonce with the current slot and reserves the UID/TID for bounded registration.
+The collection thread registers itself through the ordinary loopback
+`SIOCGIFNAME` before Core independently revalidates and activates it. The ioctl
+carries the little-endian nonce in the 16-byte input name followed by the
+registration marker and NUL. Its normal result is preserved. Registration
+retains the kernel thread identity. Only activation makes RAW effective for
+that one identity. Android permissions, UID and SELinux stay in force.
+
+`activate` starts the requested window using the suspend-aware boot clock.
+Initial providers allow up to 5000 ms per window. A verified owner can renew
+an active matching nonce in sequence starting at 1. Repeating the most recent
+sequence only reads back the existing deadline. Renewal cannot revive an
+expired or revoked grant, and the backend caps the total active interval at
+30 seconds. Core also stops renewal when its measurement deadline expires or
+the admitted collector disappears. The released state retains the last nonce
+and clears the TID, UID, remaining time and renewal sequence.
+
+Core confirms that RAW was still active after the measurement and that released
+state matches the nonce before requesting the protected observation. A timeout,
+busy response or unverified state cannot establish release. The common
+lifecycle uses explicit revoke and expiry on all transports. Opening or closing
+a file has no effect on the scope. Old Builtin/kmod providers still accept
+config v2 and have no RAW v3 block. No new proc or app SELinux permissions are
+required.

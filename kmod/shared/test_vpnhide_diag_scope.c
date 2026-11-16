@@ -45,25 +45,26 @@ static unsigned long long now(void *context)
 static void wire_and_privileges(void)
 {
 	static const char *const malformed[] = {
-		"v2 arm 42 10001 0000000000000007 5000\n",
-		"v1 arm 0 10001 0000000000000007 5000\n",
-		"v1 arm 2147483648 10001 0000000000000007 5000\n",
-		"v1 arm 42 4294967296 0000000000000007 5000\n",
-		"v1 arm 42 10001 0000000000000007 5001\n",
-		"v1 arm 42 10001 0000000000000000 5000\n",
-		"v1 arm 42 10001 0000000000000007 0\n",
-		"v1 activate 000000000000000A\n",
-		"v1 activate 7\n",
-		"v1 revoke 0000000000000007",
-		"v1 revoke 0000000000000007\n\n",
-		"v1 register 0000000000000007 trailing\n",
+		"vpnhide 2 raw\narm 42 10001 0000000000000007 5000 0000000000000000\n",
+		"vpnhide 3 raw\narm 0 10001 0000000000000007 5000 0000000000000000\n",
+		"vpnhide 3 raw\narm 2147483648 10001 0000000000000007 5000 0000000000000000\n",
+		"vpnhide 3 raw\narm 42 4294967296 0000000000000007 5000 0000000000000000\n",
+		"vpnhide 3 raw\narm 42 10001 0000000000000007 5001 0000000000000000\n",
+		"vpnhide 3 raw\narm 42 10001 0000000000000000 5000 0000000000000000\n",
+		"vpnhide 3 raw\narm 42 10001 0000000000000007 0 0000000000000000\n",
+		"vpnhide 3 raw\nactivate 000000000000000A\n",
+		"vpnhide 3 raw\nactivate 7\n",
+		"vpnhide 3 raw\nrevoke 0000000000000007",
+		"vpnhide 3 raw\nrevoke 0000000000000007\n\n",
+		"vpnhide 3 raw\nregister 0000000000000007 trailing\n",
 	};
 	struct identity collector = { 42, 10001, 0 }, root = { 1, 0, 0 };
 	struct world world = { .current = &collector };
 	struct vpnhide_diag_ops ops = { &world, current, number, uid, put, now };
 	struct vpnhide_diag_scope scope = { .max_lease = 5000000000ULL };
 	struct vpnhide_diag_command command;
-	const char *arm = "v1 arm 42 10001 0123456789abcdef 5000\n";
+	const char *arm =
+		"vpnhide 3 raw\narm 42 10001 0123456789abcdef 5000 0000000000000000\n";
 	unsigned char registration[16] = { 0xef, 0xcd, 0xab, 0x89, 0x67, 0x45,
 					   0x23, 0x01, 'V',  'H',  'R',	 'A',
 					   'W',	 '1',  '!',  0 };
@@ -98,6 +99,42 @@ static void wire_and_privileges(void)
 	assert(vpnhide_diag_execute(&scope, &ops, &command) == VPNHIDE_DIAG_OK);
 	assert(!collector.references && !root.references);
 }
+static void renewals_are_bounded(void)
+{
+	struct identity collector = { 42, 10001, 0 };
+	struct world world = { .current = &collector };
+	struct vpnhide_diag_ops ops = { &world, current, number, uid, put, now };
+	struct vpnhide_diag_scope scope = { .max_lease = 5 };
+	struct vpnhide_diag_snapshot state;
+
+	assert(vpnhide_diag_arm(&scope, &ops, 42, 10001, 7, 5, 0) ==
+	       VPNHIDE_DIAG_OK);
+	assert(vpnhide_diag_register(&scope, &ops, 7) == VPNHIDE_DIAG_OK);
+	assert(vpnhide_diag_activate(&scope, &ops, 7, 10) == VPNHIDE_DIAG_OK);
+	world.time = 3;
+	assert(vpnhide_diag_renew(&scope, &ops, 7, 2) == VPNHIDE_DIAG_STALE);
+	assert(vpnhide_diag_renew(&scope, &ops, 7, 1) == VPNHIDE_DIAG_OK);
+	world.time = 7;
+	assert(vpnhide_diag_renew(&scope, &ops, 7, 1) == VPNHIDE_DIAG_OK);
+	assert(vpnhide_diag_snapshot(&scope, &ops, &state) == VPNHIDE_DIAG_OK);
+	assert(state.remaining == 1 && state.renewal == 1);
+	assert(vpnhide_diag_renew(&scope, &ops, 7, 2) == VPNHIDE_DIAG_OK);
+	world.time = 9;
+	assert(vpnhide_diag_renew(&scope, &ops, 7, 3) == VPNHIDE_DIAG_OK);
+	assert(vpnhide_diag_current(&scope, &ops));
+	world.time = 10;
+	assert(!vpnhide_diag_current(&scope, &ops));
+	assert(vpnhide_diag_renew(&scope, &ops, 7, 4) == VPNHIDE_DIAG_STALE);
+	assert(vpnhide_diag_snapshot(&scope, &ops, &state) == VPNHIDE_DIAG_OK);
+	assert(state.phase == VPNHIDE_DIAG_RELEASED && state.nonce == 7);
+	assert(state.renewal == 0 && collector.references == 0);
+	assert(vpnhide_diag_arm(&scope, &ops, 42, 10001, 8, 5, 7) ==
+	       VPNHIDE_DIAG_OK);
+	assert(vpnhide_diag_revoke(&scope, &ops, 8) == VPNHIDE_DIAG_OK);
+	assert(vpnhide_diag_arm(&scope, &ops, 42, 10001, 7, 5, 0) ==
+	       VPNHIDE_DIAG_STALE);
+}
+
 int main(void)
 {
 	struct identity original = { 42, 10001, 0 }, reused = { 42, 10001, 0 };
@@ -109,10 +146,11 @@ int main(void)
 	struct vpnhide_diag_snapshot snapshot;
 
 	assert(vpnhide_diag_register(&scope, &ops, 7) == VPNHIDE_DIAG_STALE);
-	assert(vpnhide_diag_arm(&scope, &ops, 42, 10001, 7, 5) ==
+	assert(vpnhide_diag_arm(&scope, &ops, 42, 10001, 7, 5, 0) ==
 	       VPNHIDE_DIAG_OK);
 	assert(!vpnhide_diag_current(&scope, &ops));
-	assert(vpnhide_diag_activate(&scope, &ops, 7) == VPNHIDE_DIAG_STALE);
+	assert(vpnhide_diag_activate(&scope, &ops, 7, 20) ==
+	       VPNHIDE_DIAG_STALE);
 	world.current = &other_uid;
 	assert(vpnhide_diag_register(&scope, &ops, 7) == VPNHIDE_DIAG_INVALID);
 	world.current = &ordinary; /* same UID, different thread */
@@ -127,7 +165,7 @@ int main(void)
 		&reused; /* reuse before activation cannot replace identity */
 	assert(vpnhide_diag_register(&scope, &ops, 7) == VPNHIDE_DIAG_STALE);
 	assert(reused.references == 0);
-	assert(vpnhide_diag_activate(&scope, &ops, 7) == VPNHIDE_DIAG_OK);
+	assert(vpnhide_diag_activate(&scope, &ops, 7, 20) == VPNHIDE_DIAG_OK);
 	assert(!vpnhide_diag_current(&scope, &ops));
 	world.current = &original;
 	assert(vpnhide_diag_current(&scope, &ops));
@@ -137,8 +175,8 @@ int main(void)
 	assert(!vpnhide_diag_current(&scope, &ops));
 	world.current = &original;
 	world.time = 4;
-	assert(vpnhide_diag_activate(&scope, &ops, 7) == VPNHIDE_DIAG_OK);
-	assert(vpnhide_diag_arm(&scope, &ops, 42, 10001, 7, 5) ==
+	assert(vpnhide_diag_activate(&scope, &ops, 7, 20) == VPNHIDE_DIAG_OK);
+	assert(vpnhide_diag_arm(&scope, &ops, 42, 10001, 7, 5, 0) ==
 	       VPNHIDE_DIAG_OK);
 	assert(vpnhide_diag_snapshot(&scope, &ops, &snapshot) ==
 	       VPNHIDE_DIAG_OK);
@@ -149,10 +187,10 @@ int main(void)
 	scope.gate =
 		1; /* preempted writer/IRQ: no spinning, no RAW, no fake readback */
 	assert(!vpnhide_diag_current(&scope, &ops));
-	assert(vpnhide_diag_arm(&scope, &ops, 42, 10001, 8, 5) ==
+	assert(vpnhide_diag_arm(&scope, &ops, 42, 10001, 8, 5, scope.nonce) ==
 	       VPNHIDE_DIAG_BUSY);
 	assert(vpnhide_diag_register(&scope, &ops, 7) == VPNHIDE_DIAG_BUSY);
-	assert(vpnhide_diag_activate(&scope, &ops, 7) == VPNHIDE_DIAG_BUSY);
+	assert(vpnhide_diag_activate(&scope, &ops, 7, 20) == VPNHIDE_DIAG_BUSY);
 	assert(vpnhide_diag_revoke(&scope, &ops, 7) == VPNHIDE_DIAG_BUSY);
 	assert(vpnhide_diag_snapshot(&scope, &ops, &snapshot) ==
 	       VPNHIDE_DIAG_BUSY);
@@ -164,32 +202,34 @@ int main(void)
 	       VPNHIDE_DIAG_OK);
 	assert(snapshot.phase == VPNHIDE_DIAG_RELEASED && snapshot.nonce == 7);
 	assert(original.references == 0);
-	assert(vpnhide_diag_arm(&scope, &ops, 42, 10001, 7, 5) ==
+	assert(vpnhide_diag_arm(&scope, &ops, 42, 10001, 7, 5, 0) ==
 	       VPNHIDE_DIAG_STALE);
-	assert(vpnhide_diag_arm(&scope, &ops, 42, 10001, 8, 6) ==
+	assert(vpnhide_diag_arm(&scope, &ops, 42, 10001, 8, 6, scope.nonce) ==
 	       VPNHIDE_DIAG_INVALID);
-	assert(vpnhide_diag_arm(&scope, &ops, 42, 10001, 8, 5) ==
+	assert(vpnhide_diag_arm(&scope, &ops, 42, 10001, 8, 5, scope.nonce) ==
 	       VPNHIDE_DIAG_OK);
 	assert(vpnhide_diag_register(&scope, &ops, 8) == VPNHIDE_DIAG_OK);
-	assert(vpnhide_diag_activate(&scope, &ops, 8) == VPNHIDE_DIAG_OK);
+	assert(vpnhide_diag_activate(&scope, &ops, 8, 20) == VPNHIDE_DIAG_OK);
 	assert(vpnhide_diag_revoke(&scope, &ops, 7) == VPNHIDE_DIAG_STALE);
 	assert(vpnhide_diag_current(&scope, &ops));
 	assert(vpnhide_diag_revoke(&scope, &ops, 8) == VPNHIDE_DIAG_OK);
 	assert(original.references == 0 && reused.references == 0);
 	world.time = ~0ULL - 1;
-	assert(vpnhide_diag_arm(&scope, &ops, 42, 10001, 9, 5) ==
+	assert(vpnhide_diag_arm(&scope, &ops, 42, 10001, 9, 5, scope.nonce) ==
 	       VPNHIDE_DIAG_INVALID);
 	assert(original.references == 0);
 	world.time = 10;
-	assert(vpnhide_diag_arm(&scope, &ops, 42, 10001, 9, 5) ==
+	assert(vpnhide_diag_arm(&scope, &ops, 42, 10001, 9, 5, scope.nonce) ==
 	       VPNHIDE_DIAG_OK);
 	world.time = 15; /* registration handshake expires too */
 	assert(vpnhide_diag_register(&scope, &ops, 9) == VPNHIDE_DIAG_STALE);
-	assert(vpnhide_diag_activate(&scope, &ops, 9) == VPNHIDE_DIAG_STALE);
+	assert(vpnhide_diag_activate(&scope, &ops, 9, 20) ==
+	       VPNHIDE_DIAG_STALE);
 	assert(vpnhide_diag_snapshot(&scope, &ops, &snapshot) ==
 	       VPNHIDE_DIAG_OK);
 	assert(snapshot.phase == VPNHIDE_DIAG_RELEASED);
 	wire_and_privileges();
+	renewals_are_bounded();
 	puts("diagnostic RAW self-registration/identity/expiry/dedup/contention PASS");
 	return 0;
 }

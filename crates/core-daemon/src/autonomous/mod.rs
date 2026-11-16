@@ -29,6 +29,9 @@ pub(crate) fn raw_backend(backend: Option<vpnhide_core_rpc::NativeBackend>) -> O
         Some(vpnhide_core_rpc::NativeBackend::Builtin) => {
             Some(vpnhide_protocol::hook_ids::Backend::Builtin as u32)
         }
+        Some(vpnhide_core_rpc::NativeBackend::Kpm) => {
+            Some(vpnhide_protocol::hook_ids::Backend::Kpm as u32)
+        }
         _ => None,
     }
 }

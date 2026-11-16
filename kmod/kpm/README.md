@@ -248,3 +248,17 @@ external checkout. `kmod/kpm/build.py` packages the same artifact as
 - [bmax121/KernelPatch](https://github.com/bmax121/KernelPatch) and
   [KernelSU-Next/KPatch-Next](https://github.com/KernelSU-Next/KPatch-Next) —
   KernelPatch runtimes and module APIs used by this backend.
+
+
+## Diagnostic RAW
+
+The test-thread RAW v3 commands use `ctl0`. Backend activation, filtering and
+telemetry continue to work on existing runtimes. RAW is advertised only when
+the runtime selects the resident load contract and the running kernel has the
+necessary thread and clock helpers. The test runtime patch
+[`kernelpatch-raw-v3.patch`](../test/kernelpatch-raw-v3.patch) targets KernelPatch 0.13.1
+(`ece212d2`). It serializes management calls and keeps the embedded
+VPN Hide KPM resident until reboot so its hook callbacks and retained thread
+references stay valid. Ordinary dynamic module loads use the normal lifecycle.
+This is a QEMU qualification runtime. Production APatch and KPatch-Next builds
+need equivalent verified guarantees before they can grant RAW.

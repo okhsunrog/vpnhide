@@ -68,16 +68,15 @@ RAW visibility. An absent/unsupported grant withholds native proof while retaini
 qualified protected leaks. Unknown activation/revocation never authorizes a
 protected sample. No classifier or grant decision lives in Kotlin.
 
-The `.ko` and builtin now have a private diagnostic-thread RAW provider (wire1).
-Root arms an expected UID/TID and nonce; the actual collector self-registers its
-retained kernel PID identity through an ordinary loopback `SIOCGIFNAME`, then
-root activates that same identity. Registration alone grants no RAW. Other
-threads of the same UID remain protected. The fixed five-second CLOCK_BOOTTIME
-lease cannot be renewed by replay; matching revoke, owner FD release and expiry
-restore protection. The separate root-only proc endpoint and ioctl handshake do
-not change control2/telemetry1 or require broader app SELinux proc access.
-Absent kernel helpers leave this optional capability unavailable without changing
-backend health or triggering fallback.
+Kmod and Builtin carry diagnostic RAW v3 on their existing root-only control
+node. Root arms an expected UID/TID and nonce. The collector self-registers its
+retained kernel thread identity through loopback `SIOCGIFNAME`. Core validates
+that same thread and activates RAW. Other threads of the same UID remain
+protected. Core can renew a live measurement window, with an absolute
+30-second provider cap. Revoke, or expiry when Core stops renewing, restores
+filtering. Old providers without RAW v3 remain usable for filtering. A qualified
+resident KPM runtime exposes the same exchange through `ctl0`. See
+[the wire](protocol.md#diagnostic-raw-control-v3).
 
 With Builtin or Kmod, Core starts a short-lived process on the existing TUN
 fixtures before launching the Android worker. It keeps Core's SELinux context,
@@ -103,11 +102,10 @@ entries on older CFI kernels. Other module callsites keep their CFI checks.
 
 The Root lease/controller and unprivileged collector adapter have Linux fixture
 oracle coverage for real same-thread RAW/protected results, same-UID thread
-isolation, ordinary loopback preservation, final owner close and TTL expiry.
+isolation, ordinary loopback preservation, renewal and TTL expiry.
 The Android worker handshake and assessment consumers are implemented and have
 host/JVM/cross-build coverage; genuine Android bionic/SELinux/background execution
-still needs device acceptance. KPM and Zygisk RAW provider adapters remain code
-work. A second-ABI worker launcher also remains code work: an ordinary
+still needs device acceptance. KPM RAW requires a runtime that meets its residency contract. Zygisk RAW remains separate work. A second-ABI worker launcher also remains code work: an ordinary
 Service uses the package's selected ABI. AOSP's `instrument --abi` force-stops the
 target package before creating its requested process; `--no-restart` only attaches
 to an existing main process. Neither is a safe background launcher for this APK.

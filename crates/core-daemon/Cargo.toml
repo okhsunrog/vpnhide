@@ -23,7 +23,7 @@ path = "src/bin/fixture-oracle.rs"
 required-features = ["fixture-oracle"]
 
 [features]
-fixture-oracle = []
+fixture-oracle = ["vpnhide_activator/fixture-oracle"]
 
 [build-dependencies]
 vpnhide_build_contract = { path = "../build-contract" }

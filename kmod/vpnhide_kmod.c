@@ -369,18 +369,24 @@ static ssize_t ctl_write(struct file *file, const char __user *ubuf,
 	buf = kmalloc(count + 1, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
+	if (copy_from_user(buf, ubuf, count)) {
+		kfree(buf);
+		return -EFAULT;
+	}
+	buf[count] = '\0';
+	if (count >= sizeof(VPNHIDE_DIAG_RAW_PREFIX) - 1 &&
+	    !memcmp(buf, VPNHIDE_DIAG_RAW_PREFIX,
+		    sizeof(VPNHIDE_DIAG_RAW_PREFIX) - 1)) {
+		ssize_t result = vpnhide_diag_raw_write(buf, count);
+
+		kfree(buf);
+		return result;
+	}
 	newt = kcalloc(MAX_TARGET_UIDS, sizeof(*newt), GFP_KERNEL);
 	if (!newt) {
 		kfree(buf);
 		return -ENOMEM;
 	}
-
-	if (copy_from_user(buf, ubuf, count)) {
-		kfree(newt);
-		kfree(buf);
-		return -EFAULT;
-	}
-	buf[count] = '\0';
 
 	/* Seed `dbg` with the live value so an absent `debug` line means
 	 * "unchanged from current", per §4.3. */
@@ -428,7 +434,7 @@ static ssize_t ctl_write(struct file *file, const char __user *ubuf,
  * so the output streams without a whole-snapshot allocation or byte ceiling. */
 static void *ctl_seq_start(struct seq_file *m, loff_t *pos)
 {
-	if (*pos >= 3 + MAX_TARGET_UIDS)
+	if (*pos >= 4 + MAX_TARGET_UIDS)
 		return NULL;
 	return (void *)(unsigned long)(*pos + 1);
 }
@@ -462,11 +468,13 @@ static int ctl_seq_show(struct seq_file *m, void *v)
 			   VPNHIDE_TELEMETRY_VERSION, VPNHIDE_BACKEND_KMOD,
 			   LINUX_VERSION_CODE, hooks, error);
 	} else if (item == 2) {
+		return vpnhide_diag_raw_show(m);
+	} else if (item == 3) {
 		seq_printf(m, "vpnhide %u stats\n", VPNHIDE_TELEMETRY_VERSION);
 	} else {
 		struct stats_row row;
 		unsigned long flags;
-		int hook, index = (int)item - 3;
+		int hook, index = (int)item - 4;
 
 		spin_lock_irqsave(&stats_lock, flags);
 		if (index >= nr_stats_rows) {
@@ -2745,6 +2753,21 @@ static int __init vpnhide_init_impl(void)
 	 * service.sh and the VPN Hide app (both root). Apps must not see the
 	 * control channel. (Renamed from vpnhide_targets for semantic accuracy
 	 * — it is now control+stats, not just targets, §OPEN-4.) */
+	/* Optional diagnostic scope. Dynamically resolve helpers: their absence on
+	 * a trimmed KMI must not prevent the protection backend from loading.
+	 * The preflight-only early return above never publishes this endpoint.
+	 */
+	ret = vpnhide_diag_raw_init(
+		VPNHIDE_BACKEND_KMOD,
+		(vpnhide_diag_getpid_fn)resolve_kernel_symbol("get_task_pid"),
+		(vpnhide_diag_putpid_fn)resolve_kernel_symbol("put_pid"),
+		(vpnhide_diag_pidnr_fn)resolve_kernel_symbol("pid_vnr"),
+		(vpnhide_diag_clock_fn)resolve_kernel_symbol(
+			"ktime_get_with_offset"));
+	if (ret)
+		pr_warn(MODNAME ": diagnostic RAW capability unavailable: %d\n",
+			ret);
+
 	if (!proc_create("vpnhide_ctl", 0600, NULL, &ctl_proc_ops)) {
 		/* Without /proc/vpnhide_ctl userspace cannot configure the
 		 * target list, so the module would silently filter nothing —
@@ -2776,21 +2799,6 @@ static int __init vpnhide_init_impl(void)
 		resolved_dev_get_by_index_rcu =
 			(dev_get_by_index_rcu_fn)resolve_kernel_symbol(
 				"dev_get_by_index_rcu");
-
-	/* Optional diagnostic scope. Dynamically resolve helpers: their absence on
-	 * a trimmed KMI must not prevent the protection backend from loading.
-	 * The preflight-only early return above never publishes this endpoint.
-	 */
-	ret = vpnhide_diag_raw_init(
-		VPNHIDE_BACKEND_KMOD,
-		(vpnhide_diag_getpid_fn)resolve_kernel_symbol("get_task_pid"),
-		(vpnhide_diag_putpid_fn)resolve_kernel_symbol("put_pid"),
-		(vpnhide_diag_pidnr_fn)resolve_kernel_symbol("pid_vnr"),
-		(vpnhide_diag_clock_fn)resolve_kernel_symbol(
-			"ktime_get_with_offset"));
-	if (ret)
-		pr_warn(MODNAME ": diagnostic RAW capability unavailable: %d\n",
-			ret);
 
 	/* Activate execution redirection last. No fallible initialization may run
 	 * after module text becomes reachable outside the kprobe handler. The module

@@ -34,6 +34,7 @@
  */
 #pragma GCC visibility push(hidden)
 #include <compiler.h>
+#include <asm/current.h>
 #include <common.h> /* kver + VERSION(major,minor,patch) */
 #include <kpmodule.h>
 #include <hook.h>
@@ -46,6 +47,7 @@
 #include "../generated/iface_lists.h"
 #include "../generated/hook_ids.h"
 #include "../shared/vpnhide_logic.h"
+#include "../shared/vpnhide_diag_wire.h"
 #include "kver_offsets.h"
 
 KPM_NAME("vpnhide");
@@ -66,6 +68,68 @@ KPM_DESCRIPTION("Hide VPN interfaces from selected UIDs (KPM backend, beta)");
 
 static const struct vpnhide_offsets *off; /* selected per running kver */
 static const struct vpnhide_vfs_offsets *vfs_off;
+
+/* KernelPatch only enables RAW with its verified resident-module contract.
+ * The runtime supplies this event itself; ordinary load-file and embed events
+ * never opt the module in. Configuration and telemetry remain available.
+ */
+#define RAW_RESIDENT_EVENT "vpnhide-resident-raw-v1"
+static struct vpnhide_diag_scope raw_scope;
+static bool raw_registration_hook;
+static void *(*raw_get_pid)(void *task, int type);
+static void (*raw_put_pid)(void *pid);
+static int (*raw_pid_vnr)(void *pid);
+static long long (*raw_clock)(int offset);
+static int (*raw_snprintf)(char *buf, unsigned long size, const char *fmt, ...);
+
+static void *raw_current(void *context)
+{
+	return raw_get_pid(current, 0); /* PIDTYPE_PID */
+}
+static unsigned int raw_number(void *context, void *identity)
+{
+	return raw_pid_vnr(identity);
+}
+static unsigned int raw_uid(void *context)
+{
+	return current_uid();
+}
+static void raw_put(void *context, void *identity)
+{
+	raw_put_pid(identity);
+}
+static unsigned long long raw_now(void *context)
+{
+	return raw_clock(1); /* TK_OFFS_BOOT */
+}
+static const struct vpnhide_diag_ops raw_ops = {
+	.current_identity = raw_current,
+	.number = raw_number,
+	.uid = raw_uid,
+	.put = raw_put,
+	.now = raw_now,
+};
+static void raw_initialize(const char *event)
+{
+	const char *expected = RAW_RESIDENT_EVENT;
+
+	if (!event)
+		return;
+	while (*expected && *expected == *event) {
+		expected++;
+		event++;
+	}
+	if (*expected || *event)
+		return;
+	raw_get_pid = (void *)kallsyms_lookup_name("get_task_pid");
+	raw_put_pid = (void *)kallsyms_lookup_name("put_pid");
+	raw_pid_vnr = (void *)kallsyms_lookup_name("pid_vnr");
+	raw_clock = (void *)kallsyms_lookup_name("ktime_get_with_offset");
+	raw_snprintf = (void *)kallsyms_lookup_name("snprintf");
+	if (raw_get_pid && raw_put_pid && raw_pid_vnr && raw_clock &&
+	    raw_snprintf)
+		raw_scope.max_lease = VPNHIDE_DIAG_RAW_MAX_MS * 1000000ULL;
+}
 
 /* Live config (protocol §4.3). Each target carries a per-hook mask so the app
  * can enable hooks individually; a hook fires only if its bit is set for the
@@ -264,7 +328,8 @@ static int hook_active(enum vpnhide_hook_id hook_id)
 	 * a target nor a `default` lifts it. Also keeps uid 0 honest, which the
 	 * app's root-differential diagnostics use as ground truth.
 	 */
-	if (uid % VPNHIDE_PER_USER_RANGE < VPNHIDE_FIRST_APP_UID)
+	if (uid % VPNHIDE_PER_USER_RANGE < VPNHIDE_FIRST_APP_UID ||
+	    (raw_scope.max_lease && vpnhide_diag_current(&raw_scope, &raw_ops)))
 		return 0;
 
 	for (attempt = 0; attempt < VPNHIDE_CFG_READ_ATTEMPTS; attempt++) {
@@ -946,6 +1011,22 @@ static void socket_bind_sk_before(hook_fargs8_t *fargs, void *udata)
  * predicate vpnhide_ioctl_is_get_by_name() in shared/vpnhide_logic.h — one
  * source of truth so this gate cannot narrow below SIOCGIFINDEX (0x8933) again
  * while the zygisk copy stays wide, which is exactly how a leak crept in before. */
+static void dev_ioctl_before(hook_fargs5_t *fargs, void *udata)
+{
+	const unsigned char *request = (const void *)fargs->arg2;
+	unsigned char name[16];
+
+	if (!raw_scope.max_lease || fargs->arg1 != 0x8910 || !request)
+		return; /* SIOCGIFNAME */
+	if (!ptr_is_kernel(request)) {
+		if (!_copy_from_user ||
+		    _copy_from_user(name, request, sizeof(name)))
+			return;
+		request = name;
+	}
+	vpnhide_diag_register_name(&raw_scope, &raw_ops, request);
+}
+
 static void dev_ioctl_after(hook_fargs5_t *fargs, void *udata)
 {
 	unsigned long cmd = (unsigned long)fargs->arg1;
@@ -2037,6 +2118,7 @@ static long vpnhide_kpm_init(const char *args, const char *event,
 	 * ioctl hooks use layouts shared by all supported tables. install_hook
 	 * records each successful registration in installed_hooks.
 	 */
+	raw_initialize(event);
 	if (off->seqfile_count) {
 		install_hook("fib_route_seq_show", 2, (void *)seq_show_before,
 			     (void *)fib_route_after,
@@ -2060,8 +2142,10 @@ static long vpnhide_kpm_init(const char *args, const char *event,
 		logki(MODNAME ": proc interface hooks dev=%d if_inet6=%d\n",
 		      dev, if6);
 	}
-	install_hook("dev_ioctl", 5, 0, (void *)dev_ioctl_after,
-		     VPNHIDE_HOOK_DEV_IOCTL);
+	raw_registration_hook =
+		install_hook("dev_ioctl", 5,
+			     raw_scope.max_lease ? (void *)dev_ioctl_before : 0,
+			     (void *)dev_ioctl_after, VPNHIDE_HOOK_DEV_IOCTL);
 	/* SIOCGIF{ADDR,BRDADDR,DSTADDR,NETMASK} by name bypass dev_ioctl — the
 	 * inet layer handles them in devinet_ioctl(net, cmd, ifr). Same cmd@arg1 /
 	 * ifr@arg2 layout, and dev_ioctl_after already gates on the get-by-name
@@ -2165,6 +2249,52 @@ static long vpnhide_kpm_init(const char *args, const char *event,
  *   stats  → serialise cumulative per-uid/per-hook counters into out_msg.
  *   status → serialise backend health into out_msg.
  */
+static long raw_control(const char *args, unsigned long len,
+			char __user *out_msg, int outlen)
+{
+	static const char unsupported[] = VPNHIDE_DIAG_RAW_HEADER
+		"backend 0x1\nresult unsupported\nend\n";
+	struct vpnhide_diag_command command;
+	struct vpnhide_diag_snapshot state;
+	enum vpnhide_diag_result result;
+	char reply[VPNHIDE_DIAG_RAW_REPLY_BYTES];
+	int size;
+
+	if (current_uid() != 0 || !out_msg || !_copy_to_user)
+		return -1;
+	if (!raw_scope.max_lease || !raw_registration_hook) {
+		if (outlen < (int)sizeof(unsupported))
+			return -1;
+		return copy_ctl_reply(out_msg, unsupported,
+				      sizeof(unsupported) - 1);
+	}
+	/* Require room for a whole reply before changing state. */
+	if (outlen < (int)sizeof(reply))
+		return -1;
+	if (!vpnhide_diag_parse_command(args, len, &command))
+		result = VPNHIDE_DIAG_INVALID;
+	else
+		result = vpnhide_diag_execute(&raw_scope, &raw_ops, &command);
+	if (result == VPNHIDE_DIAG_OK)
+		result = vpnhide_diag_snapshot(&raw_scope, &raw_ops, &state);
+	if (result != VPNHIDE_DIAG_OK)
+		size = raw_snprintf(reply, sizeof(reply),
+				    VPNHIDE_DIAG_RESULT_FMT,
+				    VPNHIDE_BACKEND_KPM,
+				    vpnhide_diag_result_name(result));
+	else
+		size = raw_snprintf(reply, sizeof(reply),
+				    VPNHIDE_DIAG_STATE_FMT, VPNHIDE_BACKEND_KPM,
+				    VPNHIDE_DIAG_RAW_MAX_MS,
+				    vpnhide_diag_phase_name(state.phase),
+				    state.tid, state.uid, state.nonce,
+				    (state.remaining + 999999ULL) / 1000000ULL,
+				    state.renewal);
+	if (size <= 0 || size >= (int)sizeof(reply))
+		return -1;
+	return copy_ctl_reply(out_msg, reply, size);
+}
+
 static long vpnhide_kpm_ctl0(const char *args, char *__user out_msg, int outlen)
 {
 	unsigned long n_args = 0;
@@ -2172,8 +2302,17 @@ static long vpnhide_kpm_ctl0(const char *args, char *__user out_msg, int outlen)
 
 	if (!args)
 		return -1;
-	while (args[n_args])
+	while (n_args < 1024 && args[n_args])
 		n_args++;
+	if (n_args == 1024)
+		return -1;
+	if (n_args >= sizeof(VPNHIDE_DIAG_RAW_PREFIX) - 1) {
+		const char *prefix = args;
+
+		if (vpnhide_diag_word(&prefix, args + n_args,
+				      VPNHIDE_DIAG_RAW_PREFIX))
+			return raw_control(args, n_args, out_msg, outlen);
+	}
 	kind = vpnhide_peek_kind(args, n_args);
 
 	if (kind == VPNHIDE_KIND_CONFIG) {
@@ -2212,6 +2351,20 @@ static long vpnhide_kpm_ctl0(const char *args, char *__user out_msg, int outlen)
 			st.hooks = installed_hooks;
 			st.error = last_error;
 			full = vpnhide_format_status(buf, sizeof(buf), &st);
+			if (raw_scope.max_lease && raw_registration_hook &&
+			    full < sizeof(buf)) {
+				struct vpnhide_buf tail = {
+					.p = buf,
+					.cap = sizeof(buf),
+					.len = full,
+				};
+
+				vpnhide_puts(&tail, "raw ");
+				vpnhide_put_hex(&tail,
+						VPNHIDE_DIAG_RAW_VERSION);
+				vpnhide_putc(&tail, '\n');
+				full = tail.len;
+			}
 		}
 
 		/*

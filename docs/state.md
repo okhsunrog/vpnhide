@@ -197,12 +197,13 @@ because it is the storage root for every layer.
 
 ### `/proc/vpnhide_ctl`
 
-Created by the `.ko` backend at module init. Mode `0600`, root-only.
+Created by kmod and Builtin at init. Mode `0600`, root-only.
 
 | Direction | Format | Writer/Reader |
 |---|---|---|
 | write | `vpnhide 2 config` text snapshot: `debug` + grouped `targets <hookmask> <uid>...` + `end` | core writes; kernel parses via shared protocol code |
-| read | `status` + `stats` text response | app/debug tooling reads |
+| write | `vpnhide 3 raw` command (arm, activate, renew, revoke, status) | Core controls one diagnostic thread |
+| read | `status` + `raw-state` + `stats` text response | Core reads and validates |
 
 The state is in-kernel and per-boot. The proc write replaces the whole config,
 so core delivers one bounded snapshot.
@@ -220,25 +221,10 @@ shows up instead of being hidden by a corrected copy of the logic.
 
 The debug bundle cats it verbatim into a `kmod_diag` section. No UI surface.
 
-### `/proc/vpnhide_diag_raw`
-
-Optional `.ko`/builtin private wire1 endpoint, root-owned mode0600. It is absent
-from loader preflight. Only current root credentials may arm/activate/revoke or
-read status, even on a passed descriptor. An app collector only self-registers
-an already armed UID/TID/nonce through the existing socket ioctl path; it cannot
-open this node or enable RAW itself. The kernel retains that thread's PID object,
-not a lookup of a reusable numeric PID. Other threads and applications retain
-normal policy. One scope/reference is retained at most; a read, revoke or next
-arm reclaims an expired reference.
-
-The successful arm FD owns its nonce. Final release attempts matching revocation;
-brief control contention returns BUSY rather than spinning, with fixed
-CLOCK_BOOTTIME expiry as the crash bound. A Root controller must observe matching
-released status before issuing a protected measurement: close or elapsed userspace
-time alone is not a revocation receipt. Core now coordinates the genuine Android worker through an admitted-thread
-handshake and confirms release before protected collection; Linux qualification
-and real Android acceptance remain distinct.
-KPM has no such node. See [diagnostics](diagnostics.md).
+RAW state is in memory. It is scoped to the registered test thread, expires on
+the boot clock and requires an explicit revoke and readback before the normal
+measurement. It shares the existing control endpoint. See the
+[RAW wire contract](protocol.md#diagnostic-raw-control-v3).
 
 ### KPM Supercall Channel
 

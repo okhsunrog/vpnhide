@@ -273,18 +273,24 @@ static ssize_t ctl_write(struct file *file, const char __user *ubuf,
 	buf = kmalloc(count + 1, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
+	if (copy_from_user(buf, ubuf, count)) {
+		kfree(buf);
+		return -EFAULT;
+	}
+	buf[count] = '\0';
+	if (count >= sizeof(VPNHIDE_DIAG_RAW_PREFIX) - 1 &&
+	    !memcmp(buf, VPNHIDE_DIAG_RAW_PREFIX,
+		    sizeof(VPNHIDE_DIAG_RAW_PREFIX) - 1)) {
+		ssize_t result = vpnhide_diag_raw_write(buf, count);
+
+		kfree(buf);
+		return result;
+	}
 	newt = kcalloc(MAX_TARGET_UIDS, sizeof(*newt), GFP_KERNEL);
 	if (!newt) {
 		kfree(buf);
 		return -ENOMEM;
 	}
-
-	if (copy_from_user(buf, ubuf, count)) {
-		kfree(newt);
-		kfree(buf);
-		return -EFAULT;
-	}
-	buf[count] = '\0';
 
 	/* Seed `dbg` with the live value so an absent `debug` line means
 	 * "unchanged from current", per §4.3. */
@@ -330,7 +336,7 @@ static ssize_t ctl_write(struct file *file, const char __user *ubuf,
  * streams without a whole-snapshot allocation or byte ceiling. */
 static void *ctl_seq_start(struct seq_file *m, loff_t *pos)
 {
-	if (*pos >= 3 + MAX_TARGET_UIDS)
+	if (*pos >= 4 + MAX_TARGET_UIDS)
 		return NULL;
 	return (void *)(unsigned long)(*pos + 1);
 }
@@ -362,11 +368,13 @@ static int ctl_seq_show(struct seq_file *m, void *v)
 			   VPNHIDE_TELEMETRY_VERSION, VPNHIDE_BACKEND_BUILTIN,
 			   LINUX_VERSION_CODE, hooks, VPNHIDE_ERR_OK);
 	} else if (item == 2) {
+		return vpnhide_diag_raw_show(m);
+	} else if (item == 3) {
 		seq_printf(m, "vpnhide %u stats\n", VPNHIDE_TELEMETRY_VERSION);
 	} else {
 		struct stats_row row;
 		unsigned long flags;
-		int hook, index = (int)item - 3;
+		int hook, index = (int)item - 4;
 
 		spin_lock_irqsave(&stats_lock, flags);
 		if (index >= nr_stats_rows) {
@@ -520,6 +528,12 @@ static int __init vpnhide_init(void)
 {
 	int error;
 
+	error = vpnhide_diag_raw_init(VPNHIDE_BACKEND_BUILTIN, get_task_pid,
+				      put_pid, pid_vnr, ktime_get_with_offset);
+	if (error)
+		pr_warn(MODNAME ": diagnostic RAW capability unavailable: %d\n",
+			error);
+
 	/* 0600: root-only. The config snapshot is written here by service.sh
 	 * and the VPN Hide app (both root). Apps must not see the control
 	 * channel. Until a config is written, active_hook_mask stays 0 and
@@ -534,12 +548,6 @@ static int __init vpnhide_init(void)
 	if (!proc_create_single("vpnhide_diag", 0400, NULL, vpnhide_diag_show))
 		pr_warn(MODNAME
 			": proc_create_single(vpnhide_diag) failed — diagnostics unavailable\n");
-
-	error = vpnhide_diag_raw_init(VPNHIDE_BACKEND_BUILTIN, get_task_pid,
-				      put_pid, pid_vnr, ktime_get_with_offset);
-	if (error)
-		pr_warn(MODNAME ": diagnostic RAW capability unavailable: %d\n",
-			error);
 
 	pr_info(MODNAME
 		": in-tree backend ready — write a config snapshot to /proc/vpnhide_ctl\n");

@@ -22,7 +22,7 @@ pub fn verify(protected: bool) -> Result<(), Box<dyn std::error::Error>> {
         serde_json::to_string(&fixture.start)?
     );
     let raw = if protected {
-        Some(super::raw_control::verify(&witness.spec)?)
+        Some(super::raw_control::verify(&witness.spec, None)?)
     } else {
         None
     };

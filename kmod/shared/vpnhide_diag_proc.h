@@ -31,9 +31,6 @@ static vpnhide_diag_pidnr_fn vpnhide_diag_pidnr;
 static vpnhide_diag_clock_fn vpnhide_diag_clock;
 static unsigned int vpnhide_diag_backend;
 static struct vpnhide_diag_scope vpnhide_diag_state;
-struct vpnhide_diag_file {
-	unsigned long long nonce;
-};
 /* The .ko supplies raw kallsyms addresses, not canonical CFI jump-table
  * entries. Keep only these resolved calls behind non-inlined __nocfi boundaries,
  * like the module's other resolved VFS/socket helpers. The callbacks themselves
@@ -109,128 +106,58 @@ static int vpnhide_diag_raw_current(void)
 	return vpnhide_diag_current(&vpnhide_diag_state,
 				    &vpnhide_diag_callbacks);
 }
-static int vpnhide_diag_raw_show(struct seq_file *seq, void *unused)
+static int vpnhide_diag_raw_show(struct seq_file *seq)
 {
 	struct vpnhide_diag_snapshot snapshot;
-	unsigned long long remaining_ms;
-	int error;
+	enum vpnhide_diag_result result;
 
-	(void)unused;
 	if (__kuid_val(current_uid()) != 0)
 		return -EACCES;
-	error = vpnhide_diag_errno(vpnhide_diag_snapshot(
-		&vpnhide_diag_state, &vpnhide_diag_callbacks, &snapshot));
-	if (error)
-		return error;
-	/* Round UP: a live sub-millisecond lease must never claim it is expired. */
-	remaining_ms = div_u64(snapshot.remaining + 999999ULL, 1000000U);
-	seq_printf(seq,
-		   VPNHIDE_DIAG_RAW_HEADER
-		   "backend %u\nmax_ms %u\nphase %s\ntid %u\nuid %u\n"
-		   "nonce %016llx\nremaining_ms %llu\n",
-		   vpnhide_diag_backend, VPNHIDE_DIAG_RAW_MAX_MS,
+	result = vpnhide_diag_snapshot(&vpnhide_diag_state,
+				       &vpnhide_diag_callbacks, &snapshot);
+	if (result != VPNHIDE_DIAG_OK) {
+		seq_printf(seq, VPNHIDE_DIAG_RESULT_FMT, vpnhide_diag_backend,
+			   vpnhide_diag_result_name(result));
+		return 0;
+	}
+	seq_printf(seq, VPNHIDE_DIAG_STATE_FMT, vpnhide_diag_backend,
+		   VPNHIDE_DIAG_RAW_MAX_MS,
 		   vpnhide_diag_phase_name(snapshot.phase), snapshot.tid,
-		   snapshot.uid, snapshot.nonce, remaining_ms);
+		   snapshot.uid, snapshot.nonce,
+		   div_u64(snapshot.remaining + 999999ULL, 1000000U),
+		   snapshot.renewal);
 	return 0;
 }
-static int vpnhide_diag_raw_open(struct inode *inode, struct file *file)
-{
-	struct vpnhide_diag_file *context;
-	int error;
 
-	(void)inode;
-	if ((file->f_mode & FMODE_READ) && __kuid_val(current_uid()) != 0)
-		return -EACCES;
-	context = kzalloc(sizeof(*context), GFP_KERNEL);
-	if (!context)
-		return -ENOMEM;
-	error = single_open(file, vpnhide_diag_raw_show, context);
-	if (error)
-		kfree(context);
-	return error;
-}
-static int vpnhide_diag_raw_release(struct inode *inode, struct file *file)
+static ssize_t vpnhide_diag_raw_write(const char *buffer, size_t bytes)
 {
-	struct seq_file *seq = file->private_data;
-	struct vpnhide_diag_file *context = seq->private;
-
-	if (context->nonce)
-		/* A contended release cannot spin in kernel context. The fixed TTL
-		 * still revokes effective RAW; subsequent readback reclaims its ref.
-		 * Only a matching nonce can clear the scope, never a newer owner.
-		 */
-		vpnhide_diag_revoke(&vpnhide_diag_state,
-				    &vpnhide_diag_callbacks, context->nonce);
-	kfree(context);
-	return single_release(inode, file);
-}
-static ssize_t vpnhide_diag_raw_write(struct file *file,
-				      const char __user *input, size_t bytes,
-				      loff_t *position)
-{
-	struct seq_file *seq = file->private_data;
-	struct vpnhide_diag_file *context = seq->private;
 	struct vpnhide_diag_command command;
-	char buffer[VPNHIDE_DIAG_RAW_COMMAND_BYTES];
 	int error;
 
-	(void)position;
-	if (!bytes || bytes > sizeof(buffer))
-		return -E2BIG;
-	if (copy_from_user(buffer, input, bytes))
-		return -EFAULT;
-	if (!vpnhide_diag_parse_command(buffer, bytes, &command))
-		return -EINVAL;
 	if (__kuid_val(current_uid()) != 0)
 		return -EPERM;
+	if (!vpnhide_diag_parse_command(buffer, bytes, &command))
+		return -EINVAL;
 	error = vpnhide_diag_errno(vpnhide_diag_execute(
 		&vpnhide_diag_state, &vpnhide_diag_callbacks, &command));
-	if (error)
-		return error;
-	if (command.kind == VPNHIDE_DIAG_ARM)
-		context->nonce = command.nonce;
-	return bytes;
+	return error ? error : (ssize_t)bytes;
 }
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0)
-static const struct proc_ops vpnhide_diag_raw_operations = {
-	.proc_open = vpnhide_diag_raw_open,
-	.proc_read = seq_read,
-	.proc_write = vpnhide_diag_raw_write,
-	.proc_lseek = seq_lseek,
-	.proc_release = vpnhide_diag_raw_release,
-};
-#else
-static const struct file_operations vpnhide_diag_raw_operations = {
-	.owner = THIS_MODULE,
-	.open = vpnhide_diag_raw_open,
-	.read = seq_read,
-	.write = vpnhide_diag_raw_write,
-	.llseek = seq_lseek,
-	.release = vpnhide_diag_raw_release,
-};
-#endif
+
 static int vpnhide_diag_raw_init(unsigned int backend,
 				 vpnhide_diag_getpid_fn getpid,
 				 vpnhide_diag_putpid_fn putpid,
 				 vpnhide_diag_pidnr_fn pidnr,
 				 vpnhide_diag_clock_fn clock)
 {
+	vpnhide_diag_backend = backend;
 	if (!getpid || !putpid || !pidnr || !clock)
 		return -EOPNOTSUPP;
 	vpnhide_diag_getpid = getpid;
 	vpnhide_diag_putpid = putpid;
 	vpnhide_diag_pidnr = pidnr;
 	vpnhide_diag_clock = clock;
-	vpnhide_diag_backend = backend;
-	vpnhide_diag_state.max_lease = VPNHIDE_DIAG_RAW_MAX_MS * 1000000ULL;
-	/* Root-only control/readback. Collector self-registration uses the
-	 * existing socket ioctl hook; no app proc permission is required.
-	 */
-	if (!proc_create(VPNHIDE_DIAG_RAW_NODE_NAME, 0600, NULL,
-			 &vpnhide_diag_raw_operations)) {
-		vpnhide_diag_state.max_lease = 0;
-		return -ENOMEM;
-	}
+	WRITE_ONCE(vpnhide_diag_state.max_lease,
+		   VPNHIDE_DIAG_RAW_MAX_MS * 1000000ULL);
 	return 0;
 }
 #endif

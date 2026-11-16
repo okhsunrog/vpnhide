@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT */
-/* Native consumer of the private Rust-owned diagnostic RAW wire. */
+/* Native consumer of the shared Rust-owned diagnostic RAW wire. */
 #ifndef VPNHIDE_DIAG_WIRE_H
 #define VPNHIDE_DIAG_WIRE_H
 #include "../generated/diagnostic_raw.h"
@@ -31,11 +31,13 @@ enum vpnhide_diag_command_kind {
 	VPNHIDE_DIAG_ARM,
 	VPNHIDE_DIAG_ACTIVATE,
 	VPNHIDE_DIAG_REVOKE,
+	VPNHIDE_DIAG_RENEW,
+	VPNHIDE_DIAG_STATUS,
 };
 struct vpnhide_diag_command {
 	enum vpnhide_diag_command_kind kind;
-	unsigned int tid, uid, duration_ms;
-	unsigned long long nonce;
+	unsigned int tid, uid, duration_ms, sequence;
+	unsigned long long nonce, previous;
 };
 static inline int vpnhide_diag_word(const char **input, const char *end,
 				    const char *word)
@@ -86,8 +88,6 @@ static inline int vpnhide_diag_token(const char **input, const char *end,
 		result = (result << 4) | digit;
 		cursor++;
 	}
-	if (!result)
-		return 0;
 	*input = cursor;
 	*output = result;
 	return 1;
@@ -114,20 +114,32 @@ vpnhide_diag_parse_command(const char *input, unsigned long bytes,
 		    !vpnhide_diag_token(&input, end, &parsed.nonce) ||
 		    !vpnhide_diag_word(&input, end, " ") ||
 		    !vpnhide_diag_decimal(&input, end, &parsed.duration_ms) ||
-		    !parsed.tid || parsed.tid > (~0u >> 1) || !parsed.uid ||
-		    !parsed.duration_ms ||
+		    !vpnhide_diag_word(&input, end, " ") ||
+		    !vpnhide_diag_token(&input, end, &parsed.previous) ||
+		    !parsed.nonce || !parsed.tid || parsed.tid > (~0u >> 1) ||
+		    !parsed.uid || !parsed.duration_ms ||
 		    parsed.duration_ms > VPNHIDE_DIAG_RAW_MAX_MS)
 			return 0;
+	} else if (vpnhide_diag_word(&input, end, "status")) {
+		parsed.kind = VPNHIDE_DIAG_STATUS;
 	} else {
 		if (vpnhide_diag_word(&input, end, "activate "))
 			parsed.kind = VPNHIDE_DIAG_ACTIVATE;
 		else if (vpnhide_diag_word(&input, end, "revoke "))
 			parsed.kind = VPNHIDE_DIAG_REVOKE;
+		else if (vpnhide_diag_word(&input, end, "renew "))
+			parsed.kind = VPNHIDE_DIAG_RENEW;
 		else
 			return 0;
-		if (!vpnhide_diag_token(&input, end, &parsed.nonce))
+		if (!vpnhide_diag_token(&input, end, &parsed.nonce) ||
+		    !parsed.nonce)
 			return 0;
 	}
+	if (parsed.kind == VPNHIDE_DIAG_RENEW &&
+	    (!vpnhide_diag_word(&input, end, " ") ||
+	     !vpnhide_diag_decimal(&input, end, &parsed.sequence) ||
+	     !parsed.sequence))
+		return 0;
 	if (input != end)
 		return 0;
 	*command = parsed;
@@ -149,11 +161,19 @@ vpnhide_diag_execute(struct vpnhide_diag_scope *scope,
 	case VPNHIDE_DIAG_ARM:
 		return vpnhide_diag_arm(scope, ops, command->tid, command->uid,
 					command->nonce,
-					command->duration_ms * 1000000ULL);
+					command->duration_ms * 1000000ULL,
+					command->previous);
 	case VPNHIDE_DIAG_ACTIVATE:
-		return vpnhide_diag_activate(scope, ops, command->nonce);
+		return vpnhide_diag_activate(scope, ops, command->nonce,
+					     VPNHIDE_DIAG_RAW_TOTAL_MS *
+						     1000000ULL);
 	case VPNHIDE_DIAG_REVOKE:
 		return vpnhide_diag_revoke(scope, ops, command->nonce);
+	case VPNHIDE_DIAG_RENEW:
+		return vpnhide_diag_renew(scope, ops, command->nonce,
+					  command->sequence);
+	case VPNHIDE_DIAG_STATUS:
+		return VPNHIDE_DIAG_OK;
 	}
 	return VPNHIDE_DIAG_INVALID;
 }
@@ -171,4 +191,28 @@ static inline const char *vpnhide_diag_phase_name(enum vpnhide_diag_phase phase)
 	}
 	return "invalid";
 }
+static inline const char *
+vpnhide_diag_result_name(enum vpnhide_diag_result result)
+{
+	switch (result) {
+	case VPNHIDE_DIAG_OK:
+		return "ok";
+	case VPNHIDE_DIAG_BUSY:
+		return "busy";
+	case VPNHIDE_DIAG_INVALID:
+		return "invalid";
+	case VPNHIDE_DIAG_STALE:
+		return "stale";
+	case VPNHIDE_DIAG_UNAVAILABLE:
+		return "unsupported";
+	}
+	return "invalid";
+}
+
+#define VPNHIDE_DIAG_STATE_FMT  \
+	VPNHIDE_DIAG_RAW_HEADER \
+	"backend 0x%x\nmax_ms %u\nphase %s\nscope %u %u %016llx %llu\nrenewal %u\nend\n"
+#define VPNHIDE_DIAG_RESULT_FMT \
+	VPNHIDE_DIAG_RAW_HEADER \
+	"backend 0x%x\nresult %s\nend\n"
 #endif

@@ -168,7 +168,9 @@ pub(super) fn observe(
     if !context.starts_with("u:r:") {
         return Err(io::Error::other("Core SELinux context unavailable"));
     }
-    let deadline = BootDeadline::from_now(Duration::from_secs(5))?;
+    let deadline = BootDeadline::from_now(Duration::from_millis(u64::from(
+        vpnhide_protocol::diagnostic_raw::MAX_TOTAL_MS,
+    )))?;
     let parent = unsafe { libc::getpid() };
     let (socket, other) = UnixStream::pair()?;
     socket.set_write_timeout(Some(Duration::from_millis(250)))?;
@@ -212,13 +214,18 @@ pub(super) fn observe(
     }
     revalidate()?;
     let raw = exchange
-        .step(admitted, NativeWorkerPhase::Registered, routes)
+        .step(admitted, NativeWorkerPhase::Registered, routes, deadline)
         .map_err(wire)?;
     frame(&mut &socket, &raw)?;
     let native = Box::new(receive(&mut reader)?);
     revalidate()?;
     let protect = exchange
-        .step(admitted, NativeWorkerPhase::RawMeasured { native }, routes)
+        .step(
+            admitted,
+            NativeWorkerPhase::RawMeasured { native },
+            routes,
+            deadline,
+        )
         .map_err(wire)?;
     let raw = exchange
         .receipt()

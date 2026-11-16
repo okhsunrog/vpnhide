@@ -2,6 +2,7 @@
 //! the genuine worker and exact thread before EACH step; this owner never accepts
 //! a caller-supplied successful grant/revocation flag.
 use super::native_raw::RawLease;
+use crate::boot_time::BootDeadline;
 use std::io::{self, Read};
 use vpnhide_diagnostic_model::{
     DiagnosticError, DiagnosticThreadIdentity, NativeRawReceipt, NativeRawStage,
@@ -9,12 +10,21 @@ use vpnhide_diagnostic_model::{
 };
 
 pub(super) trait Grant: Send {
-    fn activate(&mut self) -> io::Result<()>;
+    fn activate(
+        &mut self,
+        identity: DiagnosticThreadIdentity,
+        deadline: BootDeadline,
+    ) -> io::Result<()>;
     fn finish(&mut self) -> io::Result<bool>;
 }
 impl Grant for RawLease {
-    fn activate(&mut self) -> io::Result<()> {
-        RawLease::activate(self)
+    fn activate(
+        &mut self,
+        identity: DiagnosticThreadIdentity,
+        deadline: BootDeadline,
+    ) -> io::Result<()> {
+        RawLease::activate(self)?;
+        self.maintain(identity, deadline)
     }
     fn finish(&mut self) -> io::Result<bool> {
         RawLease::finish(self)
@@ -60,10 +70,17 @@ impl NativeExchange {
             // No endpoint means no grant from this call. Busy/denied/malformed
             // or uncertain control is NOT absence and must not authorize a
             // supposedly protected sample.
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok((
-                Self::unsupported(identity, NativeRawReceipt::CapabilityAbsent { identity }),
-                NativeWorkerInstruction::ObserveProtected,
-            )),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::Unsupported
+                ) =>
+            {
+                Ok((
+                    Self::unsupported(identity, NativeRawReceipt::CapabilityAbsent { identity }),
+                    NativeWorkerInstruction::ObserveProtected,
+                ))
+            }
             Err(_) => Err(DiagnosticError::Disabled),
         }
     }
@@ -116,6 +133,7 @@ impl NativeExchange {
         identity: DiagnosticThreadIdentity,
         phase: NativeWorkerPhase,
         routes: Option<&RouteFixtureSpec>,
+        deadline: BootDeadline,
     ) -> Result<NativeWorkerInstruction, DiagnosticError> {
         if identity != self.identity {
             return Err(DiagnosticError::WrongProcess);
@@ -131,7 +149,7 @@ impl NativeExchange {
                 self.grant
                     .as_mut()
                     .ok_or(DiagnosticError::Disabled)?
-                    .activate()
+                    .activate(identity, deadline)
                     .map_err(|_| DiagnosticError::Disabled)?;
                 self.phase = Phase::Raw;
                 self.receipt = NativeRawReceipt::Failed {
@@ -199,7 +217,7 @@ mod tests {
         qualified: bool,
     }
     impl Grant for Fake {
-        fn activate(&mut self) -> io::Result<()> {
+        fn activate(&mut self, _: DiagnosticThreadIdentity, _: BootDeadline) -> io::Result<()> {
             self.calls.lock().unwrap().push("activate");
             if self.activate {
                 Ok(())
@@ -215,6 +233,9 @@ mod tests {
                 Err(io::Error::other("unknown revoke"))
             }
         }
+    }
+    fn test_deadline() -> BootDeadline {
+        BootDeadline::from_now(std::time::Duration::from_secs(42)).unwrap()
     }
     fn identity() -> DiagnosticThreadIdentity {
         DiagnosticThreadIdentity {
@@ -253,10 +274,19 @@ mod tests {
     fn a_lost_activation_or_revocation_never_authorizes_protected_measurement() {
         for (activate, released) in [(false, true), (true, false)] {
             let (mut owner, calls) = exchange(activate, released, true);
-            let first = owner.step(identity(), NativeWorkerPhase::Registered, None);
+            let first = owner.step(
+                identity(),
+                NativeWorkerPhase::Registered,
+                None,
+                test_deadline(),
+            );
             if activate {
                 assert_eq!(first, Ok(NativeWorkerInstruction::ObserveRaw));
-                assert!(owner.step(identity(), measured(), None).is_err());
+                assert!(
+                    owner
+                        .step(identity(), measured(), None, test_deadline())
+                        .is_err()
+                );
                 assert!(matches!(
                     owner.receipt(),
                     NativeRawReceipt::Failed {
@@ -271,7 +301,12 @@ mod tests {
             assert!(!owner.protected_ready());
             assert!(
                 owner
-                    .step(identity(), NativeWorkerPhase::Registered, None)
+                    .step(
+                        identity(),
+                        NativeWorkerPhase::Registered,
+                        None,
+                        test_deadline()
+                    )
                     .is_err()
             );
             assert_eq!(
@@ -289,10 +324,15 @@ mod tests {
     fn expiry_retains_raw_observation_but_only_confirmed_release_permits_protected() {
         let (mut owner, _) = exchange(true, true, false);
         owner
-            .step(identity(), NativeWorkerPhase::Registered, None)
+            .step(
+                identity(),
+                NativeWorkerPhase::Registered,
+                None,
+                test_deadline(),
+            )
             .unwrap();
         assert_eq!(
-            owner.step(identity(), measured(), None),
+            owner.step(identity(), measured(), None, test_deadline()),
             Ok(NativeWorkerInstruction::ObserveProtected)
         );
         assert!(owner.protected_ready());
@@ -312,21 +352,41 @@ mod tests {
         let mut reused = identity();
         reused.thread_start_ticks += 1;
         assert_eq!(
-            owner.step(reused, NativeWorkerPhase::Registered, None),
+            owner.step(reused, NativeWorkerPhase::Registered, None, test_deadline()),
             Err(DiagnosticError::WrongProcess)
         );
         assert!(calls.lock().unwrap().is_empty());
-        assert!(owner.step(identity(), measured(), None).is_err());
+        assert!(
+            owner
+                .step(identity(), measured(), None, test_deadline())
+                .is_err()
+        );
         owner
-            .step(identity(), NativeWorkerPhase::Registered, None)
+            .step(
+                identity(),
+                NativeWorkerPhase::Registered,
+                None,
+                test_deadline(),
+            )
             .unwrap();
         assert!(
             owner
-                .step(identity(), NativeWorkerPhase::Registered, None)
+                .step(
+                    identity(),
+                    NativeWorkerPhase::Registered,
+                    None,
+                    test_deadline()
+                )
                 .is_err()
         );
-        owner.step(identity(), measured(), None).unwrap();
-        assert!(owner.step(identity(), measured(), None).is_err());
+        owner
+            .step(identity(), measured(), None, test_deadline())
+            .unwrap();
+        assert!(
+            owner
+                .step(identity(), measured(), None, test_deadline())
+                .is_err()
+        );
         assert_eq!(*calls.lock().unwrap(), ["activate", "finish"]);
         assert!(matches!(owner.receipt(), NativeRawReceipt::Paired { .. }));
     }

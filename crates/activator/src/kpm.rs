@@ -490,6 +490,70 @@ impl CoreKpm {
         }
     }
 
+    /// The isolated Linux guest tests the same keyed ctl0 calls as Android.
+    #[cfg(feature = "fixture-oracle")]
+    pub fn connect_qemu(key: &str, lock_path: &Path) -> Result<Self> {
+        if !cfg!(all(target_os = "linux", target_arch = "aarch64"))
+            || !fs::read_to_string("/proc/cmdline")?
+                .split_whitespace()
+                .any(|arg| arg == "vpnhide_fixture_oracle=1")
+        {
+            return Err("KernelPatch oracle requires the isolated ARM64 QEMU boot".into());
+        }
+        Ok(Self {
+            client: KpmClient::ApatchSupercall {
+                key: key.into(),
+                style: apatch_probe(key)?,
+            },
+            lock_path: lock_path.to_owned(),
+        })
+    }
+
+    #[cfg(feature = "fixture-oracle")]
+    pub fn verify_qemu_resident(&self) -> Result<()> {
+        let KpmClient::ApatchSupercall { key, style } = &self.client else {
+            return Err("resident oracle requires the keyed QEMU transport".into());
+        };
+        let _lock = KpmCtlLock::acquire_at(&self.lock_path, true)?;
+        let key = CString::new(key.as_str())?;
+        let name = CString::new(KPM_NAME)?;
+        const KPM_UNLOAD: i64 = 0x1021;
+        let rc = unsafe {
+            syscall(
+                APATCH_SUPERCALL_NR as c_long,
+                key.as_ptr(),
+                supercall_cmd(*style, KPM_UNLOAD),
+                name.as_ptr(),
+                0 as c_long,
+            )
+        };
+        if rc != -1 || io::Error::last_os_error().raw_os_error() != Some(libc::EBUSY) {
+            return Err("KernelPatch did not pin the RAW provider".into());
+        }
+        Ok(())
+    }
+
+    pub fn diagnostic_raw_supported(&self) -> Result<bool> {
+        let _lock = KpmCtlLock::acquire_at(&self.lock_path, true)?;
+        let text = self.client.ctl0_read_raw("vpnhide 1 status")?;
+        let status = vpnhide_protocol::parse_status_fields(text.as_bytes())
+            .and_then(|fields| fields.complete())
+            .ok_or("invalid KPM RAW capability status")?;
+        if !text.ends_with('\n')
+            || status.backend != vpnhide_protocol::hook_ids::Backend::Kpm as u32
+        {
+            return Err("unverified KPM RAW capability status".into());
+        }
+        Ok(text.lines().any(|line| line == "raw 0x3"))
+    }
+
+    /// A RAW request uses the already authenticated ctl0 transport and the
+    /// same lock as config/telemetry. The module must attest runtime support.
+    pub fn diagnostic_raw(&self, wire: &str) -> Result<String> {
+        let _lock = KpmCtlLock::acquire_at(&self.lock_path, true)?;
+        self.client.ctl0_read_raw(wire)
+    }
+
     /// Detailed status for callers that require a compatible control endpoint.
     pub fn status(&self) -> Result<Option<vpnhide_protocol::Status>> {
         let _lock = KpmCtlLock::acquire_at(&self.lock_path, true)?;

@@ -123,7 +123,7 @@ pub fn worker(name: &str) -> Result<(), Box<dyn std::error::Error>> {
         &mut writer,
         &serde_json::to_string(&vpnhide_checks::route::observe())?,
     )?;
-    for phase in ["closed", "expired"] {
+    for phase in ["renewed", "expired", "automatic"] {
         let next_nonce: u64 = line(&mut reader)?.parse()?;
         vpnhide_checks::diagnostic_raw::register(next_nonce)?;
         say(&mut writer, "registered")?;
@@ -132,6 +132,16 @@ pub fn worker(name: &str) -> Result<(), Box<dyn std::error::Error>> {
             &mut writer,
             &serde_json::to_string(&vpnhide_checks::fixture::interface_ioctl(&name, true))?,
         )?;
+        if phase == "renewed" {
+            require(
+                line(&mut reader)? == "expired",
+                "expected renewal expiry proof",
+            )?;
+            say(
+                &mut writer,
+                &serde_json::to_string(&vpnhide_checks::fixture::interface_ioctl(&name, true))?,
+            )?;
+        }
     }
     Ok(())
 }
@@ -147,7 +157,10 @@ pub struct RawRoutePair {
     pub protected: RouteMeasurement,
     pub other_thread: RouteMeasurement,
 }
-pub fn verify(spec: &NativeFixtureSpec) -> Result<RawRoutePair, Box<dyn std::error::Error>> {
+pub fn verify(
+    spec: &NativeFixtureSpec,
+    kpm: Option<&vpnhide_activator::CoreKpm>,
+) -> Result<RawRoutePair, Box<dyn std::error::Error>> {
     let mut command = Command::new(std::env::current_exe()?);
     command
         .args(["raw-thread-worker", spec.interface.name.as_str()])
@@ -171,9 +184,17 @@ pub fn verify(spec: &NativeFixtureSpec) -> Result<RawRoutePair, Box<dyn std::err
     let mut reader = BufReader::new(child.0.stdout.take().ok_or("child stdout")?);
     let tid: u32 = line(&mut reader)?.parse()?;
     let nonce = 0x0123456789abcdefu64 ^ (u64::from(tid) << 16);
-    let status =
-        vpnhide_core_daemon::activation::read_status(std::path::Path::new("/proc/vpnhide_ctl"))?;
-    let mut lease = RawLease::arm(status.backend, tid, 10000, nonce)?;
+    let arm = |token| match kpm {
+        Some(kpm) => RawLease::arm_kpm_for_oracle(kpm.clone(), tid, 10000, token),
+        None => {
+            let status = vpnhide_core_daemon::activation::read_status(std::path::Path::new(
+                vpnhide_protocol::diagnostic_raw::NODE,
+            ))
+            .map_err(io::Error::other)?;
+            RawLease::arm(status.backend, tid, 10000, token)
+        }
+    };
+    let mut lease = arm(nonce)?;
     say(&mut writer, &nonce.to_string())?;
     require(line(&mut reader)? == "registered", "registration ACK")?;
     lease.activate()?;
@@ -226,53 +247,116 @@ pub fn verify(spec: &NativeFixtureSpec) -> Result<RawRoutePair, Box<dyn std::err
             && matches!(raw.ordinary_mtu, Sample::Value(_)),
         "ordinary objects changed",
     )?;
-    // Last owning FD closes while RAW is ACTIVE, simulating Core destruction.
-    // Then leave a separate active lease open through the fixed kernel TTL.
-    require(
-        RawLease::arm(status.backend, tid, 10000, nonce).is_err(),
-        "nonce resurrected",
-    )?;
-    for (phase, token) in [("closed", nonce + 1), ("expired", nonce + 2)] {
-        let mut owner = RawLease::arm(status.backend, tid, 10000, token)?;
+    require(arm(nonce).is_err(), "nonce resurrected")?;
+    let window =
+        std::time::Duration::from_millis(u64::from(vpnhide_protocol::diagnostic_raw::MAX_LEASE_MS));
+    for (phase, token) in [
+        ("renewed", nonce + 1),
+        ("expired", nonce + 2),
+        ("automatic", nonce + 3),
+    ] {
+        let mut owner = arm(token)?;
         say(&mut writer, &token.to_string())?;
         require(
             line(&mut reader)? == "registered",
             "cleanup registration ACK",
         )?;
         owner.activate()?;
-        if phase == "closed" {
-            owner.close_without_revoke_for_oracle();
+        if phase == "automatic" {
+            owner.maintain_for_oracle(child.0.id())?;
+            std::thread::sleep(window + window / 4);
             say(&mut writer, phase)?;
-            let restored: Sample<u32> = serde_json::from_str(&line(&mut reader)?)?;
+            let visible: Sample<u32> = serde_json::from_str(&line(&mut reader)?)?;
             require(
-                restored == Sample::Error(ProbeError::Errno(libc::ENODEV)),
-                "active FD close did not revoke",
+                visible == Sample::Value(spec.mtu),
+                "Core keepalive did not cover the slow probe",
             )?;
-        } else {
-            std::thread::sleep(std::time::Duration::from_millis(
-                u64::from(vpnhide_protocol::diagnostic_raw::MAX_LEASE_MS) + 25,
-            ));
-            // Observe BEFORE any root readback, revoke or FD close. The hot
-            // path must reject the expired identity on its own.
-            say(&mut writer, phase)?;
-            let restored: Sample<u32> = serde_json::from_str(&line(&mut reader)?)?;
-            require(
-                restored == Sample::Error(ProbeError::Errno(libc::ENODEV)),
-                "expired hot-path RAW remained active",
-            )?;
-            require(
-                !owner.finish()?,
-                "expired lease falsely claims completed RAW proof",
-            )?;
+            require(owner.finish()?, "Core keepalive lost continuous RAW")?;
+            continue;
         }
+        if phase == "renewed" {
+            std::thread::sleep(window / 2);
+            require(owner.renew_for_oracle(1)?.renewal == 1, "renewal ACK")?;
+            std::thread::sleep(window / 2 + std::time::Duration::from_millis(75));
+            say(&mut writer, phase)?;
+            let visible: Sample<u32> = serde_json::from_str(&line(&mut reader)?)?;
+            require(
+                visible == Sample::Value(spec.mtu),
+                "renewed interval expired early",
+            )?;
+            let duplicate = owner.renew_for_oracle(1)?;
+            require(
+                duplicate.remaining_ms < vpnhide_protocol::diagnostic_raw::MAX_LEASE_MS * 3 / 4,
+                "duplicate renewed RAW",
+            )?;
+            std::thread::sleep(std::time::Duration::from_millis(
+                u64::from(duplicate.remaining_ms) + 75,
+            ));
+        } else {
+            std::thread::sleep(window + std::time::Duration::from_millis(75));
+        }
+        // The collector checks expiry before any control readback/revoke.
+        say(&mut writer, "expired")?;
+        let restored: Sample<u32> = serde_json::from_str(&line(&mut reader)?)?;
+        require(
+            restored == Sample::Error(ProbeError::Errno(libc::ENODEV)),
+            "expired RAW remained active",
+        )?;
+        require(owner.renew_for_oracle(2).is_err(), "expired grant renewed")?;
+        require(
+            !owner.finish()?,
+            "expired lease falsely claims completed RAW proof",
+        )?;
     }
     require(child.0.wait()?.success(), "RAW collector failed")?;
     println!(
-        "RAW_THREAD_ORACLE=PASS same_thread_raw=1 same_uid_other_thread_protected=1 revoke=1 ordinary_preserved=1 active_close=1 ttl_expiry=1 no_nonce_replay=1"
+        "RAW_THREAD_ORACLE=PASS same_thread_raw=1 same_uid_other_thread_protected=1 revoke=1 ordinary_preserved=1 renewal=1 automatic_keepalive=1 duplicate_does_not_extend=1 ttl_expiry=1 no_nonce_replay=1"
     );
     Ok(RawRoutePair {
         raw: raw_routes,
         protected: protected_routes,
         other_thread,
     })
+}
+
+pub fn verify_kpm(
+    spec: &NativeFixtureSpec,
+    test_key: &str,
+    supported: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::path::Path;
+    use vpnhide_protocol::diagnostic_raw::{Command, Error, Snapshot};
+    let kpm = vpnhide_activator::CoreKpm::connect_qemu(test_key, Path::new("/tmp/kpm-oracle.lock"))
+        .map_err(io::Error::other)?;
+    require(
+        kpm.diagnostic_raw_supported().map_err(io::Error::other)? == supported,
+        "KPM RAW capability mismatch",
+    )?;
+    if !supported {
+        let status = kpm
+            .diagnostic_raw(&Command::Status.encode()?)
+            .map_err(io::Error::other)?;
+        require(
+            Snapshot::parse(status.as_bytes()) == Err(Error::Unsupported),
+            "unguarded runtime enabled RAW",
+        )?;
+        println!("KPM_RAW_UNSUPPORTED=PASS");
+        return Ok(());
+    }
+    kpm.configure_once(
+        Path::new("/proc/vpnhide_ctl"),
+        &vpnhide_protocol::format_config(
+            false,
+            0,
+            &[vpnhide_protocol::Target {
+                uid: 10000,
+                hookmask: vpnhide_protocol::hook_ids::KERNEL_HOOK_MASK
+                    | vpnhide_protocol::hook_ids::KMOD_HOOK_MASK,
+            }],
+        ),
+    )?;
+    kpm.verify_qemu_resident().map_err(io::Error::other)?;
+    verify(spec, Some(&kpm))?;
+    println!("KPM_RAW_UNLOAD_REFUSED=PASS");
+    Ok(())
 }

@@ -48,7 +48,8 @@ struct vpnhide_diag_scope {
 	void *identity;
 	unsigned int tid, uid;
 	enum vpnhide_diag_phase phase;
-	unsigned long long nonce, deadline, duration;
+	unsigned long long nonce, deadline, duration, hard_deadline;
+	unsigned int renewal;
 	/* Immutable after initialization. Root adapter supplies the wire limit. */
 	unsigned long long max_lease;
 };
@@ -56,6 +57,7 @@ struct vpnhide_diag_snapshot {
 	enum vpnhide_diag_phase phase;
 	unsigned int tid, uid;
 	unsigned long long nonce, remaining;
+	unsigned int renewal;
 };
 static inline int vpnhide_diag_ops_valid(const struct vpnhide_diag_ops *ops)
 {
@@ -80,7 +82,8 @@ static inline void *vpnhide_diag_clear(struct vpnhide_diag_scope *scope)
 
 	__atomic_store_n(&scope->identity, 0, __ATOMIC_RELAXED);
 	scope->tid = scope->uid = 0;
-	scope->deadline = scope->duration = 0;
+	scope->deadline = scope->duration = scope->hard_deadline = 0;
+	scope->renewal = 0;
 	scope->phase = VPNHIDE_DIAG_RELEASED;
 	/* Keep the nonce: replay must not resurrect a released grant. */
 	return old;
@@ -112,7 +115,7 @@ static inline enum vpnhide_diag_result
 vpnhide_diag_arm(struct vpnhide_diag_scope *scope,
 		 const struct vpnhide_diag_ops *ops, unsigned int tid,
 		 unsigned int uid, unsigned long long nonce,
-		 unsigned long long duration)
+		 unsigned long long duration, unsigned long long previous)
 {
 	void *old = 0;
 	unsigned long long now;
@@ -133,6 +136,8 @@ vpnhide_diag_arm(struct vpnhide_diag_scope *scope,
 		    now >= scope->deadline || scope->tid != tid ||
 		    scope->uid != uid || scope->duration != duration)
 			result = VPNHIDE_DIAG_STALE;
+	} else if (previous != scope->nonce) {
+		result = VPNHIDE_DIAG_STALE;
 	} else if (scope->phase != VPNHIDE_DIAG_RELEASED &&
 		   now < scope->deadline) {
 		result = VPNHIDE_DIAG_BUSY;
@@ -159,7 +164,7 @@ vpnhide_diag_register(struct vpnhide_diag_scope *scope,
 	void *identity;
 	enum vpnhide_diag_result result = VPNHIDE_DIAG_OK;
 
-	if (!vpnhide_diag_ops_valid(ops))
+	if (!vpnhide_diag_ops_valid(ops) || !scope->max_lease)
 		return VPNHIDE_DIAG_UNAVAILABLE;
 	if (!vpnhide_diag_try_lock(scope))
 		return VPNHIDE_DIAG_BUSY;
@@ -194,12 +199,12 @@ vpnhide_diag_register(struct vpnhide_diag_scope *scope,
 static inline enum vpnhide_diag_result
 vpnhide_diag_activate(struct vpnhide_diag_scope *scope,
 		      const struct vpnhide_diag_ops *ops,
-		      unsigned long long nonce)
+		      unsigned long long nonce, unsigned long long max_total)
 {
 	unsigned long long now;
 	enum vpnhide_diag_result result = VPNHIDE_DIAG_OK;
 
-	if (!vpnhide_diag_ops_valid(ops))
+	if (!vpnhide_diag_ops_valid(ops) || !scope->max_lease)
 		return VPNHIDE_DIAG_UNAVAILABLE;
 	if (!vpnhide_diag_try_lock(scope))
 		return VPNHIDE_DIAG_BUSY;
@@ -208,14 +213,46 @@ vpnhide_diag_activate(struct vpnhide_diag_scope *scope,
 	    now >= scope->deadline) {
 		result = VPNHIDE_DIAG_STALE;
 	} else if (scope->phase == VPNHIDE_DIAG_REGISTERED) {
-		if (scope->duration > ~0ULL - now) {
+		if (scope->duration > max_total || max_total > ~0ULL - now) {
 			result = VPNHIDE_DIAG_INVALID;
 		} else {
+			scope->hard_deadline = now + max_total;
 			scope->deadline = now + scope->duration;
 			scope->phase = VPNHIDE_DIAG_ACTIVE;
 		}
 	} else if (scope->phase != VPNHIDE_DIAG_ACTIVE) {
 		result = VPNHIDE_DIAG_STALE;
+	}
+	vpnhide_diag_unlock(scope);
+	return result;
+}
+/* Only a new sequence can extend a live grant. An expired grant stays expired. */
+static inline enum vpnhide_diag_result
+vpnhide_diag_renew(struct vpnhide_diag_scope *scope,
+		   const struct vpnhide_diag_ops *ops, unsigned long long nonce,
+		   unsigned int sequence)
+{
+	unsigned long long now, window;
+	enum vpnhide_diag_result result = VPNHIDE_DIAG_OK;
+
+	if (!vpnhide_diag_ops_valid(ops) || !scope->max_lease)
+		return VPNHIDE_DIAG_UNAVAILABLE;
+	if (!vpnhide_diag_try_lock(scope))
+		return VPNHIDE_DIAG_BUSY;
+	now = ops->now(ops->context);
+	if (!nonce || nonce != scope->nonce || !sequence ||
+	    scope->phase != VPNHIDE_DIAG_ACTIVE || now >= scope->deadline) {
+		result = VPNHIDE_DIAG_STALE;
+	} else if (sequence != scope->renewal) {
+		if (sequence - 1 != scope->renewal) {
+			result = VPNHIDE_DIAG_STALE;
+		} else {
+			window = scope->hard_deadline - now;
+			if (window > scope->duration)
+				window = scope->duration;
+			scope->deadline = now + window;
+			scope->renewal = sequence;
+		}
 	}
 	vpnhide_diag_unlock(scope);
 	return result;
@@ -227,7 +264,7 @@ vpnhide_diag_revoke(struct vpnhide_diag_scope *scope,
 {
 	void *old;
 
-	if (!vpnhide_diag_ops_valid(ops))
+	if (!vpnhide_diag_ops_valid(ops) || !scope->max_lease)
 		return VPNHIDE_DIAG_UNAVAILABLE;
 	if (!nonce)
 		return VPNHIDE_DIAG_INVALID;
@@ -252,7 +289,7 @@ vpnhide_diag_snapshot(struct vpnhide_diag_scope *scope,
 	void *old = 0;
 	unsigned long long now;
 
-	if (!vpnhide_diag_ops_valid(ops))
+	if (!vpnhide_diag_ops_valid(ops) || !scope->max_lease)
 		return VPNHIDE_DIAG_UNAVAILABLE;
 	if (!vpnhide_diag_try_lock(scope))
 		return VPNHIDE_DIAG_BUSY;
@@ -263,6 +300,7 @@ vpnhide_diag_snapshot(struct vpnhide_diag_scope *scope,
 	snapshot->tid = scope->tid;
 	snapshot->uid = scope->uid;
 	snapshot->nonce = scope->nonce;
+	snapshot->renewal = scope->renewal;
 	snapshot->remaining = scope->phase != VPNHIDE_DIAG_RELEASED ?
 				      scope->deadline - now :
 				      0;

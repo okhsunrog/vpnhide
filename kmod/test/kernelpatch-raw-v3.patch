@@ -1,0 +1,266 @@
+--- a/kernel/patch/include/module.h
++++ b/kernel/patch/include/module.h
+@@ -35,7 +35,8 @@
+         const char *base, *name, *version, *license, *author, *description;
+     } info;
+
+-    char *args, *ctl_args;
++    char *args;
++    int raw_resident;
+
+     mod_initcall_t *init;
+     mod_ctl0call_t *ctl0;
+--- a/kernel/patch/module/module.c
++++ b/kernel/patch/module/module.c
+@@ -12,6 +12,7 @@
+ #include <kallsyms.h>
+ #include <cache.h>
+ #include <common.h>
++#include <preset.h>
+ #include <linux/fs.h>
+ #include <uapi/linux/fs.h>
+ #include <hotpatch.h>
+@@ -393,7 +394,22 @@
+ }
+
+ struct module modules = { 0 };
+-static spinlock_t module_lock;
++/* Ownership gate, not a spinlock: a control handler may fault on copy_to_user.
++ * Contenders report BUSY and can retry after the owning syscall returns.
++ */
++static unsigned int module_gate;
++
++static int try_module_gate(void)
++{
++    unsigned int expected = 0;
++    return __atomic_compare_exchange_n(&module_gate, &expected, 1, 0,
++                                       __ATOMIC_ACQUIRE, __ATOMIC_RELAXED);
++}
++
++static void release_module_gate(void)
++{
++    __atomic_store_n(&module_gate, 0, __ATOMIC_RELEASE);
++}
+
+ long load_module(const void *data, int len, const char *args, const char *event, void *__user reserved)
+ {
+@@ -401,9 +417,12 @@
+     struct load_info *info = &load_info;
+     long rc = 0;
+
++    if (!try_module_gate()) return -EBUSY;
++
+     if ((rc = elf_header_check(info))) goto out;
+     if ((rc = setup_load_info(info))) goto out;
+
++
+     if (find_module(info->info.name)) {
+         logkfd("%s exist\n", info->info.name);
+         rc = -EEXIST;
+@@ -411,7 +430,10 @@
+     }
+
+     struct module *mod = (struct module *)vmalloc(sizeof(struct module));
+-    if (!mod) return -ENOMEM;
++    if (!mod) {
++        rc = -ENOMEM;
++        goto out;
++    }
+     memset(mod, 0, sizeof(struct module));
+
+     if (args) {
+@@ -432,7 +454,11 @@
+
+     flush_icache_all();
+
+-    rc = (*mod->init)(mod->args, event, reserved);
++    mod->raw_resident = event && !strcmp(event, EXTRA_EVENT_KPM_DEFAULT) &&
++                        !strcmp(info->info.name, "vpnhide");
++    rc = (*mod->init)(mod->args,
++                      mod->raw_resident ? "vpnhide-resident-raw-v1" : event,
++                      reserved);
+
+     if (!rc) {
+         logkfi("[%s] succeed with [%s] \n", mod->info.name, args);
+@@ -449,16 +475,15 @@
+ free1:
+     kvfree(mod);
+ out:
++    release_module_gate();
+     return rc;
+ }
+-
+-// todo: lock
+ long unload_module(const char *name, void *__user reserved)
+ {
+     if (!name) return -EINVAL;
+     logkfe("name: %s\n", name);
+
+-    rcu_read_lock();
++    if (!try_module_gate()) return -EBUSY;
+     long rc = 0;
+
+     struct module *mod = find_module(name);
+@@ -466,11 +491,14 @@
+         rc = -ENOENT;
+         goto out;
+     }
++    if (mod->raw_resident) {
++        rc = -EBUSY;
++        goto out;
++    }
+     list_del(&mod->list);
+     rc = (*mod->exit)(reserved);
+
+     if (mod->args) kvfree(mod->args);
+-    if (mod->ctl_args) kvfree(mod->ctl_args);
+
+     kp_free_exec(mod->start);
+     kvfree(mod);
+@@ -478,7 +506,7 @@
+     logkfi("name: %s, rc: %d\n", name, rc);
+
+ out:
+-    rcu_read_unlock();
++    release_module_gate();
+     return rc;
+ }
+
+@@ -531,7 +559,7 @@
+     logkfi("name %s, args: %s\n", name, ctl_args);
+
+     long rc = 0;
+-    rcu_read_lock();
++    if (!try_module_gate()) return -EBUSY;
+
+     struct module *mod = find_module(name);
+     if (!mod) {
+@@ -539,27 +567,20 @@
+         goto out;
+     }
+
+-    if (!*mod->ctl0) {
++    if (!mod->ctl0 || !*mod->ctl0) {
+         logkfe("no ctl0\n");
+         rc = -ENOSYS;
+         goto out;
+     }
+
+-    if (mod->ctl_args) kvfree(mod->ctl_args);
+-
+-    mod->ctl_args = vmalloc(args_len + 1);
+-    if (!mod->ctl_args) {
+-        rc = -ENOMEM;
+-        goto out;
+-    }
+-
+-    strcpy(mod->ctl_args, ctl_args);
+-
+-    rc = (*mod->ctl0)(mod->ctl_args, out_msg, outlen);
++    /* The caller already owns this immutable buffer for the duration
++     * of the synchronous call. Never move it to shared module storage.
++     */
++    rc = (*mod->ctl0)(ctl_args, out_msg, outlen);
+
+     logkfi("name: %s, rc: %d\n", name, rc);
+ out:
+-    rcu_read_unlock();
++    release_module_gate();
+     return rc;
+ }
+
+@@ -567,7 +588,7 @@
+ {
+     logkfi("name %s, a1: %llx, a2: %llx, a3: %llx\n", name, a1, a2, a3);
+     long rc = 0;
+-    rcu_read_lock();
++    if (!try_module_gate()) return -EBUSY;
+
+     struct module *mod = find_module(name);
+     if (!mod) {
+@@ -575,7 +596,7 @@
+         goto out;
+     }
+
+-    if (!*mod->ctl1) {
++    if (!mod->ctl1 || !*mod->ctl1) {
+         logkfe("no ctl1\n");
+         rc = -ENOSYS;
+         goto out;
+@@ -585,7 +606,7 @@
+
+     logkfi("name: %s, rc: %d\n", name, rc);
+ out:
+-    rcu_read_unlock();
++    release_module_gate();
+     return rc;
+ }
+
+@@ -603,7 +624,7 @@
+
+ int get_module_nums()
+ {
+-    rcu_read_lock();
++    if (!try_module_gate()) return -EBUSY;
+
+     struct module *pos;
+     int n = 0;
+@@ -611,7 +632,7 @@
+     {
+         n++;
+     }
+-    rcu_read_unlock();
++    release_module_gate();
+
+     logkfd("%d\n", n);
+     return n;
+@@ -619,7 +640,7 @@
+
+ int list_modules(char *out_names, int size)
+ {
+-    rcu_read_lock();
++    if (!try_module_gate()) return -EBUSY;
+
+     struct module *pos;
+     int off = 0;
+@@ -629,17 +650,20 @@
+     }
+     if (off > 0) out_names[off - 1] = '\0';
+
+-    rcu_read_unlock();
++    release_module_gate();
+     return off;
+ }
+
+ int get_module_info(const char *name, char *out_info, int size)
+ {
+     if (size <= 0) return 0;
+-    rcu_read_lock();
++    if (!try_module_gate()) return -EBUSY;
+
+     struct module *mod = find_module(name);
+-    if (!mod) return -ENOENT;
++    if (!mod) {
++        release_module_gate();
++        return -ENOENT;
++    }
+
+     int sz = snprintf(out_info, size - 1,
+                       "name=%s\n"
+@@ -654,12 +678,12 @@
+     if (sz > 0) out_info[sz - 1] = '\0';
+     logkfd("%s", out_info);
+
+-    rcu_read_unlock();
++    release_module_gate();
+     return sz;
+ }
+
+ void module_init()
+ {
+     INIT_LIST_HEAD(&modules.list);
+-    spin_lock_init(&module_lock);
+-}
+\ No newline at end of file
++    module_gate = 0;
++}

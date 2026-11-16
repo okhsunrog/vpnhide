@@ -140,7 +140,12 @@ impl Coordinator {
                 .native
                 .as_mut()
                 .ok_or(DiagnosticError::StaleSession)?
-                .step(identity, request.phase, task.routes.as_ref())
+                .step(
+                    identity,
+                    request.phase,
+                    task.routes.as_ref(),
+                    active.deadline,
+                )
         }
     }
 }
