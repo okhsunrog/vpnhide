@@ -6,6 +6,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Handler
+import android.os.SystemClock
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
@@ -17,6 +18,8 @@ import uniffi.vpnhide_core_ffi.CoreCallbackEvent
 import uniffi.vpnhide_core_ffi.CoreCallbackObservation
 import uniffi.vpnhide_core_ffi.CoreCallbackRegistration
 import uniffi.vpnhide_core_ffi.CoreFrameworkTask
+
+private const val LATE_EVENT_WINDOW_MS = 100L
 
 /** Each registration uses the public app API and its own Android callback object. */
 internal suspend fun observeFrameworkCallbacks(
@@ -52,10 +55,11 @@ private suspend fun observeCallback(
         }.isSuccess
     if (!registered) return null
     return try {
-        // Allow the handler to drain the cover/loss sequence after the ordinary control arrives.
+        // Count the window from delivery on the handler, even if the collector is busy with Binder reads.
         withTimeoutOrNull(900) {
-            callback.ordinaryProperties.await()
-            delay(100)
+            val ordinaryAt = callback.ordinaryProperties.await()
+            val elapsed = SystemClock.elapsedRealtime() - ordinaryAt
+            delay((LATE_EVENT_WINDOW_MS - elapsed).coerceAtLeast(0))
             callback.snapshot()
         }
     } finally {
@@ -67,7 +71,7 @@ private class CallbackObservation(
     private val registration: CoreCallbackRegistration,
     private val task: CoreFrameworkTask,
 ) : ConnectivityManager.NetworkCallback() {
-    val ordinaryProperties = CompletableDeferred<Unit>()
+    val ordinaryProperties = CompletableDeferred<Long>()
     private val events = mutableListOf<CoreCallbackEvent>()
     private var vpnTransport = false
     private var vpnProperties = false
@@ -92,7 +96,7 @@ private class CallbackObservation(
         linkProperties: LinkProperties,
     ) {
         vpnProperties = vpnProperties || linkProperties.interfaceName == task.vpnMarker
-        if (network.networkHandle.toULong() != task.vpnHandle) ordinaryProperties.complete(Unit)
+        if (network.networkHandle.toULong() != task.vpnHandle) ordinaryProperties.complete(SystemClock.elapsedRealtime())
     }
 
     private fun record(

@@ -434,6 +434,14 @@ Core requires all three registrations to qualify the group. The worker overlaps
 their independent observation windows within one phase. Each registration has
 its own timeout, late-event window and cleanup before the next phase.
 ConnectivityManager queries run while the callback handler receives events.
+The 100 ms late-event window starts when the handler receives the ordinary
+network properties, including while the collector is processing an API call.
+
+On Pixel 8 Pro with Android 17 and Builtin, the median full-run time in
+settled airplane mode fell from 8.73 s to 5.53 s across the callback, query and
+Ports scheduling changes. Each variant confirmed all 20 groups in nine runs.
+Medians use eight measured runs after one warm-up with the same Core and boot.
+
 The earlier live-network version
 introduced these observations and acknowledgements in RPC38 and framework
 channel version4.
