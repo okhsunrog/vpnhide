@@ -425,8 +425,10 @@ transport and interface marker and the test ordinary event. Protected LISTEN
 must suppress both VPN events. Protected default and REQUEST must rebuild
 AVAILABLE from the ordinary cover and keep it available when only the VPN is
 lost. The following ordinary AVAILABLE must be deduplicated.
-Core requires all three registrations to qualify the group. Android workers
-unregister the callbacks after measurement. The earlier live-network version
+Core requires all three registrations to qualify the group. The worker overlaps
+their independent observation windows within one phase. Each registration has
+its own timeout, late-event window and cleanup before the next phase.
+The earlier live-network version
 introduced these observations and acknowledgements in RPC38 and framework
 channel version4.
 

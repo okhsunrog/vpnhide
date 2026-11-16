@@ -7,6 +7,10 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Handler
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import uniffi.vpnhide_core_ffi.CoreCallbackEvent
@@ -20,34 +24,44 @@ internal suspend fun observeFrameworkCallbacks(
     task: CoreFrameworkTask,
     handler: Handler,
 ): List<CoreCallbackObservation> =
-    buildList {
+    coroutineScope {
         val request = NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build()
-        for (kind in CoreCallbackRegistration.entries) {
-            val callback = CallbackObservation(kind, task)
-            val registered =
-                runCatching {
-                    when (kind) {
-                        CoreCallbackRegistration.LISTEN -> manager.registerNetworkCallback(request, callback, handler)
-                        CoreCallbackRegistration.DEFAULT -> manager.registerDefaultNetworkCallback(callback, handler)
-                        CoreCallbackRegistration.REQUEST -> manager.requestNetwork(request, callback, handler)
-                    }
-                }.isSuccess
-            if (!registered) continue
-            val observed =
-                try {
-                    // The platform sends its original ordinary AVAILABLE after the fixture events.
-                    // Allow the handler to drain the cover/loss sequence before taking the snapshot.
-                    withTimeoutOrNull(900) {
-                        callback.ordinaryProperties.await()
-                        delay(100)
-                        callback.snapshot()
-                    }
-                } finally {
-                    manager.unregisterNetworkCallback(callback)
-                }
-            observed?.let(::add)
-        }
+        // Register in order on the collector thread. Per-registration observation windows can overlap.
+        CoreCallbackRegistration.entries
+            .map { kind ->
+                async(start = CoroutineStart.UNDISPATCHED) { observeCallback(manager, task, handler, request, kind) }
+            }.awaitAll()
+            .filterNotNull()
     }
+
+private suspend fun observeCallback(
+    manager: ConnectivityManager,
+    task: CoreFrameworkTask,
+    handler: Handler,
+    request: NetworkRequest,
+    kind: CoreCallbackRegistration,
+): CoreCallbackObservation? {
+    val callback = CallbackObservation(kind, task)
+    val registered =
+        runCatching {
+            when (kind) {
+                CoreCallbackRegistration.LISTEN -> manager.registerNetworkCallback(request, callback, handler)
+                CoreCallbackRegistration.DEFAULT -> manager.registerDefaultNetworkCallback(callback, handler)
+                CoreCallbackRegistration.REQUEST -> manager.requestNetwork(request, callback, handler)
+            }
+        }.isSuccess
+    if (!registered) return null
+    return try {
+        // Allow the handler to drain the cover/loss sequence after the ordinary control arrives.
+        withTimeoutOrNull(900) {
+            callback.ordinaryProperties.await()
+            delay(100)
+            callback.snapshot()
+        }
+    } finally {
+        manager.unregisterNetworkCallback(callback)
+    }
+}
 
 private class CallbackObservation(
     private val registration: CoreCallbackRegistration,
