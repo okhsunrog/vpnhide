@@ -122,6 +122,11 @@ consumer. The old root-only native finish entry point exists only in the explici
 fixture-oracle build, not as a production fallback. Opening the app still never
 admits a suite.
 
+After reporting the native samples, the Android worker measures Ports and the
+framework fixtures concurrently. Each keeps its own phase order and Core-owned
+cleanup. The worker waits for both collectors before acknowledging completion,
+including when either collector fails.
+
 Required/proven/leaked/unverified, infrastructure failures and cleanup are separate.
 A worker's fresh result does not prove that already-running games consumed a new
 Zygisk generation. Cache identity includes policy, runtime/platform evidence and

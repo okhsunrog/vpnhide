@@ -10,10 +10,14 @@ import android.os.PowerManager
 import android.os.Process
 import dev.okhsunrog.vpnhide.core.CorePaths
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import uniffi.vpnhide_core_ffi.CoreDiagnosticException
 import uniffi.vpnhide_core_ffi.CoreDiagnosticWorkerTask
 import uniffi.vpnhide_core_ffi.CoreException
@@ -92,8 +96,14 @@ class LoaderProbeService : Service() {
                 // Retain native evidence BEFORE Java work: process death during
                 // framework observations must not erase an already measured leak.
                 workerStage("native-report-${task.session}") { core.reportDiagnosticWorker(task, observations) }
-                measurePortsFixture(core, task)
-                measureFrameworkFixture(this, core, task)
+                supervisorScope {
+                    val ports = async(Dispatchers.IO) { measurePortsFixture(core, task) }
+                    val framework = async { measureFrameworkFixture(this@LoaderProbeService, core, task) }
+                    // A failure in one collector must still let the other submit its evidence.
+                    joinAll(ports, framework)
+                    framework.await()
+                    ports.await()
+                }
             } finally {
                 workerStage("finish-${task.session}") { core.finishDiagnosticWorker(task) }
             }
