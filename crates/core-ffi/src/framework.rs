@@ -321,6 +321,44 @@ simple_enum!(
     ProbeUnavailable,
     CleanupUnconfirmed
 );
+simple_enum!(
+    CoreFrameworkEvidencePhase,
+    FrameworkPhase,
+    Prepared,
+    Raw,
+    Protected,
+    Revoked
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum CoreFrameworkFailureScope {
+    Run,
+    NetworkView,
+    Check { check: CoreFrameworkCheck },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CoreFrameworkFailure {
+    pub scope: CoreFrameworkFailureScope,
+    pub phase: Option<CoreFrameworkEvidencePhase>,
+    pub reason: CoreFrameworkControlFailure,
+}
+
+impl From<model::FrameworkFailure> for CoreFrameworkFailure {
+    fn from(v: model::FrameworkFailure) -> Self {
+        Self {
+            scope: match v.scope {
+                model::FrameworkFailureScope::Run => CoreFrameworkFailureScope::Run,
+                model::FrameworkFailureScope::NetworkView => CoreFrameworkFailureScope::NetworkView,
+                model::FrameworkFailureScope::Check(check) => CoreFrameworkFailureScope::Check {
+                    check: check.into(),
+                },
+            },
+            phase: v.phase.map(Into::into),
+            reason: v.reason.into(),
+        }
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreFrameworkTask {
     pub phase: CoreFrameworkPhase,
@@ -368,11 +406,12 @@ pub struct CoreScopedFrameworkResult {
 }
 impl From<model::ScopedFrameworkResult> for CoreScopedFrameworkResult {
     fn from(v: model::ScopedFrameworkResult) -> Self {
+        let controls = v.controls();
         Self {
             attribution: v.attribution.map(Into::into),
             proven: v.proven.into_iter().map(Into::into).collect(),
             leaked: v.leaked.into_iter().map(Into::into).collect(),
-            controls: v.controls.into_iter().map(Into::into).collect(),
+            controls: controls.into_iter().map(Into::into).collect(),
         }
     }
 }

@@ -3,14 +3,21 @@ package dev.okhsunrog.vpnhide.diagnostics
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import uniffi.vpnhide_core_ffi.CoreAddressCheck
+import uniffi.vpnhide_core_ffi.CoreCheckOutcome
 import uniffi.vpnhide_core_ffi.CoreDiagnosticAssessment
 import uniffi.vpnhide_core_ffi.CoreDiagnosticRun
 import uniffi.vpnhide_core_ffi.CoreFilesystemCheck
 import uniffi.vpnhide_core_ffi.CoreFrameworkAttribution
+import uniffi.vpnhide_core_ffi.CoreFrameworkFailureScope
 import uniffi.vpnhide_core_ffi.CoreProcInterfaceCheck
 import uniffi.vpnhide_core_ffi.CoreRouteCheck
 import uniffi.vpnhide_core_ffi.CoreSysInterfaceCheck
+import uniffi.vpnhide_core_ffi.CoreUnverifiedReason
 import uniffi.vpnhide_core_ffi.nativeRawReceiptJson
 import java.util.Locale
 
@@ -104,15 +111,28 @@ internal data class AutonomousFrameworkAttributionInfo(
 @Serializable
 internal data class AutonomousAssessmentInfo(
     val phase: String,
-    val required: List<String>,
-    val proven: List<String>,
-    val leaked: List<String>,
-    val unverified: List<String>,
+    val verdict: String,
+    val checks: List<AutonomousCheckInfo>,
     val nativeControls: List<String>,
     val frameworkControls: List<String>,
     val reuseBlockers: List<String>,
-    val infrastructureDetail: String?,
+    val failure: AutonomousFailureInfo?,
     val cleanupConfirmed: Boolean?,
+)
+
+@Serializable
+internal data class AutonomousCheckInfo(
+    val check: String,
+    val outcome: String,
+    val androidAccessDenied: Boolean,
+    val reason: JsonElement? = null,
+)
+
+@Serializable
+internal data class AutonomousFailureInfo(
+    val stage: String,
+    val kind: String,
+    val detail: String,
 )
 
 internal fun CoreDiagnosticRun.toDiagnosticInfo(): AutonomousRunInfo =
@@ -191,16 +211,84 @@ private fun CoreFrameworkAttribution.toDiagnosticInfo(): AutonomousFrameworkAttr
 internal fun CoreDiagnosticAssessment.toDiagnosticInfo(): AutonomousAssessmentInfo =
     AutonomousAssessmentInfo(
         phase.name.lowercase(Locale.ROOT),
-        required.map { it.name.lowercase(Locale.ROOT) },
-        proven.map { it.name.lowercase(Locale.ROOT) },
-        leaked.map { it.name.lowercase(Locale.ROOT) },
-        unverified.map { it.name.lowercase(Locale.ROOT) },
+        verdict.name.lowercase(Locale.ROOT),
+        checks.map { row ->
+            val outcome = row.outcome
+            val name =
+                when (outcome) {
+                    CoreCheckOutcome.Proven -> "proven"
+                    CoreCheckOutcome.Leaked -> "leaked"
+                    is CoreCheckOutcome.Unverified -> "unverified"
+                }
+            AutonomousCheckInfo(
+                row.check.name.lowercase(Locale.ROOT),
+                name,
+                row.androidAccessDenied,
+                (outcome as? CoreCheckOutcome.Unverified)?.reason?.toDiagnosticInfo(),
+            )
+        },
         nativeControls.map { it.name.lowercase(Locale.ROOT) },
         frameworkControls.map { it.name.lowercase(Locale.ROOT) },
         reuseBlockers.map { it.name.lowercase(Locale.ROOT) },
-        infrastructureDetail,
+        failure?.let { AutonomousFailureInfo(it.stage.name.lowercase(Locale.ROOT), it.kind.name.lowercase(Locale.ROOT), it.detail) },
         cleanupConfirmed,
     )
+
+private fun CoreUnverifiedReason.toDiagnosticInfo(): JsonElement =
+    buildJsonObject {
+        when (val reason = this@toDiagnosticInfo) {
+            CoreUnverifiedReason.AwaitingEvidence -> {
+                put("kind", "awaiting_evidence")
+            }
+
+            CoreUnverifiedReason.EvidenceUnavailable -> {
+                put("kind", "evidence_unavailable")
+            }
+
+            CoreUnverifiedReason.AndroidAccessDenied -> {
+                put("kind", "android_access_denied")
+            }
+
+            is CoreUnverifiedReason.NativeControls -> {
+                put("kind", "native_controls")
+                putJsonArray("controls") { reason.controls.forEach { add(it.name.lowercase(Locale.ROOT)) } }
+            }
+
+            is CoreUnverifiedReason.FrameworkControls -> {
+                put("kind", "framework_controls")
+                putJsonArray("failures") {
+                    for (failure in reason.failures) {
+                        add(
+                            buildJsonObject {
+                                put("reason", failure.reason.name.lowercase(Locale.ROOT))
+                                failure.phase?.let { put("phase", it.name.lowercase(Locale.ROOT)) }
+                                when (val scope = failure.scope) {
+                                    CoreFrameworkFailureScope.Run -> {
+                                        put("scope", "run")
+                                    }
+
+                                    CoreFrameworkFailureScope.NetworkView -> {
+                                        put("scope", "network_view")
+                                    }
+
+                                    is CoreFrameworkFailureScope.Check -> {
+                                        put("scope", "check")
+                                        put("check", scope.check.name.lowercase(Locale.ROOT))
+                                    }
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+
+            is CoreUnverifiedReason.Interrupted -> {
+                put("kind", "interrupted")
+                put("stage", reason.stage.name.lowercase(Locale.ROOT))
+                put("failure", reason.failure.name.lowercase(Locale.ROOT))
+            }
+        }
+    }
 
 internal fun AutonomousDiagnosticSnapshot.toDiagnosticInfo(): AutonomousDiagnosticInfo =
     AutonomousDiagnosticInfo(
@@ -234,5 +322,5 @@ internal fun AutonomousDiagnosticSnapshot.toDiagnosticInfo(): AutonomousDiagnost
             ?.map { it.name.lowercase(Locale.ROOT) }
             .orEmpty(),
         run = run,
-        assessment = assessment,
+        assessment = assessment?.toDiagnosticInfo(),
     )

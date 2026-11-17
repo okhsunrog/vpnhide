@@ -250,10 +250,11 @@ pub struct CoreScopedAddressResult {
 }
 impl From<model::ScopedAddressResult> for CoreScopedAddressResult {
     fn from(v: model::ScopedAddressResult) -> Self {
+        let controls = v.controls();
         Self {
             proven: v.proven.into_iter().map(Into::into).collect(),
             leaked: v.leaked.into_iter().map(Into::into).collect(),
-            controls: v.controls.into_iter().map(Into::into).collect(),
+            controls: controls.into_iter().map(Into::into).collect(),
         }
     }
 }

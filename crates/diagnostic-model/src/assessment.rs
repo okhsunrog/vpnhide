@@ -5,16 +5,19 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ControlFailure, DIAGNOSTIC_CONTRACT, DiagnosticOutcome, DiagnosticPlan, DiagnosticRun,
-    NativeCheck, RequiredCheck, ScopedNativeResult,
-    framework::{FrameworkCheck, FrameworkControlFailure},
+    ControlFailure, DIAGNOSTIC_CONTRACT, DiagnosticFailure, DiagnosticOutcome, DiagnosticPlan,
+    DiagnosticRun, DiagnosticStage, NativeCheck, RequiredCheck, ScopedNativeResult,
+    framework::{
+        FrameworkCheck, FrameworkControlFailure, FrameworkFailure, FrameworkFailureScope,
+        ScopedFrameworkResult,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AssessmentPhase {
     Running,
-    Incomplete,
+    Finished,
     Infrastructure,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,15 +34,86 @@ pub enum ReuseBlocker {
 #[serde(deny_unknown_fields)]
 pub struct DiagnosticAssessment {
     pub phase: AssessmentPhase,
-    pub required: Vec<RequiredCheck>,
-    pub proven: Vec<RequiredCheck>,
-    pub leaked: Vec<RequiredCheck>,
-    pub unverified: Vec<RequiredCheck>,
+    pub checks: Vec<CheckAssessment>,
     pub native_controls: Vec<ControlFailure>,
     pub framework_controls: Vec<FrameworkControlFailure>,
     pub reuse_blockers: Vec<ReuseBlocker>,
-    pub infrastructure_detail: Option<String>,
+    pub failure: Option<DiagnosticFailure>,
     pub cleanup_confirmed: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CheckAssessment {
+    pub check: RequiredCheck,
+    pub outcome: CheckOutcome,
+    pub android_access_denied: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum CheckOutcome {
+    Proven,
+    Leaked,
+    Unverified { reason: UnverifiedReason },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum UnverifiedReason {
+    AwaitingEvidence,
+    EvidenceUnavailable,
+    AndroidAccessDenied,
+    NativeControls {
+        controls: Vec<ControlFailure>,
+    },
+    FrameworkControls {
+        failures: Vec<FrameworkFailure>,
+    },
+    Interrupted {
+        stage: DiagnosticStage,
+        failure: crate::DiagnosticFailureKind,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticVerdict {
+    Proven,
+    Leaked,
+    Unverified,
+}
+
+impl DiagnosticVerdict {
+    pub fn for_checks<'a>(checks: impl IntoIterator<Item = &'a CheckAssessment>) -> Self {
+        let mut any = false;
+        let mut all_proven = true;
+        for row in checks {
+            any = true;
+            match row.outcome {
+                CheckOutcome::Leaked => return Self::Leaked,
+                CheckOutcome::Proven => {}
+                CheckOutcome::Unverified { .. } => all_proven = false,
+            }
+        }
+        if any && all_proven {
+            Self::Proven
+        } else {
+            Self::Unverified
+        }
+    }
+}
+
+impl DiagnosticAssessment {
+    pub fn verdict(&self) -> DiagnosticVerdict {
+        DiagnosticVerdict::for_checks(&self.checks)
+    }
+
+    pub fn leaked(&self) -> impl Iterator<Item = RequiredCheck> + '_ {
+        self.checks
+            .iter()
+            .filter_map(|row| matches!(row.outcome, CheckOutcome::Leaked).then_some(row.check))
+    }
 }
 fn native(check: NativeCheck) -> RequiredCheck {
     match check {
@@ -60,50 +134,90 @@ fn address(check: crate::AddressCheck) -> RequiredCheck {
         _ => RequiredCheck::IoctlAddresses,
     }
 }
+fn framework_check(check: FrameworkCheck) -> RequiredCheck {
+    match check {
+        FrameworkCheck::Networks => RequiredCheck::FrameworkNetworks,
+        FrameworkCheck::Capabilities => RequiredCheck::FrameworkCapabilities,
+        FrameworkCheck::LinkProperties => RequiredCheck::FrameworkLinkProperties,
+        FrameworkCheck::DefaultNetwork => RequiredCheck::FrameworkDefaultNetwork,
+        FrameworkCheck::Callbacks => RequiredCheck::FrameworkCallbacks,
+        FrameworkCheck::PendingIntent => RequiredCheck::FrameworkPendingIntent,
+        FrameworkCheck::PackageVisibility => RequiredCheck::PackageVisibility,
+        FrameworkCheck::LegacyTypeVpn | FrameworkCheck::LegacyEnumeration => {
+            RequiredCheck::FrameworkLegacyInfo
+        }
+    }
+}
+
 pub(crate) fn framework_checks(
     checks: &[FrameworkCheck],
     require_both_legacy: bool,
 ) -> BTreeSet<RequiredCheck> {
-    let mut result = BTreeSet::new();
-    for check in checks {
-        match check {
-            FrameworkCheck::Networks => {
-                result.insert(RequiredCheck::FrameworkNetworks);
+    let legacy_complete = checks.contains(&FrameworkCheck::LegacyTypeVpn)
+        && checks.contains(&FrameworkCheck::LegacyEnumeration);
+    checks
+        .iter()
+        .copied()
+        .map(framework_check)
+        .filter(|check| {
+            *check != RequiredCheck::FrameworkLegacyInfo || !require_both_legacy || legacy_complete
+        })
+        .collect()
+}
+
+fn network_view(check: RequiredCheck) -> bool {
+    matches!(
+        check,
+        RequiredCheck::FrameworkNetworks
+            | RequiredCheck::FrameworkCapabilities
+            | RequiredCheck::FrameworkLinkProperties
+    )
+}
+
+fn framework_failures(
+    result: &ScopedFrameworkResult,
+    check: RequiredCheck,
+) -> Vec<FrameworkFailure> {
+    result
+        .failures
+        .iter()
+        .copied()
+        .filter(|failure| match failure.scope {
+            FrameworkFailureScope::Run => true,
+            FrameworkFailureScope::NetworkView => network_view(check),
+            FrameworkFailureScope::Check(source) => {
+                let source = framework_check(source);
+                source == check || (network_view(source) && network_view(check))
             }
-            FrameworkCheck::Capabilities => {
-                result.insert(RequiredCheck::FrameworkCapabilities);
-            }
-            FrameworkCheck::LinkProperties => {
-                result.insert(RequiredCheck::FrameworkLinkProperties);
-            }
-            FrameworkCheck::DefaultNetwork => {
-                result.insert(RequiredCheck::FrameworkDefaultNetwork);
-            }
-            FrameworkCheck::Callbacks => {
-                result.insert(RequiredCheck::FrameworkCallbacks);
-            }
-            FrameworkCheck::PendingIntent => {
-                result.insert(RequiredCheck::FrameworkPendingIntent);
-            }
-            FrameworkCheck::PackageVisibility => {
-                result.insert(RequiredCheck::PackageVisibility);
-            }
-            FrameworkCheck::LegacyTypeVpn | FrameworkCheck::LegacyEnumeration => {
-                if !require_both_legacy
-                    || [
-                        FrameworkCheck::LegacyTypeVpn,
-                        FrameworkCheck::LegacyEnumeration,
-                    ]
-                    .iter()
-                    .all(|c| checks.contains(c))
-                {
-                    result.insert(RequiredCheck::FrameworkLegacyInfo);
-                }
-            }
+        })
+        .collect()
+}
+
+fn is_framework(check: RequiredCheck) -> bool {
+    use RequiredCheck::*;
+    match check {
+        FrameworkNetworks
+        | FrameworkDefaultNetwork
+        | FrameworkCapabilities
+        | FrameworkLinkProperties
+        | FrameworkLegacyInfo
+        | FrameworkCallbacks
+        | FrameworkPendingIntent
+        | PackageVisibility => true,
+        IoctlFlags | IoctlMtu | Getifaddrs | NetlinkLinks | IoctlAddresses | BindToDevice
+        | NetlinkAddresses | NetlinkRoutes | NetlinkRules | ProcRoutes | ProcInterfaces
+        | SysInterfaces | Filesystem | Ports => false,
+    }
+}
+
+fn add_controls(controls: &mut Vec<ControlFailure>, extra: &[ControlFailure]) {
+    for &control in extra {
+        if !controls.contains(&control) {
+            controls.push(control);
         }
     }
-    result
 }
+
 impl DiagnosticRun {
     pub fn assessment(&self) -> DiagnosticAssessment {
         use RequiredCheck::*;
@@ -129,25 +243,27 @@ impl DiagnosticRun {
         if self.plan.contract != DIAGNOSTIC_CONTRACT || self.plan.required != required {
             reuse_blockers.push(ReuseBlocker::UnsupportedPlan);
         }
-        let (phase, result, infrastructure_detail, cleanup_confirmed) = match &self.outcome {
+        let (phase, result, failure, cleanup_confirmed) = match &self.outcome {
             DiagnosticOutcome::Running => (AssessmentPhase::Running, None, None, None),
-            DiagnosticOutcome::Incomplete { native, .. } => {
-                (AssessmentPhase::Incomplete, Some(native), None, None)
+            DiagnosticOutcome::Finished { native, .. } => {
+                (AssessmentPhase::Finished, Some(native), None, None)
             }
             DiagnosticOutcome::Infrastructure {
-                detail,
+                failure,
                 native,
                 cleanup_confirmed,
             } => (
                 AssessmentPhase::Infrastructure,
                 native.as_ref(),
-                Some(detail.clone()),
+                Some(failure.clone()),
                 *cleanup_confirmed,
             ),
         };
         let mut proven = BTreeSet::new();
         let mut leaked = BTreeSet::new();
         let mut native_controls = Vec::new();
+        let mut scoped_controls =
+            std::collections::BTreeMap::<RequiredCheck, Vec<ControlFailure>>::new();
         let interface_getifaddrs = matches!(result, Some(ScopedNativeResult::Proven { checks }) if checks.contains(&NativeCheck::Getifaddrs));
         match result {
             Some(ScopedNativeResult::Proven { checks }) => proven.extend(
@@ -167,6 +283,9 @@ impl DiagnosticRun {
             }) => {
                 leaked.extend(observed_leaks.iter().copied().map(native));
                 native_controls.push(*reason);
+                for check in [IoctlFlags, IoctlMtu, Getifaddrs, NetlinkLinks] {
+                    scoped_controls.entry(check).or_default().push(*reason);
+                }
             }
             None => {}
         }
@@ -183,9 +302,13 @@ impl DiagnosticRun {
                 }
             }
             leaked.extend(addresses.leaked.iter().copied().map(address));
-            for control in &addresses.controls {
-                if !native_controls.contains(control) {
-                    native_controls.push(*control);
+            add_controls(&mut native_controls, &addresses.controls());
+            for group in [IoctlAddresses, NetlinkAddresses, Getifaddrs] {
+                let controls = scoped_controls.entry(group).or_default();
+                for failure in &addresses.failures {
+                    if failure.check.is_none_or(|check| address(check) == group) {
+                        add_controls(controls, &[failure.reason]);
+                    }
                 }
             }
         }
@@ -198,11 +321,11 @@ impl DiagnosticRun {
             } else if proc_interfaces.all_access_denied() {
                 native_controls.push(ControlFailure::ProcInterfaceRequestDenied);
             }
-            for control in &proc_interfaces.controls {
-                if !native_controls.contains(control) {
-                    native_controls.push(*control);
-                }
-            }
+            add_controls(&mut native_controls, &proc_interfaces.controls);
+            add_controls(
+                scoped_controls.entry(ProcInterfaces).or_default(),
+                &proc_interfaces.controls,
+            );
         }
         if self.plan.required.contains(&Filesystem)
             && let Some(fs) = &self.filesystem
@@ -213,11 +336,8 @@ impl DiagnosticRun {
             if !fs.leaked.is_empty() {
                 leaked.insert(Filesystem);
             }
-            for control in &fs.controls {
-                if !native_controls.contains(control) {
-                    native_controls.push(*control);
-                }
-            }
+            add_controls(&mut native_controls, &fs.controls);
+            add_controls(scoped_controls.entry(Filesystem).or_default(), &fs.controls);
         }
         // Optional directory enumeration remains independent of path lookups.
         if self.plan.required.contains(&SysInterfaces)
@@ -229,11 +349,11 @@ impl DiagnosticRun {
             if !sys.leaked.is_empty() {
                 leaked.insert(SysInterfaces);
             }
-            for control in &sys.controls {
-                if !native_controls.contains(control) {
-                    native_controls.push(*control);
-                }
-            }
+            add_controls(&mut native_controls, &sys.controls);
+            add_controls(
+                scoped_controls.entry(SysInterfaces).or_default(),
+                &sys.controls,
+            );
         }
         if let Some(binding) = &self.binding {
             if binding.complete() {
@@ -242,11 +362,11 @@ impl DiagnosticRun {
             if !binding.leaked.is_empty() {
                 leaked.insert(RequiredCheck::BindToDevice);
             }
-            for control in &binding.controls {
-                if !native_controls.contains(control) {
-                    native_controls.push(*control);
-                }
-            }
+            add_controls(&mut native_controls, &binding.controls);
+            add_controls(
+                scoped_controls.entry(BindToDevice).or_default(),
+                &binding.controls,
+            );
         }
         if let Some(routes) = &self.routes {
             let group_of = |check: &crate::RouteCheck| {
@@ -285,9 +405,17 @@ impl DiagnosticRun {
             {
                 native_controls.push(ControlFailure::ProcRouteRequestDenied);
             }
-            for control in &routes.controls {
-                if !native_controls.contains(control) {
-                    native_controls.push(*control);
+            add_controls(&mut native_controls, &routes.controls());
+            for group in [NetlinkRoutes, ProcRoutes, NetlinkRules] {
+                let controls = scoped_controls.entry(group).or_default();
+                for failure in &routes.failures {
+                    if failure
+                        .check
+                        .as_ref()
+                        .is_none_or(|check| group_of(check) == group)
+                    {
+                        add_controls(controls, &[failure.reason]);
+                    }
                 }
             }
         }
@@ -300,7 +428,12 @@ impl DiagnosticRun {
             .and_then(|r| r.qualified_sample())
             .is_none()
         {
-            proven.clear();
+            for check in std::mem::take(&mut proven) {
+                add_controls(
+                    scoped_controls.entry(check).or_default(),
+                    &[ControlFailure::MissingPositiveControl],
+                );
+            }
             if phase != AssessmentPhase::Running
                 && !native_controls.contains(&ControlFailure::MissingPositiveControl)
             {
@@ -310,7 +443,7 @@ impl DiagnosticRun {
         let framework_controls = if let Some(result) = &self.framework {
             proven.extend(framework_checks(&result.proven, true));
             leaked.extend(framework_checks(&result.leaked, false));
-            result.controls.clone()
+            result.controls()
         } else {
             Vec::new()
         };
@@ -323,11 +456,8 @@ impl DiagnosticRun {
             if !result.leaked.is_empty() {
                 leaked.insert(Ports);
             }
-            for control in &result.controls {
-                if !native_controls.contains(control) {
-                    native_controls.push(*control);
-                }
-            }
+            add_controls(&mut native_controls, &result.controls);
+            add_controls(scoped_controls.entry(Ports).or_default(), &result.controls);
         }
         if self.link_request_denial.is_some() {
             native_controls.push(ControlFailure::NetlinkLinkRequestDenied);
@@ -359,22 +489,68 @@ impl DiagnosticRun {
                 }
             }
         }
-        proven.retain(|check| !leaked.contains(check));
-        let unverified = required
-            .iter()
-            .filter(|check| !proven.contains(check) && !leaked.contains(check))
-            .copied()
+        let checks = required
+            .into_iter()
+            .map(|check| {
+                let denial = match check {
+                    NetlinkLinks => Some(ControlFailure::NetlinkLinkRequestDenied),
+                    ProcRoutes => Some(ControlFailure::ProcRouteRequestDenied),
+                    ProcInterfaces => Some(ControlFailure::ProcInterfaceRequestDenied),
+                    _ => None,
+                };
+                let android_access_denied = denial.is_some_and(|d| native_controls.contains(&d));
+                let outcome = if leaked.contains(&check) {
+                    CheckOutcome::Leaked
+                } else if proven.contains(&check) {
+                    CheckOutcome::Proven
+                } else {
+                    let framework = is_framework(check);
+                    let failures = self
+                        .framework
+                        .as_ref()
+                        .filter(|_| framework)
+                        .map_or_else(Vec::new, |result| framework_failures(result, check));
+                    let controls = scoped_controls.remove(&check).unwrap_or_default();
+                    let interruption = failure.as_ref().filter(|failure| match failure.stage {
+                        DiagnosticStage::FrameworkAndPorts => framework || check == Ports,
+                        DiagnosticStage::Cleanup => false,
+                        _ => true,
+                    });
+                    let reason = if let Some(failure) = interruption
+                        && (failures.is_empty()
+                            || failure.kind == crate::DiagnosticFailureKind::Timeout)
+                    {
+                        UnverifiedReason::Interrupted {
+                            stage: failure.stage,
+                            failure: failure.kind,
+                        }
+                    } else if !failures.is_empty() {
+                        UnverifiedReason::FrameworkControls { failures }
+                    } else if android_access_denied {
+                        UnverifiedReason::AndroidAccessDenied
+                    } else if !controls.is_empty() {
+                        UnverifiedReason::NativeControls { controls }
+                    } else if phase == AssessmentPhase::Running {
+                        UnverifiedReason::AwaitingEvidence
+                    } else {
+                        UnverifiedReason::EvidenceUnavailable
+                    };
+                    CheckOutcome::Unverified { reason }
+                };
+                CheckAssessment {
+                    check,
+                    outcome,
+                    android_access_denied,
+                }
+            })
             .collect();
         DiagnosticAssessment {
             phase,
-            required,
-            proven: proven.into_iter().collect(),
-            leaked: leaked.into_iter().collect(),
-            unverified,
+            checks,
             native_controls,
             framework_controls,
             reuse_blockers,
-            infrastructure_detail,
+            failure,
             cleanup_confirmed,
         }
     }
@@ -383,6 +559,26 @@ impl DiagnosticRun {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    impl DiagnosticAssessment {
+        fn proven_ids(&self) -> Vec<RequiredCheck> {
+            self.checks
+                .iter()
+                .filter_map(|row| matches!(row.outcome, CheckOutcome::Proven).then_some(row.check))
+                .collect()
+        }
+        fn leaked_ids(&self) -> Vec<RequiredCheck> {
+            self.leaked().collect()
+        }
+        fn unverified_ids(&self) -> Vec<RequiredCheck> {
+            self.checks
+                .iter()
+                .filter_map(|row| {
+                    matches!(row.outcome, CheckOutcome::Unverified { .. }).then_some(row.check)
+                })
+                .collect()
+        }
+    }
     use crate::{DiagnosticFingerprint, framework::ScopedFrameworkResult};
     fn thread_identity() -> crate::DiagnosticThreadIdentity {
         crate::DiagnosticThreadIdentity {
@@ -417,13 +613,13 @@ pub(crate) mod tests {
             proc_interfaces: Unverified,
             proc_routes: Unverified,
         });
-        assert!(!run.assessment().proven.contains(&NetlinkLinks));
+        assert!(!run.assessment().proven_ids().contains(&NetlinkLinks));
         run.link_request_denial = Some(crate::LinkRequestDenial {
             raw_errno: 13,
             protected_errno: 13,
         });
         let assessment = run.assessment();
-        assert!(assessment.proven.contains(&NetlinkLinks));
+        assert!(assessment.proven_ids().contains(&NetlinkLinks));
         assert!(
             assessment
                 .native_controls
@@ -431,8 +627,8 @@ pub(crate) mod tests {
         );
         run.kernel_filters.as_mut().unwrap().netlink_links = Leaked;
         let assessment = run.assessment();
-        assert!(assessment.leaked.contains(&NetlinkLinks));
-        assert!(!assessment.proven.contains(&NetlinkLinks));
+        assert!(assessment.leaked_ids().contains(&NetlinkLinks));
+        assert!(!assessment.proven_ids().contains(&NetlinkLinks));
         assert!(
             assessment
                 .native_controls
@@ -465,10 +661,7 @@ pub(crate) mod tests {
             plan: DiagnosticPlan::supported(false),
             stale: false,
             framework: None,
-            outcome: DiagnosticOutcome::Incomplete {
-                native,
-                missing: vec![],
-            },
+            outcome: DiagnosticOutcome::Finished { native },
         }
     }
     #[test]
@@ -493,7 +686,7 @@ pub(crate) mod tests {
         run.record_routes(evidence.clone());
         assert!(
             run.assessment()
-                .unverified
+                .unverified_ids()
                 .contains(&RequiredCheck::NetlinkRoutes)
         );
         evidence.proven = netlink;
@@ -501,29 +694,37 @@ pub(crate) mod tests {
         run.record_routes(evidence.clone());
         assert!(
             run.assessment()
-                .unverified
+                .unverified_ids()
                 .contains(&RequiredCheck::NetlinkRules)
         );
         evidence.proven.extend(crate::RouteCheck::rules().take(1));
         run.record_routes(evidence);
         assert!(
             run.assessment()
-                .proven
+                .proven_ids()
                 .contains(&RequiredCheck::NetlinkRoutes)
         );
-        assert!(run.assessment().leaked.contains(&RequiredCheck::ProcRoutes));
         assert!(
             run.assessment()
-                .proven
+                .leaked_ids()
+                .contains(&RequiredCheck::ProcRoutes)
+        );
+        assert!(
+            run.assessment()
+                .proven_ids()
                 .contains(&RequiredCheck::NetlinkRules)
         );
         run.native_raw = None;
         assert!(
             run.assessment()
-                .unverified
+                .unverified_ids()
                 .contains(&RequiredCheck::NetlinkRoutes)
         );
-        assert!(run.assessment().leaked.contains(&RequiredCheck::ProcRoutes));
+        assert!(
+            run.assessment()
+                .leaked_ids()
+                .contains(&RequiredCheck::ProcRoutes)
+        );
     }
 
     #[test]
@@ -535,24 +736,24 @@ pub(crate) mod tests {
         });
         assert!(
             !run.assessment()
-                .proven
+                .proven_ids()
                 .contains(&RequiredCheck::SysInterfaces)
         );
         run.plan = DiagnosticPlan::supported(true);
         assert!(
             run.assessment()
-                .proven
+                .proven_ids()
                 .contains(&RequiredCheck::SysInterfaces)
         );
         assert!(
             run.assessment()
-                .unverified
+                .unverified_ids()
                 .contains(&RequiredCheck::Filesystem)
         );
         run.native_raw = None;
         assert!(
             !run.assessment()
-                .proven
+                .proven_ids()
                 .contains(&RequiredCheck::SysInterfaces)
         );
         run.sys_interfaces
@@ -562,13 +763,13 @@ pub(crate) mod tests {
             .push(crate::SysInterfaceCheck::required()[0]);
         assert!(
             run.assessment()
-                .leaked
+                .leaked_ids()
                 .contains(&RequiredCheck::SysInterfaces)
         );
         run.plan = DiagnosticPlan::supported(false);
         assert!(
             !run.assessment()
-                .leaked
+                .leaked_ids()
                 .contains(&RequiredCheck::SysInterfaces)
         );
     }
@@ -579,24 +780,44 @@ pub(crate) mod tests {
             proven: crate::FilesystemCheck::required(),
             ..Default::default()
         });
-        assert!(!run.assessment().proven.contains(&RequiredCheck::Filesystem));
+        assert!(
+            !run.assessment()
+                .proven_ids()
+                .contains(&RequiredCheck::Filesystem)
+        );
         run.plan = DiagnosticPlan::supported(true);
-        assert!(run.assessment().proven.contains(&RequiredCheck::Filesystem));
         assert!(
             run.assessment()
-                .unverified
+                .proven_ids()
+                .contains(&RequiredCheck::Filesystem)
+        );
+        assert!(
+            run.assessment()
+                .unverified_ids()
                 .contains(&RequiredCheck::SysInterfaces)
         );
         run.native_raw = None;
-        assert!(!run.assessment().proven.contains(&RequiredCheck::Filesystem));
+        assert!(
+            !run.assessment()
+                .proven_ids()
+                .contains(&RequiredCheck::Filesystem)
+        );
         run.filesystem
             .as_mut()
             .unwrap()
             .leaked
             .push(crate::FilesystemCheck::required()[0]);
-        assert!(run.assessment().leaked.contains(&RequiredCheck::Filesystem));
+        assert!(
+            run.assessment()
+                .leaked_ids()
+                .contains(&RequiredCheck::Filesystem)
+        );
         run.plan = DiagnosticPlan::supported(false);
-        assert!(!run.assessment().leaked.contains(&RequiredCheck::Filesystem));
+        assert!(
+            !run.assessment()
+                .leaked_ids()
+                .contains(&RequiredCheck::Filesystem)
+        );
     }
     #[test]
     fn root_only_or_failed_raw_receipts_withhold_native_proof_without_erasing_leaks() {
@@ -615,20 +836,23 @@ pub(crate) mod tests {
                 checks: vec![NativeCheck::IoctlFlags],
             });
             r.native_raw = receipt;
-            assert!(r.assessment().proven.is_empty());
+            assert!(r.assessment().proven_ids().is_empty());
             assert!(
                 r.assessment()
-                    .unverified
+                    .unverified_ids()
                     .contains(&RequiredCheck::IoctlFlags)
             );
-            r.outcome = DiagnosticOutcome::Incomplete {
+            r.outcome = DiagnosticOutcome::Finished {
                 native: ScopedNativeResult::Leaked {
                     checks: vec![NativeCheck::IoctlFlags],
                     incomplete: vec![],
                 },
-                missing: vec![],
             };
-            assert!(r.assessment().leaked.contains(&RequiredCheck::IoctlFlags));
+            assert!(
+                r.assessment()
+                    .leaked_ids()
+                    .contains(&RequiredCheck::IoctlFlags)
+            );
         }
     }
     #[test]
@@ -648,10 +872,10 @@ pub(crate) mod tests {
         let assessment = evidence.assessment();
         assert!(
             assessment
-                .unverified
+                .unverified_ids()
                 .contains(&RequiredCheck::PackageVisibility)
         );
-        assert!(assessment.unverified.contains(&RequiredCheck::Ports));
+        assert!(assessment.unverified_ids().contains(&RequiredCheck::Ports));
         evidence.plan = DiagnosticPlan::supported(true);
         evidence
             .plan
@@ -663,10 +887,15 @@ pub(crate) mod tests {
                 .reuse_blockers
                 .contains(&ReuseBlocker::UnsupportedPlan)
         );
-        assert!(assessment.required.contains(&RequiredCheck::SysInterfaces));
         assert!(
             assessment
-                .unverified
+                .checks
+                .iter()
+                .any(|row| row.check == RequiredCheck::SysInterfaces)
+        );
+        assert!(
+            assessment
+                .unverified_ids()
                 .contains(&RequiredCheck::SysInterfaces)
         );
     }
@@ -685,23 +914,31 @@ pub(crate) mod tests {
             let mut run = run(native.clone());
             run.stale = true;
             run.outcome = DiagnosticOutcome::Infrastructure {
-                detail: "worker died".into(),
+                failure: DiagnosticFailure {
+                    stage: DiagnosticStage::FrameworkAndPorts,
+                    kind: crate::DiagnosticFailureKind::Unavailable,
+                    detail: "worker died".into(),
+                },
                 native: Some(native),
                 cleanup_confirmed: Some(false),
             };
             run.framework = Some(ScopedFrameworkResult {
                 proven: vec![FrameworkCheck::Networks],
                 leaked: vec![FrameworkCheck::Networks],
-                controls: vec![FrameworkControlFailure::CleanupUnconfirmed],
+                failures: vec![FrameworkFailure {
+                    scope: FrameworkFailureScope::Run,
+                    phase: None,
+                    reason: FrameworkControlFailure::CleanupUnconfirmed,
+                }],
                 ..Default::default()
             });
             let a = run.assessment();
             assert_eq!(a.phase, AssessmentPhase::Infrastructure);
             assert_eq!(
-                a.leaked,
+                a.leaked_ids(),
                 [RequiredCheck::IoctlMtu, RequiredCheck::FrameworkNetworks]
             );
-            assert!(a.proven.is_empty());
+            assert!(a.proven_ids().is_empty());
             assert!(a.reuse_blockers.contains(&ReuseBlocker::ConditionsChanged));
             assert_eq!(a.cleanup_confirmed, Some(false));
         }
@@ -725,11 +962,15 @@ pub(crate) mod tests {
             ..Default::default()
         });
         let a = run.assessment();
-        assert_eq!(a.phase, AssessmentPhase::Incomplete);
-        assert_eq!(a.proven.len(), 6);
-        assert_eq!(a.unverified.len(), 14);
-        assert!(!a.required.contains(&RequiredCheck::SysInterfaces));
-        assert!(a.unverified.contains(&RequiredCheck::Getifaddrs));
+        assert_eq!(a.phase, AssessmentPhase::Finished);
+        assert_eq!(a.proven_ids().len(), 6);
+        assert_eq!(a.unverified_ids().len(), 14);
+        assert!(
+            !a.checks
+                .iter()
+                .any(|row| row.check == RequiredCheck::SysInterfaces)
+        );
+        assert!(a.unverified_ids().contains(&RequiredCheck::Getifaddrs));
         assert!(
             a.reuse_blockers
                 .contains(&ReuseBlocker::LoadedGenerationsIncomplete)
@@ -737,8 +978,96 @@ pub(crate) mod tests {
         assert!(!a.reuse_blockers.contains(&ReuseBlocker::ConditionsChanged));
         run.plan.required.clear();
         let a = run.assessment();
-        assert_eq!(a.required.len(), 20);
+        assert_eq!(a.checks.len(), 20);
         assert!(a.reuse_blockers.contains(&ReuseBlocker::UnsupportedPlan));
+    }
+
+    #[test]
+    fn check_reasons_stay_with_their_own_evidence_and_verdicts_are_derived() {
+        use crate::framework::FrameworkPhase;
+        let mut run = run(ScopedNativeResult::Proven { checks: vec![] });
+        let pending_failure = FrameworkFailure {
+            scope: FrameworkFailureScope::Check(FrameworkCheck::PendingIntent),
+            phase: Some(FrameworkPhase::Revoked),
+            reason: FrameworkControlFailure::ProbeUnavailable,
+        };
+        run.framework = Some(ScopedFrameworkResult {
+            proven: vec![FrameworkCheck::Callbacks],
+            leaked: vec![FrameworkCheck::PackageVisibility],
+            failures: vec![pending_failure],
+            ..Default::default()
+        });
+        let assessment = run.assessment();
+        let row = |check| {
+            assessment
+                .checks
+                .iter()
+                .find(|row| row.check == check)
+                .unwrap()
+        };
+        assert_eq!(
+            row(RequiredCheck::FrameworkCallbacks).outcome,
+            CheckOutcome::Proven
+        );
+        assert_eq!(
+            row(RequiredCheck::FrameworkPendingIntent).outcome,
+            CheckOutcome::Unverified {
+                reason: UnverifiedReason::FrameworkControls {
+                    failures: vec![pending_failure]
+                },
+            }
+        );
+        assert_eq!(
+            row(RequiredCheck::FrameworkDefaultNetwork).outcome,
+            CheckOutcome::Unverified {
+                reason: UnverifiedReason::EvidenceUnavailable,
+            }
+        );
+        assert_eq!(assessment.verdict(), DiagnosticVerdict::Leaked);
+        assert_eq!(
+            DiagnosticVerdict::for_checks([row(RequiredCheck::FrameworkCallbacks)]),
+            DiagnosticVerdict::Proven
+        );
+        assert_eq!(
+            DiagnosticVerdict::for_checks([]),
+            DiagnosticVerdict::Unverified
+        );
+    }
+
+    #[test]
+    fn framework_and_ports_timeout_preserves_confirmed_native_evidence() {
+        let native = ScopedNativeResult::Proven {
+            checks: vec![NativeCheck::IoctlFlags],
+        };
+        let mut run = run(native.clone());
+        run.outcome = DiagnosticOutcome::Infrastructure {
+            failure: DiagnosticFailure {
+                stage: DiagnosticStage::FrameworkAndPorts,
+                kind: crate::DiagnosticFailureKind::Timeout,
+                detail: "deadline".into(),
+            },
+            native: Some(native),
+            cleanup_confirmed: Some(true),
+        };
+        let assessment = run.assessment();
+        assert_eq!(assessment.proven_ids(), [RequiredCheck::IoctlFlags]);
+        for check in [RequiredCheck::FrameworkCallbacks, RequiredCheck::Ports] {
+            assert_eq!(
+                assessment
+                    .checks
+                    .iter()
+                    .find(|row| row.check == check)
+                    .unwrap()
+                    .outcome,
+                CheckOutcome::Unverified {
+                    reason: UnverifiedReason::Interrupted {
+                        stage: DiagnosticStage::FrameworkAndPorts,
+                        failure: crate::DiagnosticFailureKind::Timeout
+                    },
+                }
+            );
+        }
+        assert_eq!(assessment.verdict(), DiagnosticVerdict::Unverified);
     }
     #[test]
     fn independent_bind_controls_preserve_other_proofs_and_direct_actor_leaks() {
@@ -756,8 +1085,8 @@ pub(crate) mod tests {
             controls: vec![ControlFailure::OrdinaryObjectsChanged],
         });
         let assessment = run.assessment();
-        assert_eq!(assessment.proven.len(), 3);
-        assert_eq!(assessment.leaked, vec![RequiredCheck::BindToDevice]);
+        assert_eq!(assessment.proven_ids().len(), 3);
+        assert_eq!(assessment.leaked_ids(), vec![RequiredCheck::BindToDevice]);
         assert!(
             assessment
                 .native_controls
@@ -770,10 +1099,10 @@ pub(crate) mod tests {
         });
         assert!(
             run.assessment()
-                .proven
+                .proven_ids()
                 .contains(&RequiredCheck::BindToDevice)
         );
-        assert!(run.assessment().unverified.len() >= 14);
+        assert!(run.assessment().unverified_ids().len() >= 14);
     }
     #[test]
     fn proc_group_needs_every_surface_and_read_actor_and_retains_leaks() {
@@ -784,25 +1113,25 @@ pub(crate) mod tests {
         });
         assert!(
             run.assessment()
-                .proven
+                .proven_ids()
                 .contains(&RequiredCheck::ProcInterfaces)
         );
         let checks = run.proc_interfaces.as_mut().unwrap();
         let missing = checks.proven.pop().unwrap();
         assert!(
             run.assessment()
-                .unverified
+                .unverified_ids()
                 .contains(&RequiredCheck::ProcInterfaces)
         );
         run.proc_interfaces.as_mut().unwrap().leaked.push(missing);
         assert!(
             run.assessment()
-                .leaked
+                .leaked_ids()
                 .contains(&RequiredCheck::ProcInterfaces)
         );
         assert!(
             !run.assessment()
-                .proven
+                .proven_ids()
                 .contains(&RequiredCheck::ProcInterfaces)
         );
     }
@@ -819,7 +1148,7 @@ pub(crate) mod tests {
         });
         assert!(
             run.assessment()
-                .unverified
+                .unverified_ids()
                 .contains(&RequiredCheck::Getifaddrs)
         );
         run.record_addresses(crate::ScopedAddressResult {
@@ -831,7 +1160,7 @@ pub(crate) mod tests {
             RequiredCheck::NetlinkAddresses,
             RequiredCheck::Getifaddrs,
         ] {
-            assert!(run.assessment().proven.contains(&group));
+            assert!(run.assessment().proven_ids().contains(&group));
         }
         let mut addresses = run.addresses.take().unwrap();
         addresses
@@ -843,9 +1172,13 @@ pub(crate) mod tests {
         });
         run.record_addresses(addresses);
         let result = run.assessment();
-        assert!(result.unverified.contains(&RequiredCheck::Getifaddrs));
-        assert!(result.leaked.contains(&RequiredCheck::IoctlAddresses));
-        assert!(!result.proven.contains(&RequiredCheck::IoctlAddresses));
-        assert!(result.proven.contains(&RequiredCheck::NetlinkAddresses));
+        assert!(result.unverified_ids().contains(&RequiredCheck::Getifaddrs));
+        assert!(result.leaked_ids().contains(&RequiredCheck::IoctlAddresses));
+        assert!(!result.proven_ids().contains(&RequiredCheck::IoctlAddresses));
+        assert!(
+            result
+                .proven_ids()
+                .contains(&RequiredCheck::NetlinkAddresses)
+        );
     }
 }

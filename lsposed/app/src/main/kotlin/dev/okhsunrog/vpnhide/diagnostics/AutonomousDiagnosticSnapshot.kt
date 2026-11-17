@@ -14,6 +14,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import uniffi.vpnhide_core_ffi.CoreCheckOutcome
+import uniffi.vpnhide_core_ffi.CoreDiagnosticAssessment
+import uniffi.vpnhide_core_ffi.CoreUnverifiedReason
 
 internal enum class AutonomousAvailability {
     Initializing,
@@ -39,7 +42,7 @@ internal data class AutonomousDiagnosticSnapshot(
     val sources: AutonomousDiagnosticSources,
     val availability: AutonomousAvailability,
     val run: AutonomousRunInfo?,
-    val assessment: AutonomousAssessmentInfo?,
+    val assessment: CoreDiagnosticAssessment?,
     val rootJoined: Boolean,
 ) {
     val rootSnapshot: RootSnapshot? get() = sources.root.lastGood?.value
@@ -76,10 +79,37 @@ internal fun autonomousDiagnosticSnapshot(
         sources,
         availability,
         run?.toDiagnosticInfo(),
-        state?.autonomousAssessment?.toDiagnosticInfo(),
+        state?.autonomousAssessment?.retainedCopy(),
         currentRootJoined(sources),
     )
 }
+
+private fun CoreDiagnosticAssessment.retainedCopy(): CoreDiagnosticAssessment =
+    copy(
+        checks =
+            checks.map { row ->
+                val outcome = row.outcome
+                row.copy(
+                    outcome =
+                        if (outcome is CoreCheckOutcome.Unverified) {
+                            CoreCheckOutcome.Unverified(outcome.reason.retainedCopy())
+                        } else {
+                            outcome
+                        },
+                )
+            },
+        nativeControls = nativeControls.toList(),
+        frameworkControls = frameworkControls.toList(),
+        reuseBlockers = reuseBlockers.toList(),
+        failure = failure?.copy(),
+    )
+
+private fun CoreUnverifiedReason.retainedCopy(): CoreUnverifiedReason =
+    when (this) {
+        is CoreUnverifiedReason.NativeControls -> copy(controls = controls.toList())
+        is CoreUnverifiedReason.FrameworkControls -> copy(failures = failures.map { it.copy() })
+        else -> this
+    }
 
 /** Config identity is independent of unrelated routing/publication cursor changes. */
 private fun diagnosticConfigJoined(

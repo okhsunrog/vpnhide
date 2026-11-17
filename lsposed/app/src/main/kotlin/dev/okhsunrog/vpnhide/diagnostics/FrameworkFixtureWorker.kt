@@ -13,6 +13,7 @@ import android.os.SystemClock
 import dev.okhsunrog.vpnhide.BuildConfig
 import dev.okhsunrog.vpnhide.legacyInfoFields
 import dev.okhsunrog.vpnhide.legacyOrdinaryInfo
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -60,19 +61,25 @@ internal suspend fun measureFrameworkFixture(
                 }
             previous =
                 coroutineScope {
+                    val queriesFinished = CompletableDeferred<Unit>()
                     val observingCallbacks =
                         async(start = CoroutineStart.UNDISPATCHED) {
-                            workerStage("$stage-callbacks") { observeFrameworkCallbacks(manager, next, handler) }
+                            workerStage("$stage-callbacks") { observeFrameworkCallbacks(manager, next, handler, queriesFinished) }
                         }
                     val network = workerStage("$stage-queries") { observeFramework(manager, next) }
+                    queriesFinished.complete(Unit)
                     val callbacks = observingCallbacks.await()
                     // Broadcasts arrive on the handler while the collector
                     // runs the independent PackageManager probes in this phase.
+                    val packagesFinished = CompletableDeferred<Unit>()
                     val pending =
                         async(start = CoroutineStart.UNDISPATCHED) {
-                            workerStage("$stage-pending-intents") { observeFrameworkPendingIntents(context, manager, handler) }
+                            workerStage("$stage-pending-intents") {
+                                observeFrameworkPendingIntents(context, manager, handler, packagesFinished, phase)
+                            }
                         }
                     val packages = workerStage("$stage-packages") { observeFrameworkPackages(context, next, stage) }
+                    packagesFinished.complete(Unit)
                     network.copy(callbacks = callbacks, pendingIntents = pending.await(), packageVisibility = packages)
                 }
         }

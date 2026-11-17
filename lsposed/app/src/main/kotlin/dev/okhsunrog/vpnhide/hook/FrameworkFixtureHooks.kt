@@ -2,6 +2,7 @@ package dev.okhsunrog.vpnhide.hook
 
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.NetworkInfo
 import android.os.Binder
 import android.os.FileObserver
@@ -88,6 +89,7 @@ internal class FrameworkFixtureHooks {
         for (name in listOf("getVpnUnderlyingNetworks", "getNetworkAgentInfoForNetwork")) {
             XposedBridge.hookAllMethods(type, name, networkInputHook(name))
         }
+        XposedBridge.hookAllMethods(type, "isNetworkWithCapabilitiesBlocked", ordinaryPolicyInputHook())
         val handles =
             XposedBridge.hookAllMethods(
                 type,
@@ -120,6 +122,21 @@ internal class FrameworkFixtureHooks {
                 if (name == "getNetworkAgentInfoForNetwork" && argument == active.objects.ordinary) {
                     invocation.ordinaryAgent?.let { param.result = it }
                 }
+            }
+        }
+
+    private fun ordinaryPolicyInputHook(): XC_MethodHook =
+        object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                val invocation = scope.get() ?: return
+                val capabilities = invocation.ordinaryCoverCapabilities ?: return
+                if (param.thisObject !== receiver || param.args.firstOrNull() !== capabilities ||
+                    param.args.getOrNull(1) != invocation.authority.worker.uid || current() == null
+                ) {
+                    return
+                }
+                HookLog.i("diagnostics ordinary cover live blocked=${param.result} transaction=${invocation.transaction}")
+                param.result = false
             }
         }
 
@@ -234,7 +251,12 @@ internal class FrameworkFixtureHooks {
                     return
                 }
                 if (name == "getNetworkCapabilities" && param.args.firstOrNull() == active.objects.ordinary) {
-                    param.result = active.objects.capabilities(active.objects.ordinary)
+                    val capabilities = active.objects.capabilities(active.objects.ordinary)
+                    val invocation = scope.get()
+                    if (invocation != null && invocation.transaction in networkSourceTransactions) {
+                        invocation.ordinaryCoverCapabilities = capabilities
+                    }
+                    param.result = capabilities
                     return
                 }
                 if (!active.authority.injectsVpn()) return
@@ -304,6 +326,7 @@ internal class FrameworkFixtureHooks {
         val active = authorizedRegistration(instance, request) ?: return
         val worker = active.authority.worker
         val registration = dispatch.registration(request, worker) ?: return
+        logRegistration(active, registration, "start")
         val objects = active.objects
         val ordinary = dispatch.detachedAgent(instance, objects.ordinary, objects, worker.uid)
         val vpn = if (active.authority.injectsVpn()) dispatch.detachedAgent(instance, objects.vpn, objects, worker.uid) else null
@@ -311,9 +334,28 @@ internal class FrameworkFixtureHooks {
         val previous = scope.enter(invocation)
         try {
             dispatch.send(instance, request, registration, vpn, ordinary) { current() === active }
+            logRegistration(active, registration, "returned")
         } finally {
             scope.restore(previous)
         }
+    }
+
+    private fun logRegistration(
+        active: State,
+        registration: FrameworkNetworkDispatchFixture.Registration,
+        stage: String,
+    ) {
+        if (!HookLog.enabled) return
+        val kind =
+            when (registration) {
+                is FrameworkNetworkDispatchFixture.Registration.Callback -> "callback:${registration.kind}"
+                is FrameworkNetworkDispatchFixture.Registration.Broadcast -> "pending:${registration.kind}"
+            }
+        val authority = active.authority
+        HookLog.i(
+            "diagnostics dispatch session=${authority.session} phase=${authority.phase} worker=${authority.worker.pid} " +
+                "registration=$kind stage=$stage boot_ms=${SystemClock.elapsedRealtime()}",
+        )
     }
 
     private fun beginDispatch(

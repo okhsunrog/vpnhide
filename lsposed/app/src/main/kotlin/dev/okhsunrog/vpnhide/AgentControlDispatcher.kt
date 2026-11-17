@@ -3,6 +3,7 @@ package dev.okhsunrog.vpnhide
 import android.content.Context
 import dev.okhsunrog.vpnhide.debug.StateContentOptions
 import dev.okhsunrog.vpnhide.debug.VpnHideState
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.settings.removeConfiguredPackages
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -77,6 +78,14 @@ internal object AgentControlDispatcher {
                     args.refresh,
                     StateContentOptions(forensics = args.forensics == true, appList = args.appList == true),
                 )
+            },
+            function<EmptyArgs, AgentMutationResult>(
+                name = "retryDiagnostics",
+                description = "Queue the regular diagnostic Retry. getState returns Core's accepted run and assessment.",
+                inputSchema = schema(),
+            ) { context, _ ->
+                DiagnosticsCache.retry(context)
+                AgentMutationResult(ok = true, message = "Diagnostic retry requested")
             },
             function<EmptyArgs, AgentDebugZipExport>(
                 name = "exportKernelImages",

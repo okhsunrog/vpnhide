@@ -1,7 +1,9 @@
 //! Proof for Android NetworkCallback delivery to actual worker registrations.
 use serde::{Deserialize, Serialize};
 
-use crate::framework::{FrameworkControlFailure as Failure, FrameworkPhaseEvidence};
+use crate::framework::{
+    FrameworkControlFailure as Failure, FrameworkPhase, FrameworkPhaseEvidence,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -84,6 +86,10 @@ fn observation(
 }
 
 impl CallbackObservation {
+    fn has_delivery(&self) -> bool {
+        !self.events.is_empty() || self.vpn_transport || self.vpn_properties
+    }
+
     fn exposes_vpn(&self, vpn: u64) -> bool {
         self.vpn_transport || self.vpn_properties || self.events.iter().any(|e| e.handle == vpn)
     }
@@ -136,27 +142,25 @@ pub(crate) fn leaked(raw: &FrameworkPhaseEvidence, protected: &FrameworkPhaseEvi
     })
 }
 
-pub(crate) fn evaluate(phases: [&FrameworkPhaseEvidence; 4]) -> Result<(), Failure> {
+pub(crate) fn evaluate(
+    phases: [&FrameworkPhaseEvidence; 4],
+) -> Result<(), (FrameworkPhase, Failure)> {
     let [prepared, raw, protected, revoked] = phases;
     let vpn = raw.acknowledgement.sources.vpn_handle;
     for kind in CallbackRegistration::ALL {
-        let ordinary = raw_control(raw, kind).ok_or(Failure::MissingPositiveControl)?;
-        let src = source(protected, kind).ok_or(Failure::MissingPositiveControl)?;
-        if [prepared, revoked].into_iter().any(|phase| {
-            !phase.acknowledgement.callbacks.is_empty()
-                || !observation(phase, kind).is_some_and(|obs| {
-                    !obs.exposes_vpn(vpn) && obs.observed(&[available(ordinary)])
-                })
-        }) {
-            return Err(Failure::MissingNegativeControl);
-        }
+        let ordinary =
+            raw_control(raw, kind).ok_or((FrameworkPhase::Raw, Failure::MissingPositiveControl))?;
+        let protected_failure = |reason| (FrameworkPhase::Protected, reason);
+        let src =
+            source(protected, kind).ok_or(protected_failure(Failure::MissingPositiveControl))?;
         if src.ordinary_handle != ordinary {
-            return Err(Failure::OrdinaryObjectsChanged);
+            return Err(protected_failure(Failure::OrdinaryObjectsChanged));
         }
         if !src.available_handled || !src.lost_handled {
-            return Err(Failure::ProductionPathNotObserved);
+            return Err(protected_failure(Failure::ProductionPathNotObserved));
         }
-        let obs = observation(protected, kind).ok_or(Failure::ProbeUnavailable)?;
+        let obs =
+            observation(protected, kind).ok_or(protected_failure(Failure::ProbeUnavailable))?;
         let physical = available(ordinary);
         let ordinary_delivered = match kind {
             CallbackRegistration::Listen => obs.observed(&[physical]),
@@ -167,7 +171,19 @@ pub(crate) fn evaluate(phases: [&FrameworkPhaseEvidence; 4]) -> Result<(), Failu
             }
         };
         if obs.exposes_vpn(vpn) || !ordinary_delivered {
-            return Err(Failure::ProbeUnavailable);
+            return Err(protected_failure(Failure::ProbeUnavailable));
+        }
+        for phase in [prepared, revoked] {
+            let failure = |reason| (phase.envelope.phase, reason);
+            if !phase.acknowledgement.callbacks.is_empty() {
+                return Err(failure(Failure::MissingNegativeControl));
+            }
+            let Some(obs) = observation(phase, kind).filter(|obs| obs.has_delivery()) else {
+                return Err(failure(Failure::ProbeUnavailable));
+            };
+            if obs.exposes_vpn(vpn) || !obs.observed(&[available(ordinary)]) {
+                return Err(failure(Failure::MissingNegativeControl));
+            }
         }
     }
     Ok(())

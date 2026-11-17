@@ -27,7 +27,7 @@ fn replaced() -> io::Error {
         "framework channel file was replaced",
     )
 }
-fn identity(m: &fs::Metadata) -> (u64, u64, u64, u32, u32, i64, i64, i64, i64) {
+fn content_identity(m: &fs::Metadata) -> (u64, u64, u64, u32, u32, i64, i64) {
     (
         m.dev(),
         m.ino(),
@@ -36,9 +36,36 @@ fn identity(m: &fs::Metadata) -> (u64, u64, u64, u32, u32, i64, i64, i64, i64) {
         m.mode(),
         m.mtime(),
         m.mtime_nsec(),
-        m.ctime(),
-        m.ctime_nsec(),
     )
+}
+
+fn require_stable_read(
+    before: &fs::Metadata,
+    after: &fs::Metadata,
+    named: &fs::Metadata,
+) -> io::Result<()> {
+    if (before.dev(), before.ino()) != (named.dev(), named.ino())
+        || after.nlink() == 0
+        || named.nlink() == 0
+    {
+        return Err(replaced());
+    }
+    if [after, named]
+        .iter()
+        .any(|m| m.nlink() != 1 || content_identity(before) != content_identity(m))
+    {
+        return Err(invalid("framework channel changed during read"));
+    }
+    // Metadata for the new name can become visible before rename finishes
+    // updating ctime. Discard this sample and let the ACK poll reopen the name.
+    let ctime = (before.ctime(), before.ctime_nsec());
+    if [after, named]
+        .iter()
+        .any(|m| (m.ctime(), m.ctime_nsec()) != ctime)
+    {
+        return Err(replaced());
+    }
+    Ok(())
 }
 impl FrameworkStore {
     pub(super) fn production() -> io::Result<Self> {
@@ -108,13 +135,8 @@ impl FrameworkStore {
                 error
             }
         })?;
-        if (before.dev(), before.ino()) != (named.dev(), named.ino()) {
-            return Err(replaced());
-        }
-        if bytes.len() as u64 > MAX_BYTES
-            || identity(&before) != identity(&after)
-            || identity(&before) != identity(&named)
-        {
+        require_stable_read(&before, &after, &named)?;
+        if bytes.len() as u64 != before.len() {
             return Err(invalid("framework channel changed during read"));
         }
         self.revalidate()?;
@@ -260,6 +282,32 @@ mod tests {
         );
         assert_eq!(
             store.poll_acknowledgement(&envelope()).unwrap_err().kind(),
+            io::ErrorKind::InvalidData,
+        );
+    }
+
+    #[test]
+    fn rename_metadata_race_is_retriable_but_in_place_content_change_is_invalid() {
+        let root = tempfile::tempdir().unwrap();
+        let staged = root.path().join("staged");
+        let path = root.path().join(ACK_FILE);
+        fs::write(&staged, b"1").unwrap();
+        let before = fs::metadata(&staged).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        fs::rename(&staged, &path).unwrap();
+        let after_rename = fs::metadata(&path).unwrap();
+        assert_eq!(
+            require_stable_read(&before, &after_rename, &after_rename)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::WouldBlock,
+        );
+        fs::write(&path, b"22").unwrap();
+        let after_write = fs::metadata(&path).unwrap();
+        assert_eq!(
+            require_stable_read(&after_rename, &after_write, &after_write)
+                .unwrap_err()
+                .kind(),
             io::ErrorKind::InvalidData,
         );
     }

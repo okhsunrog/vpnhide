@@ -86,28 +86,13 @@ internal class FrameworkFixtureChannel {
             )
         try {
             try {
-                FileOutputStream(fd).use {
-                    it.write(json)
-                    it.flush()
-                    it.fd.sync()
-                }
+                FileOutputStream(fd).use { it.write(json) }
             } finally {
                 Os.close(fd)
             }
             check(read() == authority) { "fixture authority changed" }
+            // This ACK is only consumed by the live run. Atomic publication is sufficient.
             Os.rename(temporary, "$FRAMEWORK_DIRECTORY/$FRAMEWORK_ACK_FILE")
-            val directory =
-                Os.open(
-                    FRAMEWORK_DIRECTORY,
-                    OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or OsConstants.O_NOFOLLOW,
-                    0,
-                )
-            try {
-                require(OsConstants.S_ISDIR(Os.fstat(directory).st_mode))
-                Os.fsync(directory)
-            } finally {
-                Os.close(directory)
-            }
         } finally {
             runCatching { Os.remove(temporary) }
         }

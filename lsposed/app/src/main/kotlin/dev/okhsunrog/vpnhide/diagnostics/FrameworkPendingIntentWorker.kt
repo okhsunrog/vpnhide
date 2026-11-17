@@ -10,31 +10,45 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Build
 import android.os.Handler
+import android.os.SystemClock
+import android.util.Log
 import androidx.core.content.IntentCompat
+import dev.okhsunrog.vpnhide.BuildConfig
 import dev.okhsunrog.vpnhide.networkBroadcastIntent
 import dev.okhsunrog.vpnhide.registerPrivateNetworkReceiver
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import uniffi.vpnhide_core_ffi.CoreFrameworkPhase
 import uniffi.vpnhide_core_ffi.CorePendingObservation
 import uniffi.vpnhide_core_ffi.CorePendingRegistration
 import java.util.UUID
+
+private const val BROADCAST_TIMEOUT_MS = 800L
+private const val LATE_BROADCAST_WINDOW_MS = 60L
 
 internal suspend fun observeFrameworkPendingIntents(
     context: Context,
     manager: ConnectivityManager,
     handler: Handler,
+    packagesFinished: Deferred<Unit>,
+    phase: CoreFrameworkPhase,
 ): List<CorePendingObservation> {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return emptyList()
     val request = NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build()
     return coroutineScope {
         CorePendingRegistration.entries
             .map { kind ->
-                async(start = CoroutineStart.UNDISPATCHED) { observePendingIntent(context, manager, request, kind, handler) }
+                async(start = CoroutineStart.UNDISPATCHED) {
+                    observePendingIntent(context, manager, request, kind, handler, packagesFinished, phase)
+                }
             }.awaitAll()
             .filterNotNull()
     }
@@ -46,9 +60,11 @@ private suspend fun observePendingIntent(
     request: NetworkRequest,
     kind: CorePendingRegistration,
     handler: Handler,
+    packagesFinished: Deferred<Unit>,
+    phase: CoreFrameworkPhase,
 ): CorePendingObservation? {
     val action = "${context.packageName}.diagnostic.network.${UUID.randomUUID()}"
-    val receiver = PendingNetworkObservation(action, kind)
+    val receiver = PendingNetworkObservation(action, kind, phase)
     if (runCatching { registerPrivateNetworkReceiver(context, receiver, IntentFilter(action), handler) }.isFailure) return null
     try {
         val pending =
@@ -56,20 +72,28 @@ private suspend fun observePendingIntent(
                 networkBroadcastIntent(context, action, 0, Intent.FLAG_RECEIVER_FOREGROUND)
             }.getOrNull() ?: return null
         try {
-            val registered =
+            val started = SystemClock.elapsedRealtime()
+            val registration =
                 runCatching {
                     when (kind) {
                         CorePendingRegistration.LISTEN -> manager.registerNetworkCallback(request, pending)
                         CorePendingRegistration.REQUEST -> manager.requestNetwork(request, pending)
                     }
-                }.isSuccess
-            if (!registered) return null
-            try {
-                withTimeoutOrNull(800) {
-                    receiver.delivered.await()
-                    delay(60)
                 }
-                return receiver.snapshot()
+            if (registration.isFailure) {
+                receiver.trace("registration_error=${registration.exceptionOrNull()?.javaClass?.simpleName}")
+                return null
+            }
+            val registeredAt = SystemClock.elapsedRealtime()
+            receiver.trace("stage=registered start_ms=$started registered_ms=$registeredAt")
+            try {
+                packagesFinished.await()
+                return receiver.observe().also { observation ->
+                    receiver.trace(
+                        "stage=finished boot_ms=${SystemClock.elapsedRealtime()} " +
+                            "handles=${observation.handles.size} malformed=${observation.malformed}",
+                    )
+                }
             } finally {
                 manager.unregisterNetworkCallback(pending)
             }
@@ -84,8 +108,9 @@ private suspend fun observePendingIntent(
 private class PendingNetworkObservation(
     private val action: String,
     private val kind: CorePendingRegistration,
+    private val phase: CoreFrameworkPhase,
 ) : BroadcastReceiver() {
-    val delivered = CompletableDeferred<Unit>()
+    private val delivered = CompletableDeferred<Long>()
     private val handles = mutableListOf<ULong>()
     private var malformed = false
 
@@ -104,8 +129,20 @@ private class PendingNetworkObservation(
             malformed = true
         }
         if (request?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) != true) malformed = true
-        delivered.complete(Unit)
+        val now = SystemClock.elapsedRealtime()
+        if (delivered.complete(now)) trace("stage=received boot_ms=$now")
     }
 
-    @Synchronized fun snapshot(): CorePendingObservation = CorePendingObservation(kind, handles.toList(), malformed)
+    suspend fun observe(): CorePendingObservation =
+        withContext(Dispatchers.Default) {
+            val first = withTimeoutOrNull(BROADCAST_TIMEOUT_MS) { delivered.await() }
+            if (first != null) delay((first + LATE_BROADCAST_WINDOW_MS - SystemClock.elapsedRealtime()).coerceAtLeast(0))
+            snapshot()
+        }
+
+    @Synchronized private fun snapshot(): CorePendingObservation = CorePendingObservation(kind, handles.toList(), malformed)
+
+    fun trace(message: String) {
+        if (BuildConfig.DEBUG) Log.i("VpnHideDiagnosticWorker", "pending phase=$phase kind=$kind $message")
+    }
 }

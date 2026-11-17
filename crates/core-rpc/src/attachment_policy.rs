@@ -33,13 +33,16 @@ pub struct AttachmentEvidence {
 
 impl From<&StateSnapshot> for AttachmentEvidence {
     fn from(state: &StateSnapshot) -> Self {
+        let leaked: Vec<_> = state
+            .autonomous_assessment
+            .as_ref()
+            .into_iter()
+            .flat_map(|assessment| assessment.leaked())
+            .collect();
         Self::from_facts(
             state.backend.boot.as_ref().map(|boot| &boot.outcome),
             state.backend.selected,
-            state
-                .autonomous_assessment
-                .as_ref()
-                .map_or(&[], |assessment| assessment.leaked.as_slice()),
+            &leaked,
         )
     }
 }

@@ -374,19 +374,23 @@ pub struct ScopedRouteResult {
     pub access_denials: Vec<ProcRouteAccessDenial>,
     pub proven: Vec<RouteCheck>,
     pub leaked: Vec<RouteCheck>,
-    pub controls: Vec<crate::ControlFailure>,
+    pub failures: Vec<crate::NativeControlIssue<RouteCheck>>,
 }
 impl ScopedRouteResult {
     pub fn complete(&self) -> bool {
-        self.controls.is_empty()
+        self.failures.is_empty()
             && self.leaked.is_empty()
             && RouteCheck::required()
                 .iter()
                 .all(|c| self.proven.contains(c))
     }
-    fn problem(&mut self, problem: crate::ControlFailure) {
-        if !self.controls.contains(&problem) {
-            self.controls.push(problem);
+    pub fn controls(&self) -> Vec<crate::ControlFailure> {
+        crate::native_control_reasons(&self.failures)
+    }
+    fn problem(&mut self, check: Option<RouteCheck>, reason: crate::ControlFailure) {
+        let issue = crate::NativeControlIssue { check, reason };
+        if !self.failures.contains(&issue) {
+            self.failures.push(issue);
         }
     }
 }
@@ -460,7 +464,7 @@ fn evaluate_route_controls(
     use crate::ControlFailure::*;
     let mut result = ScopedRouteResult::default();
     if !spec.valid() {
-        result.problem(InvalidSpec);
+        result.problem(None, InvalidSpec);
         return result;
     }
     for check in spec.checks() {
@@ -470,16 +474,16 @@ fn evaluate_route_controls(
         };
         let root_positive = |v: &RouteObservation| paired_positive(spec, v);
         if negative.is_none_or(|v| !absent(v)) {
-            result.problem(MissingNegativeControl);
+            result.problem(Some(check), MissingNegativeControl);
             if negative.is_none_or(|v| v.error.is_some()) {
-                result.problem(ProbeUnavailable);
+                result.problem(Some(check), ProbeUnavailable);
             }
             continue;
         }
         if start.is_none_or(|v| !root_positive(v)) {
-            result.problem(MissingPositiveControl);
+            result.problem(Some(check), MissingPositiveControl);
             if start.is_none_or(|v| v.error.is_some()) {
-                result.problem(ProbeUnavailable);
+                result.problem(Some(check), ProbeUnavailable);
             }
             continue;
         }
@@ -503,22 +507,22 @@ fn evaluate_route_controls(
         }
         let worker_available = worker.is_some_and(|v| v.error.is_none());
         if !worker_available {
-            result.problem(ProbeUnavailable);
+            result.problem(Some(check), ProbeUnavailable);
         }
         let ordinary_ok = worker.is_some_and(|v| positive(spec, v, true));
         if !ordinary_ok {
-            result.problem(OrdinaryObjectsChanged);
+            result.problem(Some(check), OrdinaryObjectsChanged);
         }
         if !end_ok {
-            result.problem(FixtureChanged);
+            result.problem(Some(check), FixtureChanged);
             if end.is_none_or(|v| v.error.is_some()) {
-                result.problem(ProbeUnavailable);
+                result.problem(Some(check), ProbeUnavailable);
             }
         }
         if !cleaned {
-            result.problem(CleanupUnconfirmed);
+            result.problem(Some(check), CleanupUnconfirmed);
             if cleanup.is_none_or(|v| v.error.is_some()) {
-                result.problem(ProbeUnavailable);
+                result.problem(Some(check), ProbeUnavailable);
             }
         }
         if !leaked && worker_available && ordinary_ok && end_ok && cleaned {
@@ -541,8 +545,10 @@ pub fn evaluate_paired_route_fixture(
         .filter(|check| observation(raw, *check).is_some_and(|v| paired_positive(spec, v)))
         .collect();
     result.proven.retain(|c| qualified.contains(c));
-    if qualified.len() + result.access_denials.len() != spec.checks().count() {
-        result.problem(crate::ControlFailure::MissingPositiveControl);
+    for check in spec.checks() {
+        if !qualified.contains(&check) && !result.access_denials.iter().any(|d| d.check == check) {
+            result.problem(Some(check), crate::ControlFailure::MissingPositiveControl);
+        }
     }
 
     result
@@ -654,13 +660,13 @@ mod fixture_tests {
         assert!(missing.proven.is_empty());
         assert!(
             missing
-                .controls
+                .controls()
                 .contains(&crate::ControlFailure::MissingPositiveControl)
         );
         let held = evaluate_paired_route_fixture(&spec(), values, Some(&start), false);
         assert!(held.proven.is_empty());
         assert!(
-            held.controls
+            held.controls()
                 .contains(&crate::ControlFailure::CleanupUnconfirmed)
         );
         assert!(!evaluate_route_fixture(&spec(), [Some(&negative); 5], true).complete());
@@ -687,7 +693,7 @@ mod fixture_tests {
             crate::ControlFailure::CleanupUnconfirmed,
             crate::ControlFailure::OrdinaryObjectsChanged,
         ] {
-            assert!(result.controls.contains(&control));
+            assert!(result.controls().contains(&control));
         }
     }
     #[test]
@@ -758,7 +764,7 @@ mod fixture_tests {
                 .all(|v| v.raw.stage == Open && v.protected.stage == Read)
         );
         assert_eq!(result.proven.len(), 4);
-        assert!(result.leaked.is_empty() && result.controls.is_empty());
+        assert!(result.leaked.is_empty() && result.controls().is_empty());
         assert!(
             evaluate_paired_route_fixture(&spec(), samples, None, true)
                 .access_denials
@@ -814,7 +820,7 @@ mod fixture_tests {
         assert!(result.proven.is_empty());
         assert!(
             result
-                .controls
+                .controls()
                 .contains(&crate::ControlFailure::MissingPositiveControl)
         );
     }

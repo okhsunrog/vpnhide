@@ -10,13 +10,13 @@ pub struct PairedNativeResult {
     pub binding: ScopedBindResult,
     pub proc_interfaces: ScopedProcInterfaceResult,
 }
-fn merge<T: Copy + PartialEq>(
+fn merge<T: Copy + PartialEq, F: Copy + PartialEq>(
     proven: &mut Vec<T>,
     leaked: &mut Vec<T>,
-    controls: &mut Vec<ControlFailure>,
+    controls: &mut Vec<F>,
     app_proven: &[T],
     app_leaked: &[T],
-    app_controls: &[ControlFailure],
+    app_controls: &[F],
 ) {
     proven.retain(|v| app_proven.contains(v));
     for v in app_leaked {
@@ -77,10 +77,10 @@ pub fn evaluate_paired_native_fixture(
     merge(
         &mut addresses.proven,
         &mut addresses.leaked,
-        &mut addresses.controls,
+        &mut addresses.failures,
         &app_addresses.proven,
         &app_addresses.leaked,
-        &app_addresses.controls,
+        &app_addresses.failures,
     );
     let mut proc_interfaces = evaluate_native_proc_interface_controls(spec, samples, app_raw);
     if !proc_interfaces.all_access_denied() {

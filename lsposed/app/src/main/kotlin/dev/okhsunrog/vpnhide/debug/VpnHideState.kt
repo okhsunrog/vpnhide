@@ -51,7 +51,7 @@ import kotlinx.serialization.json.JsonElement
  *    names, which also made them unmovable between packages.
  * 1: initial.
  */
-internal const val VPNHIDE_STATE_SCHEMA: Int = 13
+internal const val VPNHIDE_STATE_SCHEMA: Int = 14
 
 /**
  * What to include in a captured [VpnHideState]. The ONE source of truth for the

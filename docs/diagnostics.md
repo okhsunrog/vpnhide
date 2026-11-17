@@ -22,6 +22,22 @@ controls remain. An obsolete CLI request is refused before daemon/socket setup.
 
 ## Evidence and ownership
 
+RPC45 publishes one `CheckAssessment` per required check. Each row carries
+`Proven`, `Leaked` or `Unverified { reason }`. A confirmed Android access
+denial is an observation on the row and can coexist with separate kernel proof.
+Core computes the summary verdict from the required rows. A qualified leak
+takes precedence. An empty or partly unverified set cannot produce `Proven`.
+The execution phase is separate. A finished run can leave checks unverified,
+and an interrupted run can retain accepted results. An interruption carries
+the stage and typed failure kind alongside its human-readable detail.
+
+Framework causes identify their scope and, when known, their phase. Shared
+fixture failures and failed controls for one check retain their respective
+scope. Native route and address control failures name the affected subcheck
+when available. Where only absence of sufficient evidence is known, the row
+reports evidence unavailable. The APK reads the typed publication for status
+and reasons, and export schema14 includes these rows and the derived verdict.
+
 Diagnostic contract 12 requires Package Visibility and Ports even with empty
 user target lists. SysInterfaces and Filesystem are required only when the
 desired `filesystem_iface_paths` feature is enabled, matching RFC0002's
@@ -160,12 +176,16 @@ With Debug logging enabled, Core logs the first failed step of each admitted
 framework run. The line includes the run ID, requested phase, active phase,
 number of accepted samples, and failing operation. The assessment and IPC
 contracts stay the same.
+The agent bridge exposes the same explicit diagnostic request through
+`retryDiagnostics`. Read `getState` for the resulting Core publication.
 
-`system_server` publishes each phase acknowledgement by atomic rename. If
-the file is replaced while Core reads it, Core waits for a stable read under
-the existing phase and run deadlines. Only the exact current session and
-phase can advance. Invalid ownership, malformed data and in-place mutation
-still fail the read.
+`system_server` publishes each phase acknowledgement by atomic rename. The
+acknowledgement is only valid for the live run, so publication needs no disk
+flush. If the file is replaced while Core reads it, Core reopens the name
+under the existing phase and run deadlines. It also discards a read that
+overlapped a rename's ctime update. Only the exact current session and phase
+can advance. Changes to the file's content identity and malformed data fail
+the read.
 
 The framework channel closes every descriptor it opens with `Os.open`.
 Android streams constructed from a supplied descriptor borrow it, so the
@@ -409,9 +429,13 @@ The default-network check uses the real `ConnectivityManager.getActiveNetwork()`
 Binder call. The source supplies a test VPN in RAW and Protected and a test
 ordinary network in Prepared and Revoked. Only the authenticated worker receives
 these inputs. For the protected call, the resolver receives the ordinary network
-as the VPN's underlying candidate and runs its usual suitability checks. Core
-requires the test VPN in RAW, evidence of the production replacement, and the
-same test ordinary handle in the protected reply and both quiet phases.
+as the VPN's underlying candidate and runs its usual suitability checks. The
+fixture supplies the access decision for that candidate's capabilities inside
+the authorized invocation. ConnectivityService's live VPN and per-UID network
+policy still apply to real networks. The same source feeds the callback and
+PendingIntent replacements. Core requires the test VPN in RAW, evidence of
+the production replacement, and the same test ordinary handle in the protected
+reply and both quiet phases.
 An observed fixture VPN handle in both active phases remains a leak after cleanup failure.
 The earlier live-network version used APK/Core RPC37 and framework channel
 version3. On a Pixel 8 Pro with Android 17 and Builtin, that version confirmed
@@ -436,16 +460,25 @@ must suppress both VPN events. Protected default and REQUEST must rebuild
 AVAILABLE from the ordinary cover and keep it available when only the VPN is
 lost. The following ordinary AVAILABLE must be deduplicated.
 Core requires all three registrations to qualify the group. The worker overlaps
-their independent observation windows within one phase. Each registration has
-its own timeout, late-event window and cleanup before the next phase.
-ConnectivityManager queries run while the callback handler receives events.
-The 100 ms late-event window starts when the handler receives the ordinary
-network properties, including while the collector is processing an API call.
+their independent observation windows within one phase and unregisters before
+the next phase. The callback handler timestamps the fixture ordinary network's
+properties at delivery, including while the collector runs the synchronous
+connectivity queries. After those queries finish, an independent coroutine waits
+up to 900 ms for any registration still missing its ordinary control. The
+100 ms late-event window starts at delivery. A registration that receives
+no evidence in Prepared or Revoked is reopened once before leaving that
+phase. Other callback observations and partial deliveries are retained.
+If the control still has no delivery, Core reports an unavailable probe
+and can schedule its bounded retry after cleanup. A delivered event that
+contradicts the control is still a failed control.
 
 On Pixel 8 Pro with Android 17 and Builtin, the median full-run time in
 settled airplane mode fell from 8.73 s to 5.53 s across the callback, query and
 Ports scheduling changes. Each variant confirmed all 20 groups in nine runs.
 Medians use eight measured runs after one warm-up with the same Core and boot.
+In a later settled Wi-Fi comparison, removing the synchronous ACK flushes
+took the ConnectivityService handler from 36 filesystem syncs per run to zero.
+The full-run median moved from 6.60 s to 5.87 s across five runs per variant.
 
 The earlier live-network version
 introduced these observations and acknowledgements in RPC38 and framework
@@ -465,14 +498,17 @@ PendingIntent dispatcher with the detached VPN fixture in RAW and Protected and
 supplies the ordinary event if the one-shot registration remains available.
 RAW must deliver the fixture VPN. Protected LISTEN must suppress it and deliver
 the ordinary event. Protected REQUEST must deliver the ordinary cover in
-`EXTRA_NETWORK`. The worker overlaps the two independent broadcast waits with
-the PackageManager probes in the same phase. Android delivers the diagnostic
-broadcasts on the worker's callback handler at foreground priority. The worker
-verifies that the broadcast includes a request with
+`EXTRA_NETWORK`. The worker collects the two broadcasts during the PackageManager
+probes. After those probes, it waits up to 800 ms for any missing broadcast.
+Android delivers the diagnostic broadcasts on the worker's callback handler at
+foreground priority. The worker verifies that the broadcast includes a request with
 the expected INTERNET capability and unregisters both registrations and receivers.
+Debug logging timestamps fixture dispatch in ConnectivityService and the debug
+APK timestamps registration and first delivery for each callback and broadcast.
 Core requires one delivery per registration, ordinary controls before and after
-the protected phase, and fixture cleanup. Both dispatch paths must qualify the
-group. The earlier live-network version introduced this evidence in RPC39 and
+the protected phase, and fixture cleanup. If RAW and Protected qualify but a
+quiet phase received no broadcast, Core can retry after cleanup. Both dispatch
+paths must qualify the group. The earlier live-network version introduced this evidence in RPC39 and
 framework channel version5.
 
 On Pixel 8 Pro with Android 17 and Builtin, PendingIntent and callbacks
@@ -490,6 +526,11 @@ current results in three of four connected runs without a VPN and four of seven
 with a VPN. Each current result confirmed 17 of 20 groups. Across the online
 series, two workers missed the start deadline, one missed the framework deadline,
 and one report was stale. No run recorded a qualified leak.
+
+The later fixture and observation changes confirmed all 20 groups in 22
+successive Pixel runs. This covered settled Wi-Fi and LTE with Floppa VPN on or
+off, airplane mode with and without Wi-Fi, and connecting or disconnecting the
+VPN during a run.
 
 Core gives the worker a short-lived authority
 for the installed Android Settings package in its own profile. The worker calls

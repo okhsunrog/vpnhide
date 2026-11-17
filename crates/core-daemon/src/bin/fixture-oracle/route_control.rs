@@ -102,7 +102,7 @@ pub fn verify(protected: bool) -> Result<(), Box<dyn std::error::Error>> {
         || if protected {
             !completion.result.complete()
         } else {
-            !completion.result.controls.is_empty()
+            !completion.result.failures.is_empty()
                 || completion.result.leaked.len() != RouteCheck::required().len()
                 || !completion.result.proven.is_empty()
         }

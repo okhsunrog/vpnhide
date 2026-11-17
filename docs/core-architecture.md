@@ -1,6 +1,6 @@
 # Core architecture
 
-Current implementation, app/core RPC44 and journal21 (reads1–20). Backend policy
+Current implementation, app/core RPC45 and journal21 (reads1–20). Backend policy
 implementation and publication of verified changes are approved under
 [RFC0005](rfcs/0005-unified-backend-lifecycle-policy.md); remaining flows and device
 gates are tracked separately. Kernel control-v2 / telemetry-v1 is unchanged.
@@ -483,7 +483,7 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-The current paired APK/Core contract is RPC44; journal21 reads schemas1–20. These
+The current paired APK/Core contract is RPC45; journal21 reads schemas1–20. These
 versions are independent of kernel control2/telemetry1 and do not require a
 compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
 publication and sampled current/stale/unattributed process consumption are separate
@@ -550,15 +550,13 @@ authority when newer Zygisk admission fails before publication, so reset can
 revoke that known grant without accepting an arbitrary stale or newer file.
 
 
-RPC19 adds `autonomous_assessment` next to its source `autonomous_diagnostics`.
-Core's publisher computes both in one publication, including context/epoch
-invalidation; APK code cannot promote reply data into a second authority. The
-shared Rust projection separates execution phase, scoped proof, retained leaks,
-unverified required checks, controls and reuse blockers. Incomplete loaded-process
-coverage is not a condition change or complete protection. The read-only Kotlin
-snapshot owner joins accepted Core/config/root provenance and exposes retained
-history as unavailable after disconnection. Production consumer cutover remains
-a separate implementation step; the legacy suite is still wired until that step.
+Core publishes `autonomous_assessment` alongside its source
+`autonomous_diagnostics`. The two share context and epoch invalidation. RPC45
+reports one typed outcome per required check and derives the verdict from those
+outcomes. The shared Rust projection retains execution phase, scoped proof,
+leaks, control failures and reuse blockers. The APK consumes the accepted
+publication. Its snapshot owner joins Core, config and root provenance and
+exposes retained history as unavailable after disconnection.
 
 RPC20 extends the scoped framework worker protocol to version2. Legacy
 `getNetworkInfo(TYPE_VPN)` and `getAllNetworkInfo` have independent dirty source,
@@ -592,7 +590,7 @@ Zygisk authorization cannot claim global process coverage.
 The foreign-VPN observer, UID-in-tunnel probe and routing RPC/FFI field are removed.
 Dashboard/diagnostics consume Core evidence independently of external VPN presence
 and split-tunnel membership. Real fixture/hook API observations and manual network
-forensics remain. APK/Core must both speak RPC44; journal21 and the frozen
+forensics remain. APK/Core must both speak RPC45; journal21 and the frozen
 kernel control2/telemetry1 are independent, so a compatible builtin kernel does not
 need rebuilding merely because the app protocol changed.
 

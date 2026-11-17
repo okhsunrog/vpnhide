@@ -213,19 +213,23 @@ pub fn fixture_addresses(session: u64) -> ([u8; 4], [u8; 16]) {
 pub struct ScopedAddressResult {
     pub proven: Vec<AddressCheck>,
     pub leaked: Vec<AddressCheck>,
-    pub controls: Vec<ControlFailure>,
+    pub failures: Vec<crate::NativeControlIssue<AddressCheck>>,
 }
 impl ScopedAddressResult {
     pub fn complete(&self) -> bool {
-        self.controls.is_empty()
+        self.failures.is_empty()
             && self.leaked.is_empty()
             && AddressCheck::required()
                 .iter()
                 .all(|c| self.proven.contains(c))
     }
-    fn problem(&mut self, problem: ControlFailure) {
-        if !self.controls.contains(&problem) {
-            self.controls.push(problem);
+    pub fn controls(&self) -> Vec<ControlFailure> {
+        crate::native_control_reasons(&self.failures)
+    }
+    fn problem(&mut self, check: Option<AddressCheck>, reason: ControlFailure) {
+        let issue = crate::NativeControlIssue { check, reason };
+        if !self.failures.contains(&issue) {
+            self.failures.push(issue);
         }
     }
 }
@@ -270,8 +274,12 @@ fn ifconf_size(
     actor: NativeReadActor,
     samples: [Option<&IfconfObservation>; 5],
 ) {
+    let check = AddressCheck {
+        actor,
+        vector: AddressVector::IfconfSize,
+    };
     let [Some(n), Some(s), Some(w), e, c] = samples else {
-        result.problem(ControlFailure::ProbeUnavailable);
+        result.problem(Some(check), ControlFailure::ProbeUnavailable);
         return;
     };
     let loopback = ordinary(&n.entries, 4);
@@ -279,7 +287,7 @@ fn ifconf_size(
     // and stable worker queries. Each count is local to its own ioctl sequence;
     // only the owned fixture and loopback are expected to persist across phases.
     if ![n, s].iter().all(|v| v.consistent()) || w.size_changed() {
-        result.problem(ControlFailure::ProbeUnavailable);
+        result.problem(Some(check), ControlFailure::ProbeUnavailable);
         return;
     }
     if n.entries.iter().any(|a| marker(spec, a, 4))
@@ -288,23 +296,20 @@ fn ifconf_size(
         || ordinary(&s.entries, 4) != loopback
         || ordinary(&w.entries, 4) != loopback
     {
-        result.problem(ControlFailure::FixtureChanged);
+        result.problem(Some(check), ControlFailure::FixtureChanged);
         return;
     }
     let visible_other =
         w.entries.iter().filter(|a| !marker(spec, a, 4)).count() as u32 * w.record_bytes;
     let leaked = w.size_before > visible_other;
     if leaked {
-        result.leaked.push(AddressCheck {
-            actor,
-            vector: AddressVector::IfconfSize,
-        });
+        result.leaked.push(check);
     }
     let mut controlled = true;
     for failure in crate::later_control_failures(e, ControlFailure::FixtureChanged, |e| {
         e.consistent() && positive(spec, &e.entries, 4) && ordinary(&e.entries, 4) == loopback
     }) {
-        result.problem(failure);
+        result.problem(Some(check), failure);
         controlled = false;
     }
     for failure in crate::later_control_failures(c, ControlFailure::CleanupUnconfirmed, |c| {
@@ -312,16 +317,13 @@ fn ifconf_size(
             && !c.entries.iter().any(|a| marker(spec, a, 4))
             && ordinary(&c.entries, 4) == loopback
     }) {
-        result.problem(failure);
+        result.problem(Some(check), failure);
         controlled = false;
     }
     if !leaked && w.size_before == visible_other && controlled {
-        result.proven.push(AddressCheck {
-            actor,
-            vector: AddressVector::IfconfSize,
-        });
+        result.proven.push(check);
     } else if w.size_before < visible_other {
-        result.problem(ControlFailure::ProbeUnavailable);
+        result.problem(Some(check), ControlFailure::ProbeUnavailable);
     }
 }
 
@@ -333,15 +335,15 @@ fn lists(
     samples: [Option<&[ObservedAddress]>; 5],
 ) {
     let [Some(n), Some(s), Some(w), e, c] = samples else {
-        result.problem(ControlFailure::ProbeUnavailable);
+        result.problem(Some(check), ControlFailure::ProbeUnavailable);
         return;
     };
     if n.iter().any(|a| marker(spec, a, family)) || ordinary(n, family).is_empty() {
-        result.problem(ControlFailure::MissingNegativeControl);
+        result.problem(Some(check), ControlFailure::MissingNegativeControl);
         return;
     }
     if !positive(spec, s, family) || ordinary(s, family) != ordinary(n, family) {
-        result.problem(ControlFailure::MissingPositiveControl);
+        result.problem(Some(check), ControlFailure::MissingPositiveControl);
         return;
     }
     let leaked = w.iter().any(|a| marker(spec, a, family));
@@ -350,19 +352,19 @@ fn lists(
     }
     let mut controlled = true;
     if ordinary(w, family) != ordinary(s, family) {
-        result.problem(ControlFailure::OrdinaryObjectsChanged);
+        result.problem(Some(check), ControlFailure::OrdinaryObjectsChanged);
         controlled = false;
     }
     for failure in crate::later_control_failures(e, ControlFailure::FixtureChanged, |e| {
         positive(spec, e, family) && ordinary(e, family) == ordinary(s, family)
     }) {
-        result.problem(failure);
+        result.problem(Some(check), failure);
         controlled = false;
     }
     for failure in crate::later_control_failures(c, ControlFailure::CleanupUnconfirmed, |c| {
         !c.iter().any(|a| marker(spec, a, family)) && ordinary(c, family) == ordinary(n, family)
     }) {
-        result.problem(failure);
+        result.problem(Some(check), failure);
         controlled = false;
     }
     if !leaked && controlled {
@@ -377,14 +379,21 @@ fn evaluate_actor(
     samples: [Option<&AddressActorMeasurement>; 5],
 ) {
     for kind in AddressIoctl::ALL {
+        let vector = match kind {
+            AddressIoctl::Address => AddressVector::IoctlAddress,
+            AddressIoctl::Netmask => AddressVector::IoctlNetmask,
+            AddressIoctl::Broadcast => AddressVector::IoctlBroadcast,
+            AddressIoctl::Destination => AddressVector::IoctlDestination,
+        };
+        let check = AddressCheck { actor, vector };
         let observations =
             samples.map(|m| m.and_then(|m| m.ioctls.iter().find(|o| o.kind == kind)));
         let [Some(n), Some(s), Some(w), e, c] = observations else {
-            result.problem(ControlFailure::ProbeUnavailable);
+            result.problem(Some(check), ControlFailure::ProbeUnavailable);
             continue;
         };
         if !absent(&n.fixture) || n.ordinary.value().is_none() {
-            result.problem(ControlFailure::MissingNegativeControl);
+            result.problem(Some(check), ControlFailure::MissingNegativeControl);
             continue;
         }
         let expected = match kind {
@@ -395,48 +404,37 @@ fn evaluate_actor(
             AddressIoctl::Broadcast => vec![0; 4],
         };
         if s.fixture.value() != Some(&expected) || s.ordinary != n.ordinary {
-            result.problem(ControlFailure::MissingPositiveControl);
+            result.problem(Some(check), ControlFailure::MissingPositiveControl);
             continue;
         }
-        let check = match kind {
-            AddressIoctl::Address => AddressVector::IoctlAddress,
-            AddressIoctl::Netmask => AddressVector::IoctlNetmask,
-            AddressIoctl::Broadcast => AddressVector::IoctlBroadcast,
-            AddressIoctl::Destination => AddressVector::IoctlDestination,
-        };
+
         let leaked = w.fixture.value().is_some();
         if leaked {
-            result.leaked.push(AddressCheck {
-                actor,
-                vector: check,
-            });
+            result.leaked.push(check);
         }
         let mut controlled = true;
         if w.ordinary != s.ordinary {
-            result.problem(ControlFailure::OrdinaryObjectsChanged);
+            result.problem(Some(check), ControlFailure::OrdinaryObjectsChanged);
             controlled = false;
         }
         for failure in crate::later_control_failures(e, ControlFailure::FixtureChanged, |e| {
             e.fixture == s.fixture && e.ordinary == s.ordinary
         }) {
-            result.problem(failure);
+            result.problem(Some(check), failure);
             controlled = false;
         }
         for failure in crate::later_control_failures(c, ControlFailure::CleanupUnconfirmed, |c| {
             absent(&c.fixture) && c.ordinary == n.ordinary
         }) {
-            result.problem(failure);
+            result.problem(Some(check), failure);
             controlled = false;
         }
         if !leaked && !absent(&w.fixture) {
-            result.problem(ControlFailure::ProbeUnavailable);
+            result.problem(Some(check), ControlFailure::ProbeUnavailable);
             controlled = false;
         }
         if !leaked && controlled {
-            result.proven.push(AddressCheck {
-                actor,
-                vector: check,
-            });
+            result.proven.push(check);
         }
     }
     for (family, vector) in [
@@ -479,12 +477,12 @@ pub fn evaluate_address_fixture(
 ) -> ScopedAddressResult {
     let mut result = ScopedAddressResult::default();
     if !spec.valid() || [negative, start, worker].iter().any(|m| !m.bounded()) {
-        result.problem(ControlFailure::InvalidSpec);
+        result.problem(None, ControlFailure::InvalidSpec);
         return result;
     }
     let samples = [negative, start, worker, end, cleanup].map(|m| m.bounded().then_some(m));
     if samples.iter().any(Option::is_none) {
-        result.problem(ControlFailure::InvalidSpec);
+        result.problem(None, ControlFailure::InvalidSpec);
     }
     for actor in NativeReadActor::ALL {
         evaluate_actor(
@@ -520,7 +518,10 @@ pub fn evaluate_native_address_fixture(
 ) -> ScopedAddressResult {
     let [Some(n), Some(s), Some(w), e, c] = samples.map(|m| m.addresses.as_ref()) else {
         return ScopedAddressResult {
-            controls: vec![ControlFailure::ProbeUnavailable],
+            failures: vec![crate::NativeControlIssue {
+                check: None,
+                reason: ControlFailure::ProbeUnavailable,
+            }],
             ..Default::default()
         };
     };

@@ -1,7 +1,7 @@
 # Reading a VPN Hide debug bundle
 
 Start with `state.json` inside the exported ZIP. This guide describes the current
-schema13, paired APK/Core RPC44 and diagnostic contract 12. Historical captures use
+schema14, paired APK/Core RPC45 and diagnostic contract 12. Historical captures use
 [the versioned reference](archive/2026-11-03-debug-bundle-legacy-reference.md).
 Current exports do not require a foreign VPN or split-tunnel membership, and
 collecting a file does not admit a diagnostic run.
@@ -31,8 +31,8 @@ jq '{schema, generatedAt, captureKind, captureOptions, errors}' state.json
 1. Read `schema`, `app`, `device`, `captureOptions` and `errors`.
 2. Read `autonomousDiagnostics.availability`, `current`, source identities and
    `rootJoined`. Capture time is not measurement time.
-3. Read `autonomousDiagnostics.assessment`: required, proven, leaked, unverified,
-   controls, reuse blockers and infrastructure/cleanup facts.
+3. Read `autonomousDiagnostics.assessment.checks` for each outcome and its reason,
+   and `assessment.failure` for an interruption of the run.
 4. Read `nativeStatus`: selection, attempts, delivery, observed runtime and setup
    are separate. Neither an installed module nor a setup-ready state proves hiding.
 5. Inspect the relevant retained run evidence, then raw `sections`, logs and
@@ -46,6 +46,7 @@ wire versions are separate boundaries.
 
 | Schema | Shipped in | What changed |
 |---|---|---|
+| 14 | main (unreleased) | `assessment.checks` records the outcome and reason per check, including Android access denial as an observation. `assessment.verdict` is computed from the rows. `assessment.failure` carries the typed stage and cause of an interruption. |
 | 13 | main (unreleased) | `run.routes` also carries the `rule_ipv4` and `rule_ipv6` subchecks. Scoped policy-rule rows can appear in `run.nativeRaw`. |
 | 12 | main (unreleased) | `run.routes` records per-actor netlink and proc IPv4/IPv6 route proof, leaks and control failures. `run.nativeRaw` can also carry scoped route observations. |
 | 11 | main (unreleased) | Logcat duration now includes suspend using CLOCK_BOOTTIME. `clock_unavailable` is a distinct auto-stop reason; its duration can be the last measured lower bound. Field names remain stable. |
@@ -86,7 +87,7 @@ from `generatedAt`, a new root read or unrelated publication sequence changes.
 
 `run` carries session, diagnostic contract, fingerprint, loaded-generation and
 platform evidence, stale state and optional framework attribution. The assessment
-reports scope honestly; current code has no whole-suite success variant.
+derives the verdict from the required check outcomes. A failed run and a recorded leak can coexist.
 
 | Evidence | Meaning and limits |
 | --- | --- |
@@ -106,7 +107,7 @@ come from the supported contract and enabled features. See
 
 ```sh
 jq '.autonomousDiagnostics | {availability, current, rootJoined, run, assessment}' state.json
-jq '.autonomousDiagnostics.assessment | {required, proven, leaked, unverified,
+jq '.autonomousDiagnostics.assessment | {phase, verdict, checks, failure,
     nativeControls, frameworkControls, reuseBlockers, cleanupConfirmed}' state.json
 ```
 
@@ -148,9 +149,9 @@ Their presence in the JSON is not a surviving VPN readiness gate or verdict owne
 
 ## 4. The diagnostic report — is the VPN actually hidden?
 
-Read `autonomousDiagnostics.assessment` and its provenance. `leaked` records
-qualified observations; `unverified` and control failures identify missing proof.
-`proven` applies only to its required controlled group. It is not a general promise
+Read `autonomousDiagnostics.assessment.checks` and its provenance. A row with
+`outcome: leaked` records a qualified observation. An `unverified` row carries
+an explanation of missing proof. A `proven` row applies to that controlled check. It is not a general promise
 about every process, API, old game instance or vendor kernel.
 
 Do not ask the user to enable a foreign VPN or route this APK through one to make
@@ -178,7 +179,7 @@ These reads do not run a suite or prove protection.
 | Kernel backend | `kmod_prop`, `kmod_state`, `kmod_diag`, `proc_modules`, `kprobes`, `kernel_symbols`, `kernel_config` |
 | KPM/Zygisk | `kpm_state`, `kpatch_runtime`, `zygisk_status`, associated module/artifact metadata |
 | Ports | `ports_state`, `ports_chain`, typed Core per-family apply evidence |
-| Link enumeration | `netlink_link_request_denied` in autonomous assessment controls identifies a paired worker send denial with successful root controls. It does not count as hiding proof. |
+| Link enumeration | `androidAccessDenied` on `netlink_links` identifies a paired worker send denial with successful root controls. It does not count as hiding proof. |
 | Proc routes | `proc_route_request_denied` identifies paired open/read denials for both actors and IP families with successful root controls. |
 | Proc interfaces | `proc_interface_request_denied` identifies paired access denials on both proc interface files through libc and direct syscalls, with successful root controls. |
 | Java layer | `lsposed_state`, `lsposed_framework`, `lsposed_files`, boot logcat and hook report |

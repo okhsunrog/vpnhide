@@ -531,7 +531,7 @@ mod tests {
         writer.join().unwrap();
         assert_eq!(run.phases.len(), 4);
         assert!(store.current().unwrap().is_none());
-        assert!(!evaluate_framework(&run.phases, true).controls.is_empty());
+        assert!(!evaluate_framework(&run.phases, true).failures.is_empty());
         assert_eq!(
             run.step_with(request(&run, FrameworkWorkerPhase::Raw), &store, |_| true),
             Err(DiagnosticError::StaleSession)

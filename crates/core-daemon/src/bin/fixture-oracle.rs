@@ -245,7 +245,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let addresses_expected = if protected {
         done.addresses.complete()
     } else {
-        done.addresses.controls.is_empty()
+        done.addresses.failures.is_empty()
             && AddressCheck::required()
                 .iter()
                 .all(|v| done.addresses.leaked.contains(v))
@@ -283,7 +283,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         || !incomplete.addresses.proven.is_empty()
         || !incomplete
             .addresses
-            .controls
+            .controls()
             .contains(&ControlFailure::CleanupUnconfirmed)
         || !AddressCheck::required()
             .iter()
@@ -349,7 +349,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         || !completed.addresses.proven.is_empty()
         || !completed
             .addresses
-            .controls
+            .controls()
             .contains(&ControlFailure::MissingPositiveControl)
         || !cleanup_confirmed(&partial_spec, &completed.cleanup)
         || completed.proc_interfaces.leaked.len() != 2

@@ -133,17 +133,46 @@ pub enum DiagnosticError {
     StaleSession,
     Malformed,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticStage {
+    Coordinator,
+    NativeFixture,
+    WorkerStart,
+    NativeMeasurement,
+    FrameworkAndPorts,
+    Cleanup,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticFailureKind {
+    Timeout,
+    Busy,
+    Cancelled,
+    Unavailable,
+    CleanupUnconfirmed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiagnosticFailure {
+    pub stage: DiagnosticStage,
+    pub kind: DiagnosticFailureKind,
+    pub detail: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum DiagnosticOutcome {
     Running,
-    /// Useful scoped evidence with remaining work. Never full protection PASS.
-    Incomplete {
+    /// Execution finished. The per-check assessment determines the verdict.
+    Finished {
         native: ScopedNativeResult,
-        missing: Vec<RequiredCheck>,
     },
     Infrastructure {
-        detail: String,
+        failure: DiagnosticFailure,
         native: Option<ScopedNativeResult>,
         cleanup_confirmed: Option<bool>,
     },
@@ -180,54 +209,32 @@ pub struct DiagnosticRun {
 impl DiagnosticRun {
     pub fn record_ports(&mut self, ports: crate::ScopedPortsResult) {
         self.ports = Some(ports);
-        self.refresh_missing();
     }
 
     pub fn record_routes(&mut self, routes: crate::ScopedRouteResult) {
         self.routes = Some(routes);
-        self.refresh_missing();
     }
 
     pub fn record_filesystem(&mut self, result: crate::ScopedFilesystemResult) {
         self.filesystem = Some(result);
-        self.refresh_missing();
     }
     pub fn record_sys_interfaces(&mut self, result: crate::ScopedSysInterfaceResult) {
         self.sys_interfaces = Some(result);
-        self.refresh_missing();
-    }
-    fn refresh_missing(&mut self) {
-        let assessment = self.assessment();
-        if let DiagnosticOutcome::Incomplete { missing, .. } = &mut self.outcome {
-            *missing = assessment
-                .required
-                .into_iter()
-                .filter(|r| !assessment.proven.contains(r))
-                .collect();
-        }
     }
     pub fn record_addresses(&mut self, addresses: crate::ScopedAddressResult) {
         self.addresses = Some(addresses);
-        self.refresh_missing();
     }
     pub fn record_proc_interfaces(&mut self, result: crate::ScopedProcInterfaceResult) {
         self.proc_interfaces = Some(result);
-        self.refresh_missing();
     }
     pub fn record_binding(&mut self, binding: crate::ScopedBindResult) {
         self.binding = Some(binding);
-        self.refresh_missing();
     }
     pub fn record_framework(&mut self, framework: crate::framework::ScopedFrameworkResult) {
         self.framework = Some(framework);
-        self.refresh_missing();
     }
     pub fn record_native(&mut self, native: ScopedNativeResult) {
-        self.outcome = DiagnosticOutcome::Incomplete {
-            native,
-            missing: Vec::new(),
-        };
-        self.refresh_missing();
+        self.outcome = DiagnosticOutcome::Finished { native };
     }
 }
 
@@ -298,9 +305,14 @@ mod tests {
                 NativeCheck::NetlinkGetlink,
             ],
         });
-        let DiagnosticOutcome::Incomplete { missing, .. } = run.outcome else {
-            panic!("partial run");
-        };
+        let missing: Vec<_> = run
+            .assessment()
+            .checks
+            .into_iter()
+            .filter_map(|row| {
+                (!matches!(row.outcome, crate::CheckOutcome::Proven)).then_some(row.check)
+            })
+            .collect();
         assert_eq!(missing.len(), 19);
         assert!(missing.contains(&RequiredCheck::Getifaddrs));
         assert!(missing.contains(&RequiredCheck::FrameworkCallbacks));

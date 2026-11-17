@@ -330,7 +330,7 @@ struct MeasurementFailure {
     proc_interfaces: Option<ScopedProcInterfaceResult>,
     addresses: Option<ScopedAddressResult>,
     binding: Option<ScopedBindResult>,
-    detail: String,
+    failure: DiagnosticFailure,
     native: Option<ScopedNativeResult>,
     cleanup_confirmed: Option<bool>,
 }
@@ -340,6 +340,31 @@ fn transient_worker_error(error: &io::Error) -> bool {
         error.kind(),
         io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
     )
+}
+
+fn diagnostic_io_failure(stage: DiagnosticStage, error: &io::Error) -> DiagnosticFailure {
+    let kind = match error.kind() {
+        io::ErrorKind::TimedOut => DiagnosticFailureKind::Timeout,
+        io::ErrorKind::WouldBlock => DiagnosticFailureKind::Busy,
+        io::ErrorKind::Interrupted => DiagnosticFailureKind::Cancelled,
+        _ => DiagnosticFailureKind::Unavailable,
+    };
+    DiagnosticFailure {
+        stage,
+        kind,
+        detail: error.to_string(),
+    }
+}
+
+fn stage_label(stage: DiagnosticStage) -> &'static str {
+    match stage {
+        DiagnosticStage::Coordinator => "coordinator",
+        DiagnosticStage::NativeFixture => "native fixture",
+        DiagnosticStage::WorkerStart => "worker start",
+        DiagnosticStage::NativeMeasurement => "native measurement",
+        DiagnosticStage::FrameworkAndPorts => "framework",
+        DiagnosticStage::Cleanup => "cleanup",
+    }
 }
 
 fn retry_delay(
@@ -509,7 +534,11 @@ impl Coordinator {
                 inner.active = None;
                 inner.last.as_mut().expect("run reserved").outcome =
                     DiagnosticOutcome::Infrastructure {
-                        detail: "diagnostic thread unavailable".into(),
+                        failure: DiagnosticFailure {
+                            stage: DiagnosticStage::Coordinator,
+                            kind: DiagnosticFailureKind::Unavailable,
+                            detail: "diagnostic thread unavailable".into(),
+                        },
                         native: None,
                         cleanup_confirmed: None,
                     };
@@ -538,7 +567,7 @@ impl Coordinator {
                 proc_interfaces: None,
                 addresses: None,
                 binding: None,
-                detail: detail.to_string(),
+                failure: diagnostic_io_failure(DiagnosticStage::WorkerStart, detail),
                 native: None,
                 cleanup_confirmed: Some(true),
             })),
@@ -586,9 +615,7 @@ impl Coordinator {
             Ok(evidence) => evidence.address_snapshot_unstable,
             Err(failure) => failure.transient,
         } || framework.as_ref().is_some_and(|(result, _)| {
-            result.controls.contains(
-                &vpnhide_diagnostic_model::framework::FrameworkControlFailure::ProbeUnavailable,
-            )
+            result.failures.iter().any(|failure| failure.reason == vpnhide_diagnostic_model::framework::FrameworkControlFailure::ProbeUnavailable)
         });
         let Some(run) = inner.last.as_mut() else {
             return;
@@ -616,7 +643,7 @@ impl Coordinator {
                 run.addresses = failure.addresses;
                 run.binding = failure.binding;
                 run.outcome = DiagnosticOutcome::Infrastructure {
-                    detail: failure.detail,
+                    failure: failure.failure,
                     native: failure.native,
                     cleanup_confirmed: failure.cleanup_confirmed,
                 }
@@ -639,7 +666,7 @@ impl Coordinator {
             transient,
             clean,
             !run.stale,
-            !run.assessment().leaked.is_empty(),
+            run.assessment().verdict() == vpnhide_diagnostic_model::DiagnosticVerdict::Leaked,
         ) {
             inner.retry_at = BootDeadline::from_now(delay).ok();
             if inner.retry_at.is_some() && debug {
@@ -649,7 +676,7 @@ impl Coordinator {
                 ));
             }
         }
-        if matches!(run.outcome, DiagnosticOutcome::Incomplete { .. }) {
+        if matches!(run.outcome, DiagnosticOutcome::Finished { .. }) {
             inner.last_completed = Some(run.clone());
         }
         inner.last = Some(run);
@@ -691,7 +718,7 @@ impl Coordinator {
                     proc_interfaces: None,
                     addresses: None,
                     binding: None,
-                    detail: format!("native fixture unavailable: {}", failure.error),
+                    failure: diagnostic_io_failure(DiagnosticStage::NativeFixture, &failure.error),
                     native: None,
                     cleanup_confirmed: if route_cleaned { cleaned } else { Some(false) },
                 }));
@@ -710,6 +737,7 @@ impl Coordinator {
             session,
             debug,
         );
+        let mut worker_stage = DiagnosticStage::WorkerStart;
         let report = (|| -> io::Result<NativeMeasurement> {
             let app_dir = app_dir
                 .as_deref()
@@ -769,17 +797,18 @@ impl Coordinator {
             trace(debug, session, "worker_launch_done");
             let mut inner = self.inner.lock().expect("diagnostic coordinator");
             loop {
+                let active = inner
+                    .active
+                    .as_ref()
+                    .filter(|a| a.session == session)
+                    .ok_or_else(|| io::Error::other("diagnostic session expired"))?;
+                worker_stage = active.stage();
                 if inner.cancelled {
                     return Err(io::Error::new(
                         io::ErrorKind::Interrupted,
                         "diagnostic run cancelled",
                     ));
                 }
-                let active = inner
-                    .active
-                    .as_mut()
-                    .filter(|a| a.session == session)
-                    .ok_or_else(|| io::Error::other("diagnostic session expired"))?;
                 if active.finished {
                     return active.report.clone().ok_or_else(|| {
                         io::Error::other("native worker finished without observation")
@@ -788,7 +817,10 @@ impl Coordinator {
                 let Some(remaining) = active.deadline.wait_slice(BootInstant::now()?) else {
                     return Err(io::Error::new(
                         io::ErrorKind::TimedOut,
-                        format!("Android diagnostic {} deadline exceeded", active.stage()),
+                        format!(
+                            "Android diagnostic {} deadline exceeded",
+                            stage_label(worker_stage)
+                        ),
                     ));
                 };
                 inner = self
@@ -897,12 +929,16 @@ impl Coordinator {
                 proc_interfaces: Some(completion.proc_interfaces),
                 addresses: Some(completion.addresses),
                 binding: Some(completion.binding),
-                detail: if native_clean {
-                    "route or rule fixture cleanup unconfirmed; diagnostic admission held"
-                } else {
-                    "native fixture cleanup unconfirmed; diagnostic admission held"
-                }
-                .into(),
+                failure: DiagnosticFailure {
+                    stage: DiagnosticStage::Cleanup,
+                    kind: DiagnosticFailureKind::CleanupUnconfirmed,
+                    detail: if native_clean {
+                        "route or rule fixture cleanup unconfirmed; diagnostic admission held"
+                    } else {
+                        "native fixture cleanup unconfirmed; diagnostic admission held"
+                    }
+                    .into(),
+                },
                 native: Some(completion.result),
                 cleanup_confirmed: Some(false),
             })),
@@ -916,7 +952,7 @@ impl Coordinator {
                 proc_interfaces: Some(completion.proc_interfaces),
                 addresses: Some(completion.addresses),
                 binding: Some(completion.binding),
-                detail: detail.to_string(),
+                failure: diagnostic_io_failure(worker_stage, &detail),
                 native: Some(completion.result),
                 cleanup_confirmed: Some(cleaned),
             })),
@@ -988,7 +1024,10 @@ impl Coordinator {
                 };
                 return (
                     ScopedRouteResult {
-                        controls: vec![failure],
+                        failures: vec![NativeControlIssue {
+                            check: None,
+                            reason: failure,
+                        }],
                         ..Default::default()
                     },
                     cleaned,
@@ -1310,13 +1349,13 @@ impl Coordinator {
 }
 
 impl Active {
-    fn stage(&self) -> &'static str {
+    fn stage(&self) -> DiagnosticStage {
         if self.report.is_some() {
-            "framework"
+            DiagnosticStage::FrameworkAndPorts
         } else if self.worker.is_some() {
-            "native measurement"
+            DiagnosticStage::NativeMeasurement
         } else {
-            "worker start"
+            DiagnosticStage::WorkerStart
         }
     }
 
@@ -1718,7 +1757,11 @@ mod tests {
             plan: plan(&snapshot),
             stale: false,
             outcome: DiagnosticOutcome::Infrastructure {
-                detail: "unavailable".into(),
+                failure: DiagnosticFailure {
+                    stage: DiagnosticStage::WorkerStart,
+                    kind: DiagnosticFailureKind::Unavailable,
+                    detail: "unavailable".into(),
+                },
                 native: None,
                 cleanup_confirmed: None,
             },
@@ -1903,7 +1946,11 @@ mod tests {
         state.publisher.update(|s| s.backend = snapshot.backend);
         assert_eq!(fingerprint(&state, &state.snapshot()), before);
         run.outcome = DiagnosticOutcome::Infrastructure {
-            detail: "fixture finished".into(),
+            failure: DiagnosticFailure {
+                stage: DiagnosticStage::NativeFixture,
+                kind: DiagnosticFailureKind::Unavailable,
+                detail: "fixture finished".into(),
+            },
             native: None,
             cleanup_confirmed: Some(true),
         };

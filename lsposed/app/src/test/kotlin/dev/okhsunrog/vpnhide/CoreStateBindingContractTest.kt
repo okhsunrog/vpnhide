@@ -56,16 +56,14 @@ class CoreStateBindingContractTest {
         )
     private val assessment =
         CoreDiagnosticAssessment(
-            CoreAssessmentPhase.RUNNING,
-            emptyList(),
-            emptyList(),
-            emptyList(),
-            emptyList(),
-            emptyList(),
-            emptyList(),
-            emptyList(),
-            null,
-            null,
+            phase = CoreAssessmentPhase.RUNNING,
+            checks = emptyList(),
+            verdict = CoreDiagnosticVerdict.UNVERIFIED,
+            nativeControls = emptyList(),
+            frameworkControls = emptyList(),
+            reuseBlockers = emptyList(),
+            failure = null,
+            cleanupConfirmed = null,
         )
     private val publication =
         CorePublication(

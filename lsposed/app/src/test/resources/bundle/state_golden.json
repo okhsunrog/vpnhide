@@ -1,5 +1,5 @@
 {
-    "schema": 13,
+    "schema": 14,
     "generatedAt": "2026-08-22T12:00:00+0300",
     "captureKind": "debug",
     "app": {
@@ -159,52 +159,149 @@
             }
         },
         "assessment": {
-            "phase": "incomplete",
-            "required": [
-                "ioctl_flags",
-                "ioctl_mtu",
-                "getifaddrs",
-                "netlink_links",
-                "ioctl_addresses",
-                "bind_to_device",
-                "netlink_addresses",
-                "netlink_routes",
-                "netlink_rules",
-                "proc_routes",
-                "proc_interfaces",
-                "sys_interfaces",
-                "framework_networks",
-                "framework_default_network",
-                "framework_capabilities",
-                "framework_link_properties",
-                "framework_legacy_info",
-                "framework_callbacks",
-                "framework_pending_intent"
-            ],
-            "proven": [
-                "ioctl_flags",
-                "ioctl_mtu",
-                "getifaddrs",
-                "netlink_links",
-                "framework_capabilities"
-            ],
-            "leaked": [
-                "framework_networks"
-            ],
-            "unverified": [
-                "ioctl_addresses",
-                "bind_to_device",
-                "netlink_addresses",
-                "netlink_routes",
-                "netlink_rules",
-                "proc_routes",
-                "proc_interfaces",
-                "sys_interfaces",
-                "framework_default_network",
-                "framework_link_properties",
-                "framework_legacy_info",
-                "framework_callbacks",
-                "framework_pending_intent"
+            "phase": "finished",
+            "verdict": "leaked",
+            "checks": [
+                {
+                    "check": "ioctl_flags",
+                    "outcome": "proven",
+                    "androidAccessDenied": false,
+                    "reason": null
+                },
+                {
+                    "check": "ioctl_mtu",
+                    "outcome": "proven",
+                    "androidAccessDenied": false,
+                    "reason": null
+                },
+                {
+                    "check": "getifaddrs",
+                    "outcome": "proven",
+                    "androidAccessDenied": false,
+                    "reason": null
+                },
+                {
+                    "check": "netlink_links",
+                    "outcome": "proven",
+                    "androidAccessDenied": false,
+                    "reason": null
+                },
+                {
+                    "check": "ioctl_addresses",
+                    "outcome": "unverified",
+                    "androidAccessDenied": false,
+                    "reason": {
+                        "kind": "evidence_unavailable"
+                    }
+                },
+                {
+                    "check": "bind_to_device",
+                    "outcome": "unverified",
+                    "androidAccessDenied": false,
+                    "reason": {
+                        "kind": "evidence_unavailable"
+                    }
+                },
+                {
+                    "check": "netlink_addresses",
+                    "outcome": "unverified",
+                    "androidAccessDenied": false,
+                    "reason": {
+                        "kind": "evidence_unavailable"
+                    }
+                },
+                {
+                    "check": "netlink_routes",
+                    "outcome": "unverified",
+                    "androidAccessDenied": false,
+                    "reason": {
+                        "kind": "evidence_unavailable"
+                    }
+                },
+                {
+                    "check": "netlink_rules",
+                    "outcome": "unverified",
+                    "androidAccessDenied": false,
+                    "reason": {
+                        "kind": "evidence_unavailable"
+                    }
+                },
+                {
+                    "check": "proc_routes",
+                    "outcome": "unverified",
+                    "androidAccessDenied": false,
+                    "reason": {
+                        "kind": "evidence_unavailable"
+                    }
+                },
+                {
+                    "check": "proc_interfaces",
+                    "outcome": "unverified",
+                    "androidAccessDenied": false,
+                    "reason": {
+                        "kind": "evidence_unavailable"
+                    }
+                },
+                {
+                    "check": "sys_interfaces",
+                    "outcome": "unverified",
+                    "androidAccessDenied": false,
+                    "reason": {
+                        "kind": "evidence_unavailable"
+                    }
+                },
+                {
+                    "check": "framework_networks",
+                    "outcome": "leaked",
+                    "androidAccessDenied": false,
+                    "reason": null
+                },
+                {
+                    "check": "framework_default_network",
+                    "outcome": "unverified",
+                    "androidAccessDenied": false,
+                    "reason": {
+                        "kind": "evidence_unavailable"
+                    }
+                },
+                {
+                    "check": "framework_capabilities",
+                    "outcome": "proven",
+                    "androidAccessDenied": false,
+                    "reason": null
+                },
+                {
+                    "check": "framework_link_properties",
+                    "outcome": "unverified",
+                    "androidAccessDenied": false,
+                    "reason": {
+                        "kind": "evidence_unavailable"
+                    }
+                },
+                {
+                    "check": "framework_legacy_info",
+                    "outcome": "unverified",
+                    "androidAccessDenied": false,
+                    "reason": {
+                        "kind": "evidence_unavailable"
+                    }
+                },
+                {
+                    "check": "framework_callbacks",
+                    "outcome": "unverified",
+                    "androidAccessDenied": false,
+                    "reason": {
+                        "kind": "evidence_unavailable"
+                    }
+                },
+                {
+                    "check": "framework_pending_intent",
+                    "outcome": "unverified",
+                    "androidAccessDenied": false,
+                    "reason": {
+                        "kind": "evidence_unavailable"
+                    }
+                }
             ],
             "nativeControls": [],
             "frameworkControls": [
@@ -213,7 +310,7 @@
             "reuseBlockers": [
                 "loaded_generations_incomplete"
             ],
-            "infrastructureDetail": null,
+            "failure": null,
             "cleanupConfirmed": null
         }
     },
@@ -371,52 +468,149 @@
                     }
                 },
                 "assessment": {
-                    "phase": "incomplete",
-                    "required": [
-                        "ioctl_flags",
-                        "ioctl_mtu",
-                        "getifaddrs",
-                        "netlink_links",
-                        "ioctl_addresses",
-                        "bind_to_device",
-                        "netlink_addresses",
-                        "netlink_routes",
-                        "netlink_rules",
-                        "proc_routes",
-                        "proc_interfaces",
-                        "sys_interfaces",
-                        "framework_networks",
-                        "framework_default_network",
-                        "framework_capabilities",
-                        "framework_link_properties",
-                        "framework_legacy_info",
-                        "framework_callbacks",
-                        "framework_pending_intent"
-                    ],
-                    "proven": [
-                        "ioctl_flags",
-                        "ioctl_mtu",
-                        "getifaddrs",
-                        "netlink_links",
-                        "framework_capabilities"
-                    ],
-                    "leaked": [
-                        "framework_networks"
-                    ],
-                    "unverified": [
-                        "ioctl_addresses",
-                        "bind_to_device",
-                        "netlink_addresses",
-                        "netlink_routes",
-                        "netlink_rules",
-                        "proc_routes",
-                        "proc_interfaces",
-                        "sys_interfaces",
-                        "framework_default_network",
-                        "framework_link_properties",
-                        "framework_legacy_info",
-                        "framework_callbacks",
-                        "framework_pending_intent"
+                    "phase": "finished",
+                    "verdict": "leaked",
+                    "checks": [
+                        {
+                            "check": "ioctl_flags",
+                            "outcome": "proven",
+                            "androidAccessDenied": false,
+                            "reason": null
+                        },
+                        {
+                            "check": "ioctl_mtu",
+                            "outcome": "proven",
+                            "androidAccessDenied": false,
+                            "reason": null
+                        },
+                        {
+                            "check": "getifaddrs",
+                            "outcome": "proven",
+                            "androidAccessDenied": false,
+                            "reason": null
+                        },
+                        {
+                            "check": "netlink_links",
+                            "outcome": "proven",
+                            "androidAccessDenied": false,
+                            "reason": null
+                        },
+                        {
+                            "check": "ioctl_addresses",
+                            "outcome": "unverified",
+                            "androidAccessDenied": false,
+                            "reason": {
+                                "kind": "evidence_unavailable"
+                            }
+                        },
+                        {
+                            "check": "bind_to_device",
+                            "outcome": "unverified",
+                            "androidAccessDenied": false,
+                            "reason": {
+                                "kind": "evidence_unavailable"
+                            }
+                        },
+                        {
+                            "check": "netlink_addresses",
+                            "outcome": "unverified",
+                            "androidAccessDenied": false,
+                            "reason": {
+                                "kind": "evidence_unavailable"
+                            }
+                        },
+                        {
+                            "check": "netlink_routes",
+                            "outcome": "unverified",
+                            "androidAccessDenied": false,
+                            "reason": {
+                                "kind": "evidence_unavailable"
+                            }
+                        },
+                        {
+                            "check": "netlink_rules",
+                            "outcome": "unverified",
+                            "androidAccessDenied": false,
+                            "reason": {
+                                "kind": "evidence_unavailable"
+                            }
+                        },
+                        {
+                            "check": "proc_routes",
+                            "outcome": "unverified",
+                            "androidAccessDenied": false,
+                            "reason": {
+                                "kind": "evidence_unavailable"
+                            }
+                        },
+                        {
+                            "check": "proc_interfaces",
+                            "outcome": "unverified",
+                            "androidAccessDenied": false,
+                            "reason": {
+                                "kind": "evidence_unavailable"
+                            }
+                        },
+                        {
+                            "check": "sys_interfaces",
+                            "outcome": "unverified",
+                            "androidAccessDenied": false,
+                            "reason": {
+                                "kind": "evidence_unavailable"
+                            }
+                        },
+                        {
+                            "check": "framework_networks",
+                            "outcome": "leaked",
+                            "androidAccessDenied": false,
+                            "reason": null
+                        },
+                        {
+                            "check": "framework_default_network",
+                            "outcome": "unverified",
+                            "androidAccessDenied": false,
+                            "reason": {
+                                "kind": "evidence_unavailable"
+                            }
+                        },
+                        {
+                            "check": "framework_capabilities",
+                            "outcome": "proven",
+                            "androidAccessDenied": false,
+                            "reason": null
+                        },
+                        {
+                            "check": "framework_link_properties",
+                            "outcome": "unverified",
+                            "androidAccessDenied": false,
+                            "reason": {
+                                "kind": "evidence_unavailable"
+                            }
+                        },
+                        {
+                            "check": "framework_legacy_info",
+                            "outcome": "unverified",
+                            "androidAccessDenied": false,
+                            "reason": {
+                                "kind": "evidence_unavailable"
+                            }
+                        },
+                        {
+                            "check": "framework_callbacks",
+                            "outcome": "unverified",
+                            "androidAccessDenied": false,
+                            "reason": {
+                                "kind": "evidence_unavailable"
+                            }
+                        },
+                        {
+                            "check": "framework_pending_intent",
+                            "outcome": "unverified",
+                            "androidAccessDenied": false,
+                            "reason": {
+                                "kind": "evidence_unavailable"
+                            }
+                        }
                     ],
                     "nativeControls": [],
                     "frameworkControls": [
@@ -425,7 +619,7 @@
                     "reuseBlockers": [
                         "loaded_generations_incomplete"
                     ],
-                    "infrastructureDetail": null,
+                    "failure": null,
                     "cleanupConfirmed": null
                 }
             }
@@ -507,52 +701,149 @@
                 }
             },
             "assessment": {
-                "phase": "incomplete",
-                "required": [
-                    "ioctl_flags",
-                    "ioctl_mtu",
-                    "getifaddrs",
-                    "netlink_links",
-                    "ioctl_addresses",
-                    "bind_to_device",
-                    "netlink_addresses",
-                    "netlink_routes",
-                    "netlink_rules",
-                    "proc_routes",
-                    "proc_interfaces",
-                    "sys_interfaces",
-                    "framework_networks",
-                    "framework_default_network",
-                    "framework_capabilities",
-                    "framework_link_properties",
-                    "framework_legacy_info",
-                    "framework_callbacks",
-                    "framework_pending_intent"
-                ],
-                "proven": [
-                    "ioctl_flags",
-                    "ioctl_mtu",
-                    "getifaddrs",
-                    "netlink_links",
-                    "framework_capabilities"
-                ],
-                "leaked": [
-                    "framework_networks"
-                ],
-                "unverified": [
-                    "ioctl_addresses",
-                    "bind_to_device",
-                    "netlink_addresses",
-                    "netlink_routes",
-                    "netlink_rules",
-                    "proc_routes",
-                    "proc_interfaces",
-                    "sys_interfaces",
-                    "framework_default_network",
-                    "framework_link_properties",
-                    "framework_legacy_info",
-                    "framework_callbacks",
-                    "framework_pending_intent"
+                "phase": "finished",
+                "verdict": "leaked",
+                "checks": [
+                    {
+                        "check": "ioctl_flags",
+                        "outcome": "proven",
+                        "androidAccessDenied": false,
+                        "reason": null
+                    },
+                    {
+                        "check": "ioctl_mtu",
+                        "outcome": "proven",
+                        "androidAccessDenied": false,
+                        "reason": null
+                    },
+                    {
+                        "check": "getifaddrs",
+                        "outcome": "proven",
+                        "androidAccessDenied": false,
+                        "reason": null
+                    },
+                    {
+                        "check": "netlink_links",
+                        "outcome": "proven",
+                        "androidAccessDenied": false,
+                        "reason": null
+                    },
+                    {
+                        "check": "ioctl_addresses",
+                        "outcome": "unverified",
+                        "androidAccessDenied": false,
+                        "reason": {
+                            "kind": "evidence_unavailable"
+                        }
+                    },
+                    {
+                        "check": "bind_to_device",
+                        "outcome": "unverified",
+                        "androidAccessDenied": false,
+                        "reason": {
+                            "kind": "evidence_unavailable"
+                        }
+                    },
+                    {
+                        "check": "netlink_addresses",
+                        "outcome": "unverified",
+                        "androidAccessDenied": false,
+                        "reason": {
+                            "kind": "evidence_unavailable"
+                        }
+                    },
+                    {
+                        "check": "netlink_routes",
+                        "outcome": "unverified",
+                        "androidAccessDenied": false,
+                        "reason": {
+                            "kind": "evidence_unavailable"
+                        }
+                    },
+                    {
+                        "check": "netlink_rules",
+                        "outcome": "unverified",
+                        "androidAccessDenied": false,
+                        "reason": {
+                            "kind": "evidence_unavailable"
+                        }
+                    },
+                    {
+                        "check": "proc_routes",
+                        "outcome": "unverified",
+                        "androidAccessDenied": false,
+                        "reason": {
+                            "kind": "evidence_unavailable"
+                        }
+                    },
+                    {
+                        "check": "proc_interfaces",
+                        "outcome": "unverified",
+                        "androidAccessDenied": false,
+                        "reason": {
+                            "kind": "evidence_unavailable"
+                        }
+                    },
+                    {
+                        "check": "sys_interfaces",
+                        "outcome": "unverified",
+                        "androidAccessDenied": false,
+                        "reason": {
+                            "kind": "evidence_unavailable"
+                        }
+                    },
+                    {
+                        "check": "framework_networks",
+                        "outcome": "leaked",
+                        "androidAccessDenied": false,
+                        "reason": null
+                    },
+                    {
+                        "check": "framework_default_network",
+                        "outcome": "unverified",
+                        "androidAccessDenied": false,
+                        "reason": {
+                            "kind": "evidence_unavailable"
+                        }
+                    },
+                    {
+                        "check": "framework_capabilities",
+                        "outcome": "proven",
+                        "androidAccessDenied": false,
+                        "reason": null
+                    },
+                    {
+                        "check": "framework_link_properties",
+                        "outcome": "unverified",
+                        "androidAccessDenied": false,
+                        "reason": {
+                            "kind": "evidence_unavailable"
+                        }
+                    },
+                    {
+                        "check": "framework_legacy_info",
+                        "outcome": "unverified",
+                        "androidAccessDenied": false,
+                        "reason": {
+                            "kind": "evidence_unavailable"
+                        }
+                    },
+                    {
+                        "check": "framework_callbacks",
+                        "outcome": "unverified",
+                        "androidAccessDenied": false,
+                        "reason": {
+                            "kind": "evidence_unavailable"
+                        }
+                    },
+                    {
+                        "check": "framework_pending_intent",
+                        "outcome": "unverified",
+                        "androidAccessDenied": false,
+                        "reason": {
+                            "kind": "evidence_unavailable"
+                        }
+                    }
                 ],
                 "nativeControls": [],
                 "frameworkControls": [
@@ -561,7 +852,7 @@
                 "reuseBlockers": [
                     "loaded_generations_incomplete"
                 ],
-                "infrastructureDetail": null,
+                "failure": null,
                 "cleanupConfirmed": null
             }
         },

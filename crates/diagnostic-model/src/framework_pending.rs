@@ -1,7 +1,9 @@
 //! Core verifies the actual network extras received by the worker's broadcasts.
 use serde::{Deserialize, Serialize};
 
-use crate::framework::{FrameworkControlFailure as Failure, FrameworkPhaseEvidence};
+use crate::framework::{
+    FrameworkControlFailure as Failure, FrameworkPhase, FrameworkPhaseEvidence,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -99,28 +101,41 @@ pub(crate) fn leaked(raw: &FrameworkPhaseEvidence, protected: &FrameworkPhaseEvi
     })
 }
 
-pub(crate) fn evaluate(phases: [&FrameworkPhaseEvidence; 4]) -> Result<(), Failure> {
+pub(crate) fn evaluate(
+    phases: [&FrameworkPhaseEvidence; 4],
+) -> Result<(), (FrameworkPhase, Failure)> {
     let [prepared, raw, protected, revoked] = phases;
     for mode in PendingRegistration::ALL {
-        let ordinary = raw_control(raw, mode).ok_or(Failure::MissingPositiveControl)?;
-        let src = source(protected, mode).ok_or(Failure::MissingPositiveControl)?;
-        if [prepared, revoked].into_iter().any(|phase| {
-            !phase.acknowledgement.pending_intents.is_empty() || !delivered(phase, mode, ordinary)
-        }) {
-            return Err(Failure::MissingNegativeControl);
-        }
+        let ordinary =
+            raw_control(raw, mode).ok_or((FrameworkPhase::Raw, Failure::MissingPositiveControl))?;
+        let protected_failure = |reason| (FrameworkPhase::Protected, reason);
+        let src =
+            source(protected, mode).ok_or(protected_failure(Failure::MissingPositiveControl))?;
         if src.ordinary_handle != ordinary {
-            return Err(Failure::OrdinaryObjectsChanged);
+            return Err(protected_failure(Failure::OrdinaryObjectsChanged));
         }
         let handled = match mode {
             PendingRegistration::Listen => src.suppressed,
             PendingRegistration::Request => src.cover_handle == Some(ordinary),
         };
         if !handled {
-            return Err(Failure::ProductionPathNotObserved);
+            return Err(protected_failure(Failure::ProductionPathNotObserved));
         }
         if !delivered(protected, mode, ordinary) {
-            return Err(Failure::ProbeUnavailable);
+            return Err(protected_failure(Failure::ProbeUnavailable));
+        }
+        for phase in [prepared, revoked] {
+            let failure = |reason| (phase.envelope.phase, reason);
+            if !phase.acknowledgement.pending_intents.is_empty() {
+                return Err(failure(Failure::MissingNegativeControl));
+            }
+            let obs = observation(phase, mode).ok_or(failure(Failure::ProbeUnavailable))?;
+            if obs.handles.is_empty() && !obs.malformed {
+                return Err(failure(Failure::ProbeUnavailable));
+            }
+            if !delivered(phase, mode, ordinary) {
+                return Err(failure(Failure::MissingNegativeControl));
+            }
         }
     }
     Ok(())

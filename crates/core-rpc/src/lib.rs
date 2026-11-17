@@ -852,29 +852,30 @@ mod tests {
             for outcome in [
                 DiagnosticOutcome::Running,
                 DiagnosticOutcome::Infrastructure {
-                    detail: "fixture unavailable".into(),
+                    failure: vpnhide_diagnostic_model::DiagnosticFailure {
+                        stage: vpnhide_diagnostic_model::DiagnosticStage::NativeFixture,
+                        kind: vpnhide_diagnostic_model::DiagnosticFailureKind::Unavailable,
+                        detail: "fixture unavailable".into(),
+                    },
                     native: None,
                     cleanup_confirmed: None,
                 },
-                DiagnosticOutcome::Incomplete {
+                DiagnosticOutcome::Finished {
                     native: ScopedNativeResult::Leaked {
                         checks: vec![NativeCheck::IoctlFlags],
                         incomplete: vec![ControlFailure::CleanupUnconfirmed],
                     },
-                    missing: DiagnosticPlan::supported(true).required.clone(),
                 },
-                DiagnosticOutcome::Incomplete {
+                DiagnosticOutcome::Finished {
                     native: ScopedNativeResult::Unverified {
                         reason: ControlFailure::MissingPositiveControl,
                         observed_leaks: vec![NativeCheck::Getifaddrs],
                     },
-                    missing: vec![],
                 },
-                DiagnosticOutcome::Incomplete {
+                DiagnosticOutcome::Finished {
                     native: ScopedNativeResult::Proven {
                         checks: vec![NativeCheck::IoctlMtu],
                     },
-                    missing: vec![],
                 },
             ] {
                 let run = DiagnosticRun {

@@ -28,7 +28,7 @@ class AutonomousExportTest {
                 .jsonPrimitive.content,
         )
         assertEquals(
-            "incomplete",
+            "finished",
             autonomous
                 .getValue("assessment")
                 .jsonObject

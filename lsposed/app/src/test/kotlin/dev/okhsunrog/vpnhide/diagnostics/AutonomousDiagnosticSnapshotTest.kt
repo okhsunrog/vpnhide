@@ -15,6 +15,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
@@ -24,26 +25,34 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import uniffi.vpnhide_core_ffi.CoreAssessmentPhase
 import uniffi.vpnhide_core_ffi.CoreAttachmentEvidence
+import uniffi.vpnhide_core_ffi.CoreCheckAssessment
+import uniffi.vpnhide_core_ffi.CoreCheckOutcome
 import uniffi.vpnhide_core_ffi.CoreDiagnosticAssessment
 import uniffi.vpnhide_core_ffi.CoreDiagnosticOutcome
 import uniffi.vpnhide_core_ffi.CoreDiagnosticRun
 import uniffi.vpnhide_core_ffi.CoreDiagnosticThreadIdentity
+import uniffi.vpnhide_core_ffi.CoreDiagnosticVerdict
+import uniffi.vpnhide_core_ffi.CoreFrameworkCheck
+import uniffi.vpnhide_core_ffi.CoreFrameworkControlFailure
+import uniffi.vpnhide_core_ffi.CoreFrameworkEvidencePhase
+import uniffi.vpnhide_core_ffi.CoreFrameworkFailure
+import uniffi.vpnhide_core_ffi.CoreFrameworkFailureScope
 import uniffi.vpnhide_core_ffi.CoreNativeRawReceipt
+import uniffi.vpnhide_core_ffi.CoreRequiredCheck
+import uniffi.vpnhide_core_ffi.CoreUnverifiedReason
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class AutonomousDiagnosticSnapshotTest {
     private fun assessment() =
         CoreDiagnosticAssessment(
-            CoreAssessmentPhase.RUNNING,
-            emptyList(),
-            emptyList(),
-            emptyList(),
-            emptyList(),
-            emptyList(),
-            emptyList(),
-            emptyList(),
-            null,
-            null,
+            phase = CoreAssessmentPhase.RUNNING,
+            checks = emptyList(),
+            verdict = CoreDiagnosticVerdict.UNVERIFIED,
+            nativeControls = emptyList(),
+            frameworkControls = emptyList(),
+            reuseBlockers = emptyList(),
+            failure = null,
+            cleanupConfirmed = null,
         )
 
     private fun run(epoch: Long) =
@@ -216,11 +225,37 @@ class AutonomousDiagnosticSnapshotTest {
     @Test
     fun `published evidence does not alias mutable transport records`() {
         val initial = update()
+        val pendingFailure =
+            CoreFrameworkFailure(
+                CoreFrameworkFailureScope.Check(CoreFrameworkCheck.PENDING_INTENT),
+                CoreFrameworkEvidencePhase.REVOKED,
+                CoreFrameworkControlFailure.PROBE_UNAVAILABLE,
+            )
+        initial.state?.autonomousAssessment?.checks =
+            listOf(
+                CoreCheckAssessment(
+                    CoreRequiredCheck.FRAMEWORK_PENDING_INTENT,
+                    CoreCheckOutcome.Unverified(CoreUnverifiedReason.FrameworkControls(listOf(pendingFailure))),
+                    false,
+                ),
+            )
         val snapshot = autonomousDiagnosticSnapshot(AutonomousDiagnosticSources(initial, ObservationState(), config(initial)), 1, 0)
         initial.state?.autonomousDiagnostics?.session = 99uL
         initial.state?.autonomousAssessment?.phase = CoreAssessmentPhase.INFRASTRUCTURE
+        pendingFailure.phase = CoreFrameworkEvidencePhase.PREPARED
         assertEquals(1L, snapshot.run?.session)
-        assertEquals("running", snapshot.assessment?.phase)
+        assertEquals(CoreAssessmentPhase.RUNNING, snapshot.assessment?.phase)
+        val row = requireNotNull(snapshot.toDiagnosticInfo().assessment).checks.single()
+        assertEquals("framework_pending_intent", row.check)
+        val failure =
+            requireNotNull(row.reason)
+                .jsonObject
+                .getValue("failures")
+                .jsonArray
+                .single()
+                .jsonObject
+        assertEquals("revoked", failure.getValue("phase").jsonPrimitive.content)
+        assertEquals("probe_unavailable", failure.getValue("reason").jsonPrimitive.content)
     }
 
     @Test

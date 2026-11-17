@@ -390,12 +390,11 @@ impl From<model::ScopedNativeResult> for CoreScopedNativeResult {
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum CoreDiagnosticOutcome {
     Running,
-    Incomplete {
+    Finished {
         native: CoreScopedNativeResult,
-        missing: Vec<CoreRequiredCheck>,
     },
     Infrastructure {
-        detail: String,
+        failure: CoreDiagnosticFailure,
         native: Option<CoreScopedNativeResult>,
         cleanup_confirmed: Option<bool>,
     },
@@ -404,7 +403,7 @@ enum_map!(
     CoreAssessmentPhase,
     AssessmentPhase,
     Running,
-    Incomplete,
+    Finished,
     Infrastructure
 );
 enum_map!(
@@ -418,31 +417,138 @@ enum_map!(
     UnsupportedPlan
 );
 
+enum_map!(
+    CoreDiagnosticStage,
+    DiagnosticStage,
+    Coordinator,
+    NativeFixture,
+    WorkerStart,
+    NativeMeasurement,
+    FrameworkAndPorts,
+    Cleanup
+);
+enum_map!(
+    CoreDiagnosticFailureKind,
+    DiagnosticFailureKind,
+    Timeout,
+    Busy,
+    Cancelled,
+    Unavailable,
+    CleanupUnconfirmed
+);
+enum_map!(
+    CoreDiagnosticVerdict,
+    DiagnosticVerdict,
+    Proven,
+    Leaked,
+    Unverified
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CoreDiagnosticFailure {
+    pub stage: CoreDiagnosticStage,
+    pub kind: CoreDiagnosticFailureKind,
+    pub detail: String,
+}
+
+impl From<model::DiagnosticFailure> for CoreDiagnosticFailure {
+    fn from(v: model::DiagnosticFailure) -> Self {
+        Self {
+            stage: v.stage.into(),
+            kind: v.kind.into(),
+            detail: v.detail,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum CoreUnverifiedReason {
+    AwaitingEvidence,
+    EvidenceUnavailable,
+    AndroidAccessDenied,
+    NativeControls {
+        controls: Vec<CoreControlFailure>,
+    },
+    FrameworkControls {
+        failures: Vec<crate::CoreFrameworkFailure>,
+    },
+    Interrupted {
+        stage: CoreDiagnosticStage,
+        failure: CoreDiagnosticFailureKind,
+    },
+}
+
+impl From<model::UnverifiedReason> for CoreUnverifiedReason {
+    fn from(v: model::UnverifiedReason) -> Self {
+        match v {
+            model::UnverifiedReason::AwaitingEvidence => Self::AwaitingEvidence,
+            model::UnverifiedReason::EvidenceUnavailable => Self::EvidenceUnavailable,
+            model::UnverifiedReason::AndroidAccessDenied => Self::AndroidAccessDenied,
+            model::UnverifiedReason::NativeControls { controls } => Self::NativeControls {
+                controls: controls.into_iter().map(Into::into).collect(),
+            },
+            model::UnverifiedReason::FrameworkControls { failures } => Self::FrameworkControls {
+                failures: failures.into_iter().map(Into::into).collect(),
+            },
+            model::UnverifiedReason::Interrupted { stage, failure } => Self::Interrupted {
+                stage: stage.into(),
+                failure: failure.into(),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum CoreCheckOutcome {
+    Proven,
+    Leaked,
+    Unverified { reason: CoreUnverifiedReason },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CoreCheckAssessment {
+    pub check: CoreRequiredCheck,
+    pub outcome: CoreCheckOutcome,
+    pub android_access_denied: bool,
+}
+
+impl From<model::CheckAssessment> for CoreCheckAssessment {
+    fn from(v: model::CheckAssessment) -> Self {
+        Self {
+            check: v.check.into(),
+            android_access_denied: v.android_access_denied,
+            outcome: match v.outcome {
+                model::CheckOutcome::Proven => CoreCheckOutcome::Proven,
+                model::CheckOutcome::Leaked => CoreCheckOutcome::Leaked,
+                model::CheckOutcome::Unverified { reason } => CoreCheckOutcome::Unverified {
+                    reason: reason.into(),
+                },
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreDiagnosticAssessment {
     pub phase: CoreAssessmentPhase,
-    pub required: Vec<CoreRequiredCheck>,
-    pub proven: Vec<CoreRequiredCheck>,
-    pub leaked: Vec<CoreRequiredCheck>,
-    pub unverified: Vec<CoreRequiredCheck>,
+    pub checks: Vec<CoreCheckAssessment>,
+    pub verdict: CoreDiagnosticVerdict,
     pub native_controls: Vec<CoreControlFailure>,
     pub framework_controls: Vec<crate::CoreFrameworkControlFailure>,
     pub reuse_blockers: Vec<CoreReuseBlocker>,
-    pub infrastructure_detail: Option<String>,
+    pub failure: Option<CoreDiagnosticFailure>,
     pub cleanup_confirmed: Option<bool>,
 }
 impl From<model::DiagnosticAssessment> for CoreDiagnosticAssessment {
     fn from(v: model::DiagnosticAssessment) -> Self {
         Self {
             phase: v.phase.into(),
-            required: v.required.into_iter().map(Into::into).collect(),
-            proven: v.proven.into_iter().map(Into::into).collect(),
-            leaked: v.leaked.into_iter().map(Into::into).collect(),
-            unverified: v.unverified.into_iter().map(Into::into).collect(),
+            verdict: v.verdict().into(),
+            checks: v.checks.into_iter().map(Into::into).collect(),
             native_controls: v.native_controls.into_iter().map(Into::into).collect(),
             framework_controls: v.framework_controls.into_iter().map(Into::into).collect(),
             reuse_blockers: v.reuse_blockers.into_iter().map(Into::into).collect(),
-            infrastructure_detail: v.infrastructure_detail,
+            failure: v.failure.map(Into::into),
             cleanup_confirmed: v.cleanup_confirmed,
         }
     }
@@ -474,18 +580,15 @@ impl From<model::DiagnosticRun> for CoreDiagnosticRun {
     fn from(v: model::DiagnosticRun) -> Self {
         let outcome = match v.outcome {
             model::DiagnosticOutcome::Running => CoreDiagnosticOutcome::Running,
-            model::DiagnosticOutcome::Incomplete { native, missing } => {
-                CoreDiagnosticOutcome::Incomplete {
-                    native: native.into(),
-                    missing: missing.into_iter().map(Into::into).collect(),
-                }
-            }
+            model::DiagnosticOutcome::Finished { native } => CoreDiagnosticOutcome::Finished {
+                native: native.into(),
+            },
             model::DiagnosticOutcome::Infrastructure {
-                detail,
+                failure,
                 native,
                 cleanup_confirmed,
             } => CoreDiagnosticOutcome::Infrastructure {
-                detail,
+                failure: failure.into(),
                 native: native.map(Into::into),
                 cleanup_confirmed,
             },

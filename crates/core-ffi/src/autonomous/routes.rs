@@ -239,10 +239,11 @@ pub struct CoreScopedRouteResult {
 }
 impl From<model::ScopedRouteResult> for CoreScopedRouteResult {
     fn from(v: model::ScopedRouteResult) -> Self {
+        let controls = v.controls();
         Self {
             proven: v.proven.into_iter().map(Into::into).collect(),
             leaked: v.leaked.into_iter().map(Into::into).collect(),
-            controls: v.controls.into_iter().map(Into::into).collect(),
+            controls: controls.into_iter().map(Into::into).collect(),
         }
     }
 }

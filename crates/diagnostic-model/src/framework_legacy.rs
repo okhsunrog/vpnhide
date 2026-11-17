@@ -226,15 +226,13 @@ pub(crate) fn evaluate_legacy(
     cleanup: bool,
 ) -> super::framework::ScopedFrameworkResult {
     use super::framework::{
-        FrameworkCheck as V, FrameworkControlFailure as F, ScopedFrameworkResult,
+        FrameworkCheck as V, FrameworkControlFailure as F, FrameworkFailureScope as Scope,
+        ScopedFrameworkResult,
     };
     let [prepared, raw, protected, revoked] = phases else {
         return ScopedFrameworkResult::default();
     };
     let mut result = ScopedFrameworkResult::default();
-    if !cleanup {
-        result.controls.push(F::CleanupUnconfirmed);
-    }
     let type_positive = invocation_current(raw, true)
         && invocation_current(protected, true)
         && raw.acknowledgement.legacy.type_calls == 1
@@ -330,12 +328,10 @@ pub(crate) fn evaluate_legacy(
             None
         };
         if let Some(control) = control {
-            result.controls.push(control);
+            result.fail(Scope::Check(vector), None, control);
         } else if cleanup {
             result.proven.push(vector);
         }
     }
-    result.controls.sort();
-    result.controls.dedup();
     result
 }

@@ -88,7 +88,9 @@ mod tests {
     #[test]
     fn publication_advice_uses_typed_rpc_facts_and_currentness_without_another_request() {
         use vpnhide_core_rpc as rpc;
-        use vpnhide_diagnostic_model::{AssessmentPhase, DiagnosticAssessment, RequiredCheck};
+        use vpnhide_diagnostic_model::{
+            AssessmentPhase, CheckAssessment, CheckOutcome, DiagnosticAssessment, RequiredCheck,
+        };
         let reply: crate::StateReply = vpnhide_core_client::ClientReply {
             generation: 4,
             value: rpc::Published {
@@ -100,21 +102,22 @@ mod tests {
                         ..Default::default()
                     },
                     autonomous_assessment: Some(DiagnosticAssessment {
-                        phase: AssessmentPhase::Incomplete,
-                        required: vec![
+                        phase: AssessmentPhase::Finished,
+                        checks: [
                             RequiredCheck::ProcInterfaces,
                             RequiredCheck::FrameworkCallbacks,
-                        ],
-                        proven: vec![],
-                        leaked: vec![
-                            RequiredCheck::ProcInterfaces,
-                            RequiredCheck::FrameworkCallbacks,
-                        ],
-                        unverified: vec![],
+                        ]
+                        .into_iter()
+                        .map(|check| CheckAssessment {
+                            check,
+                            outcome: CheckOutcome::Leaked,
+                            android_access_denied: false,
+                        })
+                        .collect(),
                         native_controls: vec![],
                         framework_controls: vec![],
                         reuse_blockers: vec![],
-                        infrastructure_detail: None,
+                        failure: None,
                         cleanup_confirmed: Some(true),
                     }),
                     ..Default::default()

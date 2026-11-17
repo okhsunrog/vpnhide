@@ -291,6 +291,23 @@ pub enum ControlFailure {
     ProcInterfaceRequestDenied,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeControlIssue<C> {
+    pub check: Option<C>,
+    pub reason: ControlFailure,
+}
+
+pub(crate) fn native_control_reasons<C>(issues: &[NativeControlIssue<C>]) -> Vec<ControlFailure> {
+    let mut reasons = Vec::new();
+    for issue in issues {
+        if !reasons.contains(&issue.reason) {
+            reasons.push(issue.reason);
+        }
+    }
+    reasons
+}
+
 /// Later observations qualify proof, never erase an earlier qualified leak.
 /// Unavailable data and the affected control remain separate failure facts.
 pub(crate) fn later_control_failures<T>(

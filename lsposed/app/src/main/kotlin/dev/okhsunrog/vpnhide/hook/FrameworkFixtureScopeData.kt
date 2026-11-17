@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide.hook
 
+import android.net.NetworkCapabilities
 import dev.okhsunrog.vpnhide.LegacyOrdinaryInfo
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
@@ -132,7 +133,9 @@ internal data class FixtureInvocation(
     val callback: FixtureCallbackRegistration? = null,
     val pendingIntent: FixturePendingRegistration? = null,
     val ordinaryAgent: Any? = null,
-)
+) {
+    var ordinaryCoverCapabilities: NetworkCapabilities? = null
+}
 
 /** Nested untrusted Binder entries must clear the inherited RAW privilege. */
 internal class FixtureInvocationScope {

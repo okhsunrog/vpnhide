@@ -282,6 +282,22 @@ pub enum FrameworkControlFailure {
     ProbeUnavailable,
     CleanupUnconfirmed,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "scope", content = "check", rename_all = "snake_case")]
+pub enum FrameworkFailureScope {
+    Run,
+    NetworkView,
+    Check(FrameworkCheck),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrameworkFailure {
+    pub scope: FrameworkFailureScope,
+    pub phase: Option<FrameworkPhase>,
+    pub reason: FrameworkControlFailure,
+}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FrameworkPhaseEvidence {
@@ -309,7 +325,29 @@ pub struct ScopedFrameworkResult {
     pub attribution: Option<FrameworkAttribution>,
     pub proven: Vec<FrameworkCheck>,
     pub leaked: Vec<FrameworkCheck>,
-    pub controls: Vec<FrameworkControlFailure>,
+    pub failures: Vec<FrameworkFailure>,
+}
+
+impl ScopedFrameworkResult {
+    pub fn controls(&self) -> Vec<FrameworkControlFailure> {
+        let mut controls: Vec<_> = self.failures.iter().map(|f| f.reason).collect();
+        controls.sort();
+        controls.dedup();
+        controls
+    }
+
+    pub(crate) fn fail(
+        &mut self,
+        scope: FrameworkFailureScope,
+        phase: Option<FrameworkPhase>,
+        reason: FrameworkControlFailure,
+    ) {
+        self.failures.push(FrameworkFailure {
+            scope,
+            phase,
+            reason,
+        });
+    }
 }
 impl FrameworkEnvelope {
     pub fn for_phase(&self, phase: FrameworkPhase) -> Self {
@@ -408,6 +446,7 @@ pub fn evaluate_framework(
 ) -> ScopedFrameworkResult {
     use FrameworkCheck as V;
     use FrameworkControlFailure as F;
+    use FrameworkFailureScope as Scope;
     let mut result = ScopedFrameworkResult {
         leaked: observed_leaks(phases),
         attribution: phases
@@ -431,10 +470,10 @@ pub fn evaluate_framework(
         ..Default::default()
     };
     if !cleanup {
-        result.controls.push(F::CleanupUnconfirmed);
+        result.fail(Scope::Run, None, F::CleanupUnconfirmed);
     }
     let [prepared, raw, protected, revoked] = phases else {
-        result.controls.push(F::MissingNegativeControl);
+        result.fail(Scope::Run, None, F::MissingNegativeControl);
         return result;
     };
     for (e, phase) in phases.iter().zip([
@@ -447,7 +486,7 @@ pub fn evaluate_framework(
             || !e.acknowledgement.matches(&e.envelope)
             || !e.observation.bounded()
         {
-            result.controls.push(F::InvalidEnvelope);
+            result.fail(Scope::Run, None, F::InvalidEnvelope);
             return result;
         }
     }
@@ -457,14 +496,14 @@ pub fn evaluate_framework(
             || e.acknowledgement.system_server_start_ticks != original.system_server_start_ticks
             || e.acknowledgement.hook_sha256 != original.hook_sha256
     }) {
-        result.controls.push(F::IdentityChanged);
+        result.fail(Scope::Run, None, F::IdentityChanged);
         return result;
     }
     if phases
         .iter()
         .any(|e| e.acknowledgement.sources != original.sources)
     {
-        result.controls.push(F::SourceChanged);
+        result.fail(Scope::Run, None, F::SourceChanged);
         return result;
     }
     let source = &original.sources;
@@ -481,7 +520,7 @@ pub fn evaluate_framework(
         || !quiet(&prepared.acknowledgement)
         || !quiet(&revoked.acknowledgement)
     {
-        result.controls.push(F::MissingNegativeControl);
+        result.fail(Scope::NetworkView, None, F::MissingNegativeControl);
     }
     let ordinary = raw
         .observation
@@ -499,7 +538,7 @@ pub fn evaluate_framework(
             .value()
             .is_some_and(|v| v.contains(&source.ordinary_handle));
     if !ordinary {
-        result.controls.push(F::OrdinaryObjectsChanged);
+        result.fail(Scope::NetworkView, None, F::OrdinaryObjectsChanged);
     }
     let positive = [
         raw.acknowledgement.networks_source
@@ -545,54 +584,60 @@ pub fn evaluate_framework(
         .into_iter()
         .enumerate()
     {
+        let scope = Scope::Check(vector);
         if !positive[index] || !injected[index] {
-            result.controls.push(F::MissingPositiveControl);
+            let phase = if positive[index] {
+                FrameworkPhase::Protected
+            } else {
+                FrameworkPhase::Raw
+            };
+            result.fail(scope, Some(phase), F::MissingPositiveControl);
             continue;
         }
         match clean[index] {
             Some(false) => result.leaked.push(vector),
             Some(true) if production[index] => result.proven.push(vector),
-            Some(true) => result.controls.push(F::ProductionPathNotObserved),
-            None => result.controls.push(F::ProbeUnavailable),
+            Some(true) => result.fail(
+                scope,
+                Some(FrameworkPhase::Protected),
+                F::ProductionPathNotObserved,
+            ),
+            None => result.fail(scope, Some(FrameworkPhase::Protected), F::ProbeUnavailable),
         }
     }
     result.leaked.sort();
     result.leaked.dedup();
-    result.controls.sort();
-    result.controls.dedup();
-    if !result.controls.is_empty() {
+    if !result.failures.is_empty() {
         result.proven.clear();
     }
     let legacy = crate::framework_legacy::evaluate_legacy(phases, cleanup);
     result.proven.extend(legacy.proven);
     result.leaked.extend(legacy.leaked);
-    result.controls.extend(legacy.controls);
+    result.failures.extend(legacy.failures);
     match crate::framework_default::evaluate([prepared, raw, protected, revoked]) {
         Ok(()) if cleanup => result.proven.push(V::DefaultNetwork),
         Ok(()) => {}
-        Err(failure) => result.controls.push(failure),
+        Err(failure) => result.fail(Scope::Check(V::DefaultNetwork), None, failure),
     }
     match crate::framework_callbacks::evaluate([prepared, raw, protected, revoked]) {
         Ok(()) if cleanup => result.proven.push(V::Callbacks),
         Ok(()) => {}
-        Err(failure) => result.controls.push(failure),
+        Err((phase, failure)) => result.fail(Scope::Check(V::Callbacks), Some(phase), failure),
     }
     match crate::framework_pending::evaluate([prepared, raw, protected, revoked]) {
         Ok(()) if cleanup => result.proven.push(V::PendingIntent),
         Ok(()) => {}
-        Err(failure) => result.controls.push(failure),
+        Err((phase, failure)) => result.fail(Scope::Check(V::PendingIntent), Some(phase), failure),
     }
     if prepared.envelope.fixture.package_visibility.is_some() {
         match crate::framework_packages::evaluate([prepared, raw, protected, revoked]) {
             Ok(()) if cleanup => result.proven.push(V::PackageVisibility),
             Ok(()) => {}
-            Err(failure) => result.controls.push(failure),
+            Err(failure) => result.fail(Scope::Check(V::PackageVisibility), None, failure),
         }
     }
     result.leaked.sort();
     result.leaked.dedup();
-    result.controls.sort();
-    result.controls.dedup();
     result
 }
 
@@ -884,9 +929,39 @@ mod tests {
                 "case {change}"
             );
         }
-        evidence[2].observation.callbacks[0]
-            .events
-            .push(event(101, true));
+        for phase in [0, 3] {
+            let mut missing = evidence.clone();
+            let request = missing[phase].observation.callbacks.pop().unwrap();
+            let evaluate = |samples: &[FrameworkPhaseEvidence]| {
+                crate::framework_callbacks::evaluate([
+                    &samples[0],
+                    &samples[1],
+                    &samples[2],
+                    &samples[3],
+                ])
+            };
+            let phase_name = missing[phase].envelope.phase;
+            let unavailable = Err((phase_name, FrameworkControlFailure::ProbeUnavailable));
+            assert_eq!(evaluate(&missing), unavailable);
+            missing[phase]
+                .observation
+                .callbacks
+                .push(CallbackObservation {
+                    events: vec![],
+                    ..request
+                });
+            assert_eq!(evaluate(&missing), unavailable);
+            missing[phase].observation.callbacks[2]
+                .events
+                .push(event(103, false));
+            assert_eq!(
+                evaluate(&missing),
+                Err((phase_name, FrameworkControlFailure::MissingNegativeControl))
+            );
+        }
+        // A delivered VPN event remains a leak even when no ordinary event
+        // arrived in that Protected registration.
+        evidence[2].observation.callbacks[2].events = vec![event(101, true)];
         let leak = evaluate_framework(&evidence[..3], false);
         assert!(leak.leaked.contains(&check));
         assert!(!leak.proven.contains(&check));
@@ -920,7 +995,7 @@ mod tests {
             crate::assessment::framework_checks(&proof.proven, true)
                 .contains(&crate::RequiredCheck::FrameworkPendingIntent)
         );
-        for change in 0..6 {
+        for change in 0..7 {
             let mut invalid = evidence.clone();
             match change {
                 0 => invalid[1].observation.pending_intents[0].handles.clear(),
@@ -928,7 +1003,32 @@ mod tests {
                 2 => invalid[2].acknowledgement.pending_intents[1].cover_handle = Some(12),
                 3 => invalid[2].observation.pending_intents[1].malformed = true,
                 4 => invalid[2].observation.pending_intents[1].handles.push(102),
-                _ => invalid[3].observation.pending_intents[0].handles.clear(),
+                5 => invalid[3].observation.pending_intents[0].handles.clear(),
+                _ => invalid[3].observation.pending_intents[0].handles = vec![103],
+            }
+            let actual = crate::framework_pending::evaluate([
+                &invalid[0],
+                &invalid[1],
+                &invalid[2],
+                &invalid[3],
+            ]);
+            if change == 5 {
+                assert_eq!(
+                    actual,
+                    Err((
+                        FrameworkPhase::Revoked,
+                        FrameworkControlFailure::ProbeUnavailable
+                    ))
+                );
+            }
+            if change == 6 {
+                assert_eq!(
+                    actual,
+                    Err((
+                        FrameworkPhase::Revoked,
+                        FrameworkControlFailure::MissingNegativeControl
+                    ))
+                );
             }
             let result = evaluate_framework(&invalid, true);
             assert!(!result.proven.contains(&check), "case {change}");
@@ -1010,7 +1110,7 @@ mod tests {
         let phases = legacy_phases();
         let result = evaluate_framework(&phases, true);
         assert_eq!(
-            result.controls,
+            result.controls(),
             vec![
                 FrameworkControlFailure::MissingNegativeControl,
                 FrameworkControlFailure::MissingPositiveControl,
@@ -1053,7 +1153,7 @@ mod tests {
                 }
             }
             let result = evaluate_framework(&bad, true);
-            assert!(!result.controls.is_empty(), "edit={edit}");
+            assert!(!result.controls().is_empty(), "edit={edit}");
             assert!(
                 !crate::assessment::framework_checks(&result.proven, true)
                     .contains(&crate::RequiredCheck::FrameworkLegacyInfo)
@@ -1117,7 +1217,7 @@ mod tests {
             assert!(!result.proven.contains(&FrameworkCheck::LegacyEnumeration));
             assert!(
                 result
-                    .controls
+                    .controls()
                     .contains(&FrameworkControlFailure::MissingPositiveControl)
             );
         }
@@ -1185,7 +1285,7 @@ mod tests {
                     assert!(result.proven.contains(&other));
                     assert!(
                         result
-                            .controls
+                            .controls()
                             .contains(&FrameworkControlFailure::MissingNegativeControl)
                     );
                 }
@@ -1236,7 +1336,7 @@ mod tests {
         );
         assert!(result.leaked.is_empty());
         assert_eq!(
-            result.controls,
+            result.controls(),
             vec![
                 FrameworkControlFailure::MissingNegativeControl,
                 FrameworkControlFailure::MissingPositiveControl,
@@ -1260,7 +1360,7 @@ mod tests {
         assert!(result.leaked.is_empty());
         assert!(
             result
-                .controls
+                .controls()
                 .contains(&FrameworkControlFailure::MissingPositiveControl)
         );
         let mut evidence = phases();
@@ -1269,7 +1369,7 @@ mod tests {
         assert!(result.proven.is_empty());
         assert!(
             result
-                .controls
+                .controls()
                 .contains(&FrameworkControlFailure::ProductionPathNotObserved)
         );
     }
@@ -1287,7 +1387,7 @@ mod tests {
             }
             let result = evaluate_framework(&evidence, true);
             assert!(result.proven.is_empty());
-            assert!(!result.controls.is_empty());
+            assert!(!result.controls().is_empty());
         }
     }
     #[test]
@@ -1299,7 +1399,7 @@ mod tests {
         assert!(result.proven.is_empty());
         assert!(
             result
-                .controls
+                .controls()
                 .contains(&FrameworkControlFailure::CleanupUnconfirmed)
         );
     }
@@ -1320,13 +1420,13 @@ mod tests {
         let mut evidence = phases();
         evidence[2].acknowledgement.generation = 1;
         assert_eq!(
-            evaluate_framework(&evidence, true).controls,
+            evaluate_framework(&evidence, true).controls(),
             vec![FrameworkControlFailure::InvalidEnvelope]
         );
         let mut evidence = phases();
         evidence[2].acknowledgement.worker_pid += 1;
         assert_eq!(
-            evaluate_framework(&evidence, true).controls,
+            evaluate_framework(&evidence, true).controls(),
             vec![FrameworkControlFailure::InvalidEnvelope]
         );
     }

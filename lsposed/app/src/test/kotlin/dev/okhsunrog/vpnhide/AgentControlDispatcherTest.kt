@@ -17,6 +17,7 @@ class AgentControlDispatcherTest {
             "navigateUiScenario",
             "backUiScenario",
             "stopUiScenario",
+            "retryDiagnostics",
         )) {
             assertTrue("$name missing", name in names)
         }

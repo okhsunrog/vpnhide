@@ -116,7 +116,7 @@ fn raw_and_protected_observations_require_both_syscall_actors_and_address_famili
     let (n, p) = (measurement(false), measurement(true));
     let raw = evaluate_address_fixture(&spec(), &n, &p, &p, &p, &n);
     assert_eq!(raw.leaked.len(), 18);
-    assert!(raw.proven.is_empty() && raw.controls.is_empty());
+    assert!(raw.proven.is_empty() && raw.failures.is_empty());
     let hidden = evaluate_address_fixture(&spec(), &n, &p, &n, &p, &n);
     assert_eq!(hidden.proven.len(), 18);
     assert!(hidden.complete());
@@ -163,7 +163,7 @@ fn literal_addresses_remain_leaks_after_both_identity_fields_are_scrubbed() {
         evaluate_address_fixture(&spec(), &negative, &positive, &worker, &positive, &negative);
     assert_eq!(result.leaked.len(), 18);
     assert!(result.proven.is_empty());
-    assert!(result.controls.is_empty());
+    assert!(result.failures.is_empty());
 }
 
 #[test]
@@ -173,7 +173,7 @@ fn missing_raw_positive_is_not_a_leak_or_an_empty_enumeration_pass() {
     assert!(empty.proven.is_empty() && empty.leaked.is_empty());
     assert!(
         empty
-            .controls
+            .controls()
             .contains(&ControlFailure::MissingPositiveControl)
     );
     let p = measurement(true);
@@ -265,17 +265,16 @@ fn cleanup_failure_and_lost_ordinary_objects_preserve_observed_leaks() {
     assert_eq!(failed.leaked.len(), 18);
     assert!(
         failed
-            .controls
+            .controls()
             .contains(&ControlFailure::CleanupUnconfirmed)
     );
     let mut broken = n.clone();
     broken.ifaddrs = Sample::Value(vec![]);
     let changed = evaluate_address_fixture(&spec(), &n, &p, &broken, &p, &n);
-    assert!(
-        changed
-            .controls
-            .contains(&ControlFailure::OrdinaryObjectsChanged)
-    );
+    assert!(changed.failures.contains(&NativeControlIssue {
+        check: Some(check(NativeReadActor::Libc, AddressVector::GetifaddrsIpv6)),
+        reason: ControlFailure::OrdinaryObjectsChanged,
+    }));
     assert!(
         !changed
             .proven
@@ -313,16 +312,13 @@ fn unavailable_end_or_cleanup_keeps_all_qualified_address_leaks_without_proof() 
             let leaked = evaluate_address_fixture(&spec(), &n, &p, &p, &end, &cleanup);
             assert_eq!(leaked.leaked.len(), 18);
             assert!(leaked.proven.is_empty());
-            assert!(leaked.controls.contains(&ControlFailure::ProbeUnavailable));
+            let controls = leaked.controls();
+            assert!(controls.contains(&ControlFailure::ProbeUnavailable));
             if lost_end {
-                assert!(leaked.controls.contains(&ControlFailure::FixtureChanged));
+                assert!(controls.contains(&ControlFailure::FixtureChanged));
             }
             if lost_cleanup {
-                assert!(
-                    leaked
-                        .controls
-                        .contains(&ControlFailure::CleanupUnconfirmed)
-                );
+                assert!(controls.contains(&ControlFailure::CleanupUnconfirmed));
             }
             let hidden = evaluate_address_fixture(&spec(), &n, &p, &n, &end, &cleanup);
             assert!(hidden.proven.is_empty() && hidden.leaked.is_empty());
@@ -351,12 +347,9 @@ fn null_buffer_size_mismatch_survives_unavailable_end_and_cleanup() {
         ]
     );
     assert!(result.proven.is_empty());
-    assert!(result.controls.contains(&ControlFailure::ProbeUnavailable));
-    assert!(
-        result
-            .controls
-            .contains(&ControlFailure::CleanupUnconfirmed)
-    );
+    let controls = result.controls();
+    assert!(controls.contains(&ControlFailure::ProbeUnavailable));
+    assert!(controls.contains(&ControlFailure::CleanupUnconfirmed));
 }
 
 #[test]
@@ -371,7 +364,7 @@ fn missing_later_component_preserves_qualified_address_evidence_in_core_projecti
     assert!(result.proven.is_empty());
     assert!(
         result
-            .controls
+            .controls()
             .contains(&ControlFailure::CleanupUnconfirmed)
     );
 }
@@ -382,17 +375,23 @@ fn permission_failure_duplicate_actors_and_malformed_records_never_pass() {
     let mut denied = n.clone();
     denied.actors[0].ioctls[0].fixture = Sample::Error(ProbeError::Errno(13));
     let result = evaluate_address_fixture(&spec(), &n, &p, &denied, &p, &n);
-    assert!(result.controls.contains(&ControlFailure::ProbeUnavailable));
-    assert!(
-        !result
-            .proven
-            .contains(&check(NativeReadActor::Libc, AddressVector::IoctlAddress))
+    let address = check(NativeReadActor::Libc, AddressVector::IoctlAddress);
+    assert_eq!(
+        result.failures,
+        [NativeControlIssue {
+            check: Some(address),
+            reason: ControlFailure::ProbeUnavailable,
+        }]
     );
+    assert!(!result.proven.contains(&address));
     denied.actors.push(denied.actors[0].clone());
     assert!(!denied.bounded());
     assert_eq!(
-        evaluate_address_fixture(&spec(), &n, &p, &denied, &p, &n).controls,
-        vec![ControlFailure::InvalidSpec]
+        evaluate_address_fixture(&spec(), &n, &p, &denied, &p, &n).failures,
+        [NativeControlIssue {
+            check: None,
+            reason: ControlFailure::InvalidSpec,
+        }]
     );
     let mut invalid = entry(false, 4, true);
     invalid.prefix = Some(33);

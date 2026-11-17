@@ -244,15 +244,33 @@ internal fun sampleAutonomousDiagnosticInfo(): dev.okhsunrog.vpnhide.diagnostics
         run = sampleAutonomousRun(),
         assessment =
             dev.okhsunrog.vpnhide.diagnostics.AutonomousAssessmentInfo(
-                phase = "incomplete",
-                required = required,
-                proven = proven,
-                leaked = leaked,
-                unverified = required - proven.toSet() - leaked.toSet(),
+                phase = "finished",
+                verdict = "leaked",
+                checks =
+                    required.map { check ->
+                        val outcome =
+                            when (check) {
+                                in proven -> "proven"
+                                in leaked -> "leaked"
+                                else -> "unverified"
+                            }
+                        dev.okhsunrog.vpnhide.diagnostics.AutonomousCheckInfo(
+                            check = check,
+                            outcome = outcome,
+                            androidAccessDenied = false,
+                            reason =
+                                if (outcome == "unverified") {
+                                    kotlinx.serialization.json.Json
+                                        .parseToJsonElement("""{"kind":"evidence_unavailable"}""")
+                                } else {
+                                    null
+                                },
+                        )
+                    },
                 nativeControls = emptyList(),
                 frameworkControls = listOf("probe_unavailable"),
                 reuseBlockers = listOf("loaded_generations_incomplete"),
-                infrastructureDetail = null,
+                failure = null,
                 cleanupConfirmed = null,
             ),
     )
